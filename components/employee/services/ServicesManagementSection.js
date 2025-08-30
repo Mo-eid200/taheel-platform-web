@@ -28,14 +28,47 @@ export default function ServicesManagementSection({ employeeData, lang }) {
   const [servicesDropdownOpen, setServicesDropdownOpen] = useState(false);
   const dropdownRef = useRef();
 
+  // دمج الخدمات الأخرى من مصدرين: مجموعة services و servicesByClientType.other
+  async function fetchOtherServices() {
+    // جلب من مجموعة services (type == other)
+    const q = query(collection(firestore, "services"), where("type", "==", "other"));
+    const snap = await getDocs(q);
+    let arr = [];
+    snap.forEach(doc => {
+      arr.push({ id: doc.id, ...doc.data() });
+    });
+    // جلب من servicesByClientType > other
+    const docRef = doc(firestore, "servicesByClientType", "other");
+    const snapOther = await getDoc(docRef);
+    if (snapOther.exists()) {
+      const data = snapOther.data();
+      const otherArr = Object.entries(data)
+        .filter(([key, val]) => key.startsWith("service") && val.active)
+        .map(([key, val]) => ({ id: key, ...val }));
+      arr = arr.concat(otherArr);
+    }
+    // فلترة التكرار بالـ id
+    arr = arr.filter((srv, idx, self) => self.findIndex(s => s.id === srv.id) === idx);
+    setOtherServices(arr);
+  }
+
+  // فلترة الخدمات حسب البحث (مرونة عالية: يشمل كل الخدمات)
   const filteredServices = serviceSearch.trim()
-    ? services.filter(s =>
-        (s.name || "").toLowerCase().includes(serviceSearch.trim().toLowerCase())
+    ? services.filter(
+        s =>
+          (s.name || "").toLowerCase().includes(serviceSearch.trim().toLowerCase()) ||
+          (Array.isArray(s.providers)
+            ? s.providers.join(", ").toLowerCase().includes(serviceSearch.trim().toLowerCase())
+            : false)
       )
     : services;
   const filteredOtherServices = serviceSearch.trim()
-    ? otherServices.filter(s =>
-        (s.name || "").toLowerCase().includes(serviceSearch.trim().toLowerCase())
+    ? otherServices.filter(
+        s =>
+          (s.name || "").toLowerCase().includes(serviceSearch.trim().toLowerCase()) ||
+          (Array.isArray(s.providers)
+            ? s.providers.join(", ").toLowerCase().includes(serviceSearch.trim().toLowerCase())
+            : false)
       )
     : otherServices;
 
@@ -117,16 +150,6 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     }
   }
 
-  async function fetchOtherServices() {
-    const q = query(collection(firestore, "services"), where("type", "==", "other"));
-    const snap = await getDocs(q);
-    let arr = [];
-    snap.forEach(doc => {
-      arr.push({ id: doc.id, ...doc.data() });
-    });
-    setOtherServices(arr);
-  }
-
   useEffect(() => {
     if (!selectedServiceId) return setSelectedService(null);
     const all = [...services, ...otherServices];
@@ -197,7 +220,7 @@ export default function ServicesManagementSection({ employeeData, lang }) {
         <div className="px-4 py-4 grid grid-cols-1 gap-3 text-base font-semibold text-gray-800">
           <div>
             <span className="inline-block w-32 text-emerald-700">{lang === "ar" ? "الخدمة:" : "Service:"}</span>
-            <span style={{ color: "#c41e1e", fontWeight: "bold" }}>{selectedService.name}</span>
+            <span style={{ color: "#1c7ed6", fontWeight: "bold" }}>{selectedService.name}</span>
           </div>
           <div>
             <span className="inline-block w-32 text-emerald-700">{lang === "ar" ? "السعر:" : "Price:"}</span>
@@ -245,11 +268,16 @@ export default function ServicesManagementSection({ employeeData, lang }) {
                   const all = [...services, ...otherServices];
                   const srv = all.find(s => s.id === selectedServiceId);
                   return srv
-                    ? `${srv.name} ${
-                        srv.providers && srv.providers.length
-                          ? `| ${lang === "ar" ? "جهة الخدمة:" : "Service Authority:"} ${srv.providers.join(", ")}`
-                          : ""
-                      }`
+                    ? (
+                        <span>
+                          <span style={{ color: "#1c7ed6", fontWeight: "bold" }}>{srv.name}</span>
+                          {srv.providers && srv.providers.length
+                            ? <span style={{ color: "#e53935", fontWeight: "bold" }}>
+                                {" | " + (lang === "ar" ? "جهة الخدمة:" : "Service Authority:") + " " + srv.providers.join(", ")}
+                              </span>
+                            : null}
+                        </span>
+                      )
                     : lang === "ar"
                     ? "-- اختر الخدمة --"
                     : "-- Select Service --";
@@ -274,7 +302,7 @@ export default function ServicesManagementSection({ employeeData, lang }) {
                 onChange={e => setServiceSearch(e.target.value)}
                 autoFocus
                 className="w-full border rounded px-2 py-1 text-base font-bold focus:outline-none"
-                placeholder={lang === "ar" ? "اكتب اسم الخدمة..." : "Type service name..."}
+                placeholder={lang === "ar" ? "اكتب اسم الخدمة أو جهة الخدمة..." : "Type service name or authority..."}
                 style={{ fontSize: "18px" }}
               />
             </div>
@@ -292,7 +320,7 @@ export default function ServicesManagementSection({ employeeData, lang }) {
                     }}
                     style={{ borderBottom: "1px solid #f3f5f7" }}
                   >
-                    <span style={{ color: "#c41e1e", fontWeight: "bold", fontSize: "17px" }}>{s.name}</span>
+                    <span style={{ color: "#1c7ed6", fontWeight: "bold", fontSize: "17px" }}>{s.name}</span>
                     {s.providers && s.providers.length > 0 && (
                       <span
                         className="ml-2"
@@ -305,7 +333,7 @@ export default function ServicesManagementSection({ employeeData, lang }) {
                 ))}
               </div>
             )}
-            {/* خدمات أخرى */}
+            {/* خدمات أخرى - تظهر للجميع */}
             {filteredOtherServices.length > 0 && (
               <div>
                 <div className="px-3 py-1 font-bold text-emerald-700 text-sm bg-white border-b">{lang === "ar" ? "خدمات أخرى" : "Other Services"}</div>
@@ -319,7 +347,7 @@ export default function ServicesManagementSection({ employeeData, lang }) {
                     }}
                     style={{ borderBottom: "1px solid #f3f5f7" }}
                   >
-                    <span style={{ color: "#c41e1e", fontWeight: "bold", fontSize: "17px" }}>{s.name}</span>
+                    <span style={{ color: "#1c7ed6", fontWeight: "bold", fontSize: "17px" }}>{s.name}</span>
                     {s.providers && s.providers.length > 0 && (
                       <span
                         className="ml-2"
