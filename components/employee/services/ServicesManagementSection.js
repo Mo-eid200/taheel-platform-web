@@ -240,18 +240,18 @@ export default function ServicesManagementSection({ employeeData, lang }) {
       : (selectedService.requiredDocuments ? Object.values(selectedService.requiredDocuments) : []);
     const requireUpload = selectedService.requireUpload || requiredDocs.length > 0;
 
-    function UploadDocButton() {
-      if (!selectedService || requiredDocs.length === 0) return null;
-      return (
-        <button
-          type="button"
-          className="px-5 py-2 rounded-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-base shadow mt-3"
-          onClick={() => setUploadModalOpen(true)}
-        >
-          {lang === "ar" ? "رفع المستندات المطلوبة" : "Upload Required Documents"}
-        </button>
-      );
-    }
+function UploadDocButton() {
+  if (!selectedService || requiredDocs.length === 0) return null;
+  return (
+    <button
+      type="button"
+      className="px-5 py-2 rounded-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-base shadow mt-3"
+      onClick={() => setUploadModalOpen(true)}
+    >
+      {lang === "ar" ? "رفع المستندات المطلوبة" : "Upload Required Documents"}
+    </button>
+  );
+}
 
     return (
       <div className="w-full rounded-xl overflow-hidden shadow border border-emerald-100 bg-white animate-fade-in">
