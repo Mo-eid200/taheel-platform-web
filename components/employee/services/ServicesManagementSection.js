@@ -73,12 +73,12 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     const searchNorm = normalizeArabic(serviceSearch.trim());
     return searchNorm
       ? arr.filter(
-        s =>
-          normalizeArabic(s.name || "").includes(searchNorm) ||
-          (Array.isArray(s.providers)
-            ? normalizeArabic(s.providers.join(", ")).includes(searchNorm)
-            : false)
-      )
+          s =>
+            normalizeArabic(s.name || "").includes(searchNorm) ||
+            (Array.isArray(s.providers)
+              ? normalizeArabic(s.providers.join(", ")).includes(searchNorm)
+              : false)
+        )
       : arr;
   }
   const filteredServices = filterFlexible(services);
@@ -188,16 +188,13 @@ export default function ServicesManagementSection({ employeeData, lang }) {
         serviceId: selectedService.id,
         serviceName: selectedService.name,
         price: selectedService.price,
-        uploadedDocs, // روابط المستندات
+        uploadedDocs,
         status: "pending_payment",
         createdAt: new Date().toISOString(),
       };
 
-      // إنشاء الطلب في فايرستور
       await addDoc(collection(firestore, "orders"), orderData);
 
-      // هنا ممكن توليد لينك دفع حقيقي حسب النظام (Stripe, PayTabs...)
-      // بشكل تجريبي نرسل لينك وهمي
       const paymentUrl = "https://payment.example.com/pay?order=" + orderNumber;
 
       setOrderCreated(true);
@@ -280,8 +277,6 @@ export default function ServicesManagementSection({ employeeData, lang }) {
                 ))}
               </ul>
               <UploadDocButton />
-
-              {/* زر توليد الطلب يظهر فقط بعد اكتمال رفع المستندات */}
               {allDocsUploaded && !orderCreated && (
                 <button
                   type="button"
@@ -291,8 +286,6 @@ export default function ServicesManagementSection({ employeeData, lang }) {
                   {lang === "ar" ? "إنشاء الطلب وإرسال لينك الدفع" : "Create Order & Send Payment Link"}
                 </button>
               )}
-
-              {/* بعد إنشاء الطلب أظهر رقم الطلب واللينك */}
               {orderCreated && orderInfo && (
                 <div className="mt-4 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 shadow text-center font-bold text-lg text-emerald-700">
                   <div>
@@ -338,7 +331,6 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     return found ? (lang === "ar" ? found.labelAr : found.labelEn) : "";
   }
 
-  // قائمة الخدمات المنسدلة مع تقسيم فرعي واضح
   function ServicesDropdown() {
     return (
       <div ref={dropdownRef} className="relative w-full">
@@ -398,7 +390,6 @@ export default function ServicesManagementSection({ employeeData, lang }) {
                 }}
               />
             </div>
-            {/* قائمة فرعية: خدمات الفئة الحالية */}
             <div>
               <div className="px-3 py-1 font-bold text-emerald-700 text-sm bg-white border-b" style={{background:"#f1f8fc"}}>
                 {lang === "ar" ? `خدمات ${getCurrentTypeLabel()}` : `Services ${getCurrentTypeLabel()}`}
@@ -429,7 +420,6 @@ export default function ServicesManagementSection({ employeeData, lang }) {
                 <div className="px-4 py-1 text-gray-400 text-center">{lang === "ar" ? "لا يوجد خدمات مطابقة" : "No matching services found"}</div>
               )}
             </div>
-            {/* قائمة فرعية: خدمات أخرى */}
             <div>
               <div className="px-3 py-1 font-bold text-emerald-700 text-sm bg-white border-b" style={{background:"#f8e9e9"}}>
                 {lang === "ar" ? "خدمات أخرى" : "Other Services"}

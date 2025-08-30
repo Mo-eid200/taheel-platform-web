@@ -34,11 +34,13 @@ export default function ServiceUploadModal({
   useEffect(() => {
     if (!open) return;
     const allUploaded = docItems.length > 0 && docItems.every((d) => !!uploadedDocs[d.key]);
-    if (allUploaded && typeof onAllDocsUploaded === "function") {
-      onAllDocsUploaded();
-      // لا تغلق المودال تلقائيًا! خلي الموظف يغلقه بنفسه
+    if (allUploaded) {
+      // إغلاق تلقائي بعد رفع كل المستندات المطلوبة
+      if (typeof onAllDocsUploaded === "function") onAllDocsUploaded();
+      onClose && onClose();
     }
-  }, [uploadedDocs, docItems, open, onAllDocsUploaded]);
+    // لا تفرغ الملفات عند الإغلاق، تظل محفوظة في الـ parent
+  }, [uploadedDocs, docItems, open, onAllDocsUploaded, onClose]);
 
   // إغلاق المودال عند الضغط خارج
   useEffect(() => {
