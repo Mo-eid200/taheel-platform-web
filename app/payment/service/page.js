@@ -4,7 +4,7 @@ import { loadStripe } from "@stripe/stripe-js";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import Image from "next/image";
 import PaymentSuccessPage from "../PaymentSuccess/PaymentSuccessPage";
-import { collection, query, where, getDocs, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { firestore } from "@/lib/firebase.client";
 
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
@@ -50,18 +50,15 @@ const LANG = {
 
 async function moveOrderToRequests(paymentData, paymentId, orderNumber) {
   try {
-    // نقل الطلب المدفوع إلى requests
+    // تحديث الطلب المدفوع في requests
     await setDoc(doc(firestore, "requests", orderNumber), {
       ...paymentData,
       paymentId,
       status: "paid",
-      createdAt: new Date().toISOString()
+      paidAt: new Date().toISOString()
     });
-
-    // يمكنك حذف الطلب من orders لو أردت (اختياري)
-    // await deleteDoc(doc(firestore, "orders", ...)); 
   } catch (error) {
-    console.error("Error moving order:", error);
+    console.error("Error updating request:", error);
   }
 }
 
@@ -118,7 +115,7 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
           printingFee: service.printingFee,
           vat: service.vat,
           coinDiscount: service.coinDiscount,
-          processingFee, // أضفها في الإيميل أيضاً
+          processingFee,
           finalPrice,
           paymentId: paymentIntent.id,
           paymentMethod: "gateway",
@@ -126,7 +123,7 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
         }),
       });
 
-      // نقل الطلب من orders إلى requests لو حبيت
+      // تحديث الطلب المدفوع في requests
       await moveOrderToRequests(paymentData, paymentIntent.id, orderNumber);
 
       setTimeout(() => {
@@ -260,17 +257,13 @@ export default function CardPaymentPage() {
     const params = new URLSearchParams(window.location.search);
     const orderNum = params.get("order");
     if (orderNum) {
-      // جلب بيانات الدفع من كولكشن orders وليس pendingPayments
+      // جلب بيانات الدفع من كولكشن requests (النظام الموحد)
       const fetchPaymentData = async () => {
         try {
-          const q = query(
-            collection(firestore, "orders"),
-            where("orderNumber", "==", orderNum)
-          );
-          const snap = await getDocs(q);
-          if (!snap.empty) {
-            const docData = snap.docs[0].data();
-            setPaymentData({ ...docData, orderNumber: orderNum });
+          const docRef = doc(firestore, "requests", orderNum);
+          const snap = await getDoc(docRef);
+          if (snap.exists()) {
+            setPaymentData({ ...snap.data(), orderNumber: orderNum });
           } else {
             setPaymentData(null);
           }
