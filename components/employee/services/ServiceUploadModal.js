@@ -9,9 +9,7 @@ export default function ServiceUploadModal({
   lang = "ar",
   setUploadedDocs,
   uploadedDocs = {},
-  // requiredDocs: مصفوفة مفاتيح منطقية ثابتة (strings)
   requiredDocs = [],
-  // displayDocs: نصوص العرض المقابلة لكل مفتاح (اختياري)
   displayDocs = [],
   onAllDocsUploaded,
 }) {
@@ -26,8 +24,14 @@ export default function ServiceUploadModal({
   const docItems = useMemo(() => {
     const list = Array.isArray(requiredDocs) ? requiredDocs : [];
     return list.map((key, i) => {
-      const rawLabel = Array.isArray(displayDocs) && typeof displayDocs[i] !== "undefined" ? displayDocs[i] : key;
-      const label = typeof rawLabel === "string" ? rawLabel : JSON.stringify(rawLabel ?? "");
+      const rawLabel =
+        Array.isArray(displayDocs) && typeof displayDocs[i] !== "undefined"
+          ? displayDocs[i]
+          : key;
+      const label =
+        typeof rawLabel === "string"
+          ? rawLabel
+          : JSON.stringify(rawLabel ?? "");
       return { key: String(key), label: String(label || key) };
     });
   }, [requiredDocs, displayDocs]);
@@ -35,7 +39,8 @@ export default function ServiceUploadModal({
   // عند اكتمال رفع كل المطلوب
   useEffect(() => {
     if (!open) return;
-    const allUploaded = docItems.length > 0 && docItems.every((d) => !!uploadedDocs[d.key]);
+    const allUploaded =
+      docItems.length > 0 && docItems.every((d) => !!uploadedDocs[d.key]);
     if (allUploaded && typeof onAllDocsUploaded === "function") {
       onAllDocsUploaded();
     }
@@ -50,8 +55,19 @@ export default function ServiceUploadModal({
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    return () =>
+      document.removeEventListener("mousedown", handleClickOutside);
   }, [open, onClose]);
+
+  // عند فتح المودال، أعد تهيئة الرسائل المؤقتة
+  useEffect(() => {
+    if (open) {
+      setMsg({});
+      setError({});
+      setSelectedFiles({});
+      // لا تفرغ uploadedDocs هنا حتى لا يمسح الملفات بعد الرفع!
+    }
+  }, [open]);
 
   if (!open) return null;
 
@@ -63,11 +79,15 @@ export default function ServiceUploadModal({
       setSelectedFiles((prev) => ({ ...prev, [docKey]: null }));
       return;
     }
-    const isPdf = file.type === "application/pdf" || file.name?.toLowerCase().endsWith(".pdf");
+    const isPdf =
+      file.type === "application/pdf" ||
+      file.name?.toLowerCase().endsWith(".pdf");
     if (!isPdf) {
       setError((prev) => ({
         ...prev,
-        [docKey]: lang === "ar" ? "يرجى رفع ملف PDF فقط" : "Please upload a PDF file only.",
+        [docKey]: lang === "ar"
+          ? "يرجى رفع ملف PDF فقط"
+          : "Please upload a PDF file only.",
       }));
       if (fileRefs.current[docKey]) fileRefs.current[docKey].value = null;
       setSelectedFiles((prev) => ({ ...prev, [docKey]: null }));
@@ -85,7 +105,9 @@ export default function ServiceUploadModal({
     if (!file) {
       setError((prev) => ({
         ...prev,
-        [docKey]: lang === "ar" ? "يجب اختيار ملف PDF" : "Please select a PDF file.",
+        [docKey]: lang === "ar"
+          ? "يجب اختيار ملف PDF"
+          : "Please select a PDF file.",
       }));
       return;
     }
@@ -98,7 +120,7 @@ export default function ServiceUploadModal({
       formData.append("userId", userId || "");
       formData.append("serviceId", service?.serviceId || "");
       formData.append("serviceName", service?.name || "");
-      formData.append("docName", docKey); // استخدم المفتاح المنطقي فقط
+      formData.append("docName", docKey);
 
       const res = await fetch("/api/upload-to-gcs", {
         method: "POST",
@@ -111,7 +133,9 @@ export default function ServiceUploadModal({
       } catch {
         setError((prev) => ({
           ...prev,
-          [docKey]: lang === "ar" ? "استجابة غير صحيحة من السيرفر." : "Invalid server response.",
+          [docKey]: lang === "ar"
+            ? "استجابة غير صحيحة من السيرفر."
+            : "Invalid server response.",
         }));
         setUploading((prev) => ({ ...prev, [docKey]: false }));
         return;
@@ -130,7 +154,9 @@ export default function ServiceUploadModal({
 
         setMsg((prev) => ({
           ...prev,
-          [docKey]: lang === "ar" ? "تم رفع الملف بنجاح!" : "File uploaded successfully!",
+          [docKey]: lang === "ar"
+            ? "تم رفع الملف بنجاح!"
+            : "File uploaded successfully!",
         }));
 
         setSelectedFiles((prev) => ({ ...prev, [docKey]: null }));
@@ -139,23 +165,43 @@ export default function ServiceUploadModal({
         if (setUploadedDocs) {
           setUploadedDocs((prev) => ({
             ...(prev || uploadedDocs || {}),
-            [docKey]: fileObj, // نخزن على المفتاح المنطقي
+            [docKey]: fileObj,
           }));
         }
       } else {
         setError((prev) => ({
           ...prev,
-          [docKey]: data?.error || (lang === "ar" ? "حدث خطأ أثناء رفع الملف." : "An error occurred during upload."),
+          [docKey]:
+            data?.error ||
+            (lang === "ar"
+              ? "حدث خطأ أثناء رفع الملف."
+              : "An error occurred during upload."),
         }));
       }
     } catch {
       setError((prev) => ({
         ...prev,
-        [docKey]: lang === "ar" ? "حدث خطأ أثناء رفع الملف." : "An error occurred during upload.",
+        [docKey]: lang === "ar"
+          ? "حدث خطأ أثناء رفع الملف."
+          : "An error occurred during upload.",
       }));
     }
 
     setUploading((prev) => ({ ...prev, [docKey]: false }));
+  }
+
+  function handleReplaceFile(docKey) {
+    setError((prev) => ({ ...prev, [docKey]: "" }));
+    setMsg((prev) => ({ ...prev, [docKey]: "" }));
+    setSelectedFiles((prev) => ({ ...prev, [docKey]: null }));
+    if (fileRefs.current[docKey]) fileRefs.current[docKey].value = null;
+    if (setUploadedDocs) {
+      setUploadedDocs((prev) => {
+        const newDocs = { ...(prev || uploadedDocs || {}) };
+        delete newDocs[docKey];
+        return newDocs;
+      });
+    }
   }
 
   return (
@@ -165,7 +211,6 @@ export default function ServiceUploadModal({
         className="relative bg-gradient-to-br from-cyan-50 via-white to-cyan-100 rounded-3xl shadow-2xl px-6 py-8 w-full max-w-md border border-cyan-200 flex flex-col items-center"
         style={{ maxHeight: "calc(100vh - 60px)", minHeight: "340px", overflowY: "auto" }}
       >
-        {/* Close */}
         <button
           className="absolute top-3 right-3 bg-gray-100 hover:bg-red-500 text-gray-400 hover:text-white rounded-full w-8 h-8 flex items-center justify-center text-xl shadow transition duration-200"
           onClick={onClose}
@@ -180,7 +225,9 @@ export default function ServiceUploadModal({
           {lang === "ar" ? "رفع المستندات المطلوبة" : "Upload Required Documents"}
         </div>
         <div className="text-sm text-gray-500 text-center mb-4 px-2 max-w-[90%]">
-          {lang === "ar" ? "يرجى رفع ملف PDF فقط لكل مستند مطلوب." : "Please upload only a PDF file for each required document."}
+          {lang === "ar"
+            ? "يرجى رفع ملف PDF فقط لكل مستند مطلوب."
+            : "Please upload only a PDF file for each required document."}
         </div>
 
         <form className="flex flex-col items-center w-full gap-3 mt-1">
@@ -190,58 +237,85 @@ export default function ServiceUploadModal({
             const hasUploaded = !!uploadedDocs[docKey];
 
             return (
-              <div key={docKey} className="w-full flex flex-col items-center p-3 rounded-xl border border-cyan-100 bg-cyan-50 shadow mb-2 transition-all duration-200 hover:shadow-lg">
+              <div
+                key={docKey}
+                className="w-full flex flex-col items-center p-3 rounded-xl border border-cyan-100 bg-cyan-50 shadow mb-2 transition-all duration-200 hover:shadow-lg"
+              >
                 <div className="font-bold text-cyan-700 mb-1 w-full text-center">
-                  {/* أظهر العنوان للعرض فقط */}
                   {label || docKey}
                 </div>
 
-                <label
-                  htmlFor={`pdf-upload-${idx}`}
-                  className={`flex flex-col items-center justify-center w-full py-2 rounded-2xl border-2 border-dashed
-                    ${selected ? "border-emerald-400 bg-emerald-50" : "border-cyan-300 bg-cyan-50 hover:bg-cyan-100"} cursor-pointer transition`}
-                  tabIndex={0}
-                  style={{ minHeight: 60 }}
-                >
-                  <FaUpload className={`text-2xl mb-1 ${selected ? "text-emerald-700" : "text-cyan-400"}`} />
-                  <span className={`font-bold text-sm ${selected ? "text-emerald-800" : "text-cyan-700"}`}>
-                    {lang === "ar" ? "اختر ملف PDF" : "Choose PDF File"}
-                  </span>
-                  <input
-                    id={`pdf-upload-${idx}`}
-                    type="file"
-                    ref={(el) => (fileRefs.current[docKey] = el)}
-                    accept="application/pdf"
-                    className="hidden"
-                    onChange={(e) => handleFileChange(e, docKey)}
-                    disabled={isUploading}
-                  />
-                  {selected && (
-                    <div className="mt-1 text-xs text-emerald-700 font-bold truncate max-w-[90%] flex flex-col gap-1">
-                      <span>{selected.name}</span>
-                    </div>
-                  )}
-                </label>
+                {!hasUploaded ? (
+                  <>
+                    <label
+                      htmlFor={`pdf-upload-${idx}`}
+                      className={`flex flex-col items-center justify-center w-full py-2 rounded-2xl border-2 border-dashed
+                        ${selected ? "border-emerald-400 bg-emerald-50" : "border-cyan-300 bg-cyan-50 hover:bg-cyan-100"} cursor-pointer transition`}
+                      tabIndex={0}
+                      style={{ minHeight: 60 }}
+                    >
+                      <FaUpload className={`text-2xl mb-1 ${selected ? "text-emerald-700" : "text-cyan-400"}`} />
+                      <span className={`font-bold text-sm ${selected ? "text-emerald-800" : "text-cyan-700"}`}>
+                        {lang === "ar" ? "اختر ملف PDF" : "Choose PDF File"}
+                      </span>
+                      <input
+                        id={`pdf-upload-${idx}`}
+                        type="file"
+                        ref={(el) => (fileRefs.current[docKey] = el)}
+                        accept="application/pdf"
+                        className="hidden"
+                        onChange={(e) => handleFileChange(e, docKey)}
+                        disabled={isUploading}
+                      />
+                      {selected && (
+                        <div className="mt-1 text-xs text-emerald-700 font-bold truncate max-w-[90%] flex flex-col gap-1">
+                          <span>{selected.name}</span>
+                        </div>
+                      )}
+                    </label>
 
-                <button
-                  type="button"
-                  disabled={isUploading || !selected}
-                  className={`w-full py-2 rounded-full font-black shadow transition text-base mt-2 duration-200
-                    ${isUploading || !selected
-                      ? "bg-cyan-200 text-white cursor-not-allowed"
-                      : "bg-gradient-to-r from-emerald-500 to-cyan-400 hover:from-emerald-600 hover:to-cyan-500 text-white cursor-pointer"}`}
-                  style={{ fontSize: "1.05rem", letterSpacing: "1px" }}
-                  onClick={(e) => handleUpload(e, docKey)}
-                >
-                  {isUploading ? (
-                    <span className="inline-flex items-center gap-2">
-                      <FaSpinner className="animate-spin" />
-                      {lang === "ar" ? "جاري الرفع..." : "Uploading..."}
-                    </span>
-                  ) : (
-                    <span>{lang === "ar" ? "رفع الملف" : "Upload File"}</span>
-                  )}
-                </button>
+                    <button
+                      type="button"
+                      disabled={isUploading || !selected}
+                      className={`w-full py-2 rounded-full font-black shadow transition text-base mt-2 duration-200
+                        ${isUploading || !selected
+                          ? "bg-cyan-200 text-white cursor-not-allowed"
+                          : "bg-gradient-to-r from-emerald-500 to-cyan-400 hover:from-emerald-600 hover:to-cyan-500 text-white cursor-pointer"}`}
+                      style={{ fontSize: "1.05rem", letterSpacing: "1px" }}
+                      onClick={(e) => handleUpload(e, docKey)}
+                    >
+                      {isUploading ? (
+                        <span className="inline-flex items-center gap-2">
+                          <FaSpinner className="animate-spin" />
+                          {lang === "ar" ? "جاري الرفع..." : "Uploading..."}
+                        </span>
+                      ) : (
+                        <span>{lang === "ar" ? "رفع الملف" : "Upload File"}</span>
+                      )}
+                    </button>
+                  </>
+                ) : (
+                  <div className="w-full flex flex-col items-center">
+                    <div className="text-xs text-emerald-700 font-bold mt-1 text-center">
+                      {lang === "ar" ? "تم رفع المستند: " : "Uploaded: "}
+                      <a
+                        href={uploadedDocs[docKey].url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline text-emerald-800 font-bold"
+                      >
+                        {uploadedDocs[docKey].name}
+                      </a>
+                    </div>
+                    <button
+                      type="button"
+                      className="mt-2 px-4 py-1 bg-yellow-500 hover:bg-yellow-700 text-white rounded-full font-bold text-sm"
+                      onClick={() => handleReplaceFile(docKey)}
+                    >
+                      {lang === "ar" ? "استبدال المستند" : "Replace Document"}
+                    </button>
+                  </div>
+                )}
 
                 {error[docKey] && (
                   <div className="text-center text-red-600 font-bold flex items-center gap-1 mt-1 text-xs">
@@ -251,20 +325,6 @@ export default function ServiceUploadModal({
                 {msg[docKey] && (
                   <div className="text-center text-green-700 font-bold flex items-center gap-1 mt-1 text-xs">
                     <FaCheckCircle /> {msg[docKey]}
-                  </div>
-                )}
-
-                {hasUploaded && uploadedDocs[docKey]?.url && (
-                  <div className="text-xs text-emerald-700 font-bold mt-1 text-center">
-                    {lang === "ar" ? "تم رفع المستند: " : "Uploaded: "}
-                    <a
-                      href={uploadedDocs[docKey].url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline text-emerald-800 font-bold"
-                    >
-                      {uploadedDocs[docKey].name}
-                    </a>
                   </div>
                 )}
               </div>
