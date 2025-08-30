@@ -155,14 +155,17 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     }
   }
 
-  useEffect(() => {
-    if (!selectedServiceId) return setSelectedService(null);
-    const all = [...services, ...otherServices];
-    const srv = all.find(s => s.id === selectedServiceId);
-    setSelectedService(srv || null);
-    // ممنوع هنا تفتح المودال!
-    // setUploadModalOpen(false); // ممكن تغلق المودال عند تغيير الخدمة لو تحب
-  }, [selectedServiceId, services, otherServices]);
+useEffect(() => {
+  if (!selectedServiceId) {
+    setSelectedService(null);
+    setUploadModalOpen(false); // يغلق المودال عند تغيير الخدمة
+    return;
+  }
+  const all = [...services, ...otherServices];
+  const srv = all.find(s => s.id === selectedServiceId);
+  setSelectedService(srv || null);
+  setUploadModalOpen(false); // يغلق المودال عند تغيير الخدمة
+}, [selectedServiceId, services, otherServices]);
 
   function generateOrderNumber() {
     const part1 = Math.floor(100 + Math.random() * 900);
