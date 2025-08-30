@@ -23,8 +23,8 @@ function normalizeArabic(text) {
     .toLowerCase();
 }
 
-// دالة موحدة لحفظ الطلب في Firestore بنفس الحقول لكل النظام
-async function createOrderInFirestore({
+// دالة لحفظ الطلب في requests بنفس الهيكل الموحد
+async function createRequestInFirestore({
   orderNumber,
   client,
   selectedService,
@@ -40,28 +40,35 @@ async function createOrderInFirestore({
   const servicePrice = Number(selectedService.price) || 0;
   const printingFee = Number(selectedService.printingFee) || 0;
   const serviceProviders = Array.isArray(selectedService.providers) ? selectedService.providers : [];
-  await setDoc(doc(firestore, "orders", orderNumber), {
-    orderNumber,
-    clientId: client?.customerId,
+  await setDoc(doc(firestore, "requests", orderNumber), {
+    requestId: orderNumber,
+    customerId: client?.customerId,
+    assignedTo,
+    assignedToName,
     clientName: `${client?.firstName || ""} ${client?.lastName || ""}`.trim(),
     clientType: client?.accountType || client?.type || "",
     serviceId: selectedService.id,
     serviceName: selectedService.name,
-    price: servicePrice,
+    providers: serviceProviders,
+    paidAmount: servicePrice,
     printingFee,
     vat,
     coinDiscount: selectedService.coinDiscount || 0,
     totalPrice,
-    assignedTo,
-    assignedToName,
     employeeData,
-    providers: serviceProviders,
-    uploadedDocs: uploadedDocs || {},
-    status, // "pending_payment" أو "paid"
+    attachments: uploadedDocs || {},
+    status,
     lang,
     userEmail: client?.email,
-    createdAt: new Date().toISOString()
-    // يمكنك إضافة أي حقل آخر متفق عليه
+    createdAt: new Date().toISOString(),
+    lastUpdated: new Date().toISOString(),
+    statusHistory: [
+      {
+        status: status,
+        timestamp: new Date().toISOString(),
+        updatedBy: assignedToName || "System"
+      }
+    ]
   });
 }
 
@@ -206,13 +213,13 @@ export default function ServicesManagementSection({ employeeData, lang }) {
   useEffect(() => {
     if (!selectedServiceId) {
       setSelectedService(null);
-      setUploadModalOpen(false); // يغلق المودال عند تغيير الخدمة
+      setUploadModalOpen(false);
       return;
     }
     const all = [...services, ...otherServices];
     const srv = all.find(s => s.id === selectedServiceId);
     setSelectedService(srv || null);
-    setUploadModalOpen(false); // يغلق المودال عند تغيير الخدمة
+    setUploadModalOpen(false);
   }, [selectedServiceId, services, otherServices]);
 
   function generateOrderNumber() {
@@ -221,7 +228,7 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     return `REQ-${part1}-${part2}`;
   }
 
-  // دالة تجهيز بيانات الدفع وعرض لينك الدفع للموظف + حفظ الطلب في Firestore بنفس الحقول الموحدة
+  // دالة تجهيز بيانات الدفع وحفظ الطلب في requests بنفس الهيكل الموحد
   async function handleStartPayment({
     client,
     selectedService,
@@ -249,7 +256,6 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     const assignedTo = isSpecialist ? employeeData.id : "";
     const assignedToName = isSpecialist ? employeeData.name : "";
 
-    // تجهيز بيانات الدفع (لصفحة الدفع)
     const paymentData = {
       orderNumber,
       service: {
@@ -274,8 +280,8 @@ export default function ServicesManagementSection({ employeeData, lang }) {
       lang
     };
 
-    // حفظ الطلب في قاعدة البيانات (orders) بنفس الحقول الموحدة
-    await createOrderInFirestore({
+    // حفظ الطلب في requests بنفس الهيكل الموحد
+    await createRequestInFirestore({
       orderNumber,
       client,
       selectedService,
@@ -289,12 +295,8 @@ export default function ServicesManagementSection({ employeeData, lang }) {
       status: "pending_payment"
     });
 
-    // حفظ بيانات الدفع في localStorage (لصفحة الدفع بالكارت)
     localStorage.setItem("paymentData", JSON.stringify(paymentData));
-
-    // أنشئ لينك صفحة الدفع
     const link = `${window.location.origin}/payment/service?order=${orderNumber}`;
-
     setOrderCreated(true);
     setOrderInfo({
       orderNumber,

@@ -9,13 +9,50 @@ import {
 } from "firebase/firestore";
 import { translateText } from "@/utils/translate";
 import { useRouter } from "next/navigation";
-import calcStripeFees from "@/utils/calcStripeFees"; // ← دالة حساب رسوم سترايب
+import calcStripeFees from "@/utils/calcStripeFees";
 
 // دالة توليد رقم تتبع بالشكل المطلوب
 function generateOrderNumber() {
-  const part1 = Math.floor(100 + Math.random() * 900); // 3 أرقام
-  const part2 = Math.floor(1000 + Math.random() * 9000); // 4 أرقام
+  const part1 = Math.floor(100 + Math.random() * 900);
+  const part2 = Math.floor(1000 + Math.random() * 9000);
   return `REQ-${part1}-${part2}`;
+}
+
+// دالة حفظ الطلب في requests بنفس هيكل الصورة
+async function saveRequestToFirestore({
+  orderNumber,
+  customerId,
+  assignedTo,
+  assignedToName,
+  serviceName,
+  serviceId,
+  providers,
+  paidAmount,
+  printingFee,
+  coinsUsed,
+  coinsGiven,
+  uploadedDocs,
+  status = "completed",
+  statusHistory = [],
+}) {
+  await setDoc(doc(firestore, "requests", orderNumber), {
+    requestId: orderNumber,
+    customerId,
+    assignedTo,
+    assignedToName,
+    serviceName,
+    serviceId,
+    providers,
+    paidAmount,
+    printingFee,
+    coinsUsed,
+    coinsGiven,
+    createdAt: new Date().toISOString(),
+    lastUpdated: new Date().toISOString(),
+    status,
+    attachments: uploadedDocs || {},
+    statusHistory
+  });
 }
 
 export default function ServicePayModal({
@@ -30,12 +67,14 @@ export default function ServicePayModal({
   cashbackCoins,
   userWallet,
   lang = "ar",
-  customerId,   // معرف المستند للعميل (رقم العميل: مثال "RES-200-9180" أو "COM-2025-001")
-  userId,       // الـ UID الخاص بفيريبيز (لو احتجته)
+  customerId,   // مثال: "RES-200-9180"
+  userId,
   userEmail,
   uploadedDocs,
   onPaid,
-  clientType = "resident"
+  clientType = "resident",
+  assignedTo, // اضف هنا الـ id الخاص بالموظف (مثلاً من props أو state)
+  assignedToName // اضف هنا اسم الموظف (مثلاً من props أو state)
 }) {
   const [useCoins, setUseCoins] = useState(false);
   const [payMethod, setPayMethod] = useState("wallet");
@@ -43,7 +82,7 @@ export default function ServicePayModal({
   const [payMsg, setPayMsg] = useState("");
   const [msgSuccess, setMsgSuccess] = useState(false);
 
-  const router = useRouter(); // للتحويل للصفحة الجديدة
+  const router = useRouter();
 
   // حسابات الكوينات
   const maxCoinDiscount = Math.floor(printingFee * 0.1 * 100);
@@ -52,21 +91,17 @@ export default function ServicePayModal({
   const finalPrice = totalPrice - coinDiscountValue;
   const willGetCashback = !useCoins;
 
-  // حساب رسوم Stripe عند الدفع بالكارت فقط (Gateway)
-  const stripeFeesResult = calcStripeFees(finalPrice, {
-    isInternational: false, // غير لو فيه عملاء دوليين
-    isCurrencyConversion: false // غير لو فيه تحويل عملة
-  });
+  // Stripe
+  const stripeFeesResult = calcStripeFees(finalPrice, { isInternational: false, isCurrencyConversion: false });
   const finalPriceWithFees = payMethod === "gateway" ? stripeFeesResult.totalAmount : finalPrice;
   const stripeFeeValue = payMethod === "gateway" ? stripeFeesResult.stripeFee : 0;
 
-  // دفع المحفظة (بدون أي تعديل على منطقك)
+  // دفع المحفظة
   async function handlePayment() {
     setIsPaying(true);
     setPayMsg("");
     setMsgSuccess(false);
 
-    // تحقق من القيم الممررة
     if (!customerId || !userEmail || !serviceName) {
       setPayMsg(lang === "ar"
         ? "بيانات العميل أو البريد أو الخدمة ناقصة."
@@ -85,109 +120,92 @@ export default function ServicePayModal({
 
       const userRef = doc(firestore, "users", customerId);
 
-      // خصم الرصيد من المحفظة
-      await updateDoc(userRef, {
-        walletBalance: userWallet - finalPrice
-      });
-
-      // خصم الكوينات إذا استخدمهم العميل للخصم
+      await updateDoc(userRef, { walletBalance: userWallet - finalPrice });
       if (useCoins && coinDiscount > 0) {
-        await updateDoc(userRef, {
-          coins: increment(-coinDiscount)
-        });
+        await updateDoc(userRef, { coins: increment(-coinDiscount) });
       }
-
-      // إضافة الكوينات كمكافأة لو العميل لم يستخدمهم
       if (willGetCashback && cashbackCoins > 0) {
-        await updateDoc(userRef, {
-          coins: increment(cashbackCoins)
-        });
+        await updateDoc(userRef, { coins: increment(cashbackCoins) });
       }
 
       const orderNumber = generateOrderNumber();
 
-      // جلب بيانات الخدمة من فايرستور (servicesByClientType/{clientType})
+      // جلب بيانات الخدمة
       let serviceData = {};
       try {
         const serviceDocRef = doc(firestore, "servicesByClientType", clientType);
         const serviceDocSnap = await getDoc(serviceDocRef);
         if (serviceDocSnap.exists()) {
           const allServices = serviceDocSnap.data();
-          // لو عندك serviceId استخدمه، لو مش موجود ابحث بالاسم
           serviceData = serviceId && allServices[serviceId]
             ? allServices[serviceId]
             : Object.values(allServices).find(s => s.name === serviceName) || {};
         }
-      } catch (e) {
-        console.log("خطأ في جلب بيانات الخدمة:", e);
-      }
+      } catch (e) { console.log("خطأ في جلب بيانات الخدمة:", e); }
 
-      // اسم الخدمة الأصلي بالعربي (للتخزين)
       const originalServiceName = serviceData?.name || serviceName || "";
-
-      // اسم الخدمة للعرض والإشعار/الإيميل حسب اللغة
-      const uiServiceName =
-        lang === "ar"
-          ? originalServiceName
-          : await translateText({
-              text: originalServiceName,
-              target: "en",
-              source: "ar",
-              fieldKey: `service:${serviceId || originalServiceName}:name:en`,
-            });
-
-      // استخراج البروفايدرز كما هو من الخدمة الأصلية
       const providers =
         Array.isArray(serviceData?.providers)
           ? serviceData.providers
-          : serviceData?.providers
-            ? [serviceData.providers]
-            : [];
+          : serviceData?.providers ? [serviceData.providers] : [];
 
-      // سجل الريكويست وفيه جميع البروفايدرز كما هو
-      await setDoc(doc(firestore, "requests", orderNumber), {
-        requestId: orderNumber,
-        customerId: customerId,
-        serviceName: originalServiceName, // ← تخزين بالعربي لضمان التوافق
+      // سجل التاريخ للحالات (اضف أو عدل حسب منطقك)
+      const statusHistory = [
+        {
+          status: "awaiting_payment",
+          timestamp: new Date().toISOString(),
+          updatedBy: assignedToName || "System"
+        },
+        {
+          status: "completed", // أو "paid" أو "completed" حسب منطقك
+          timestamp: new Date().toISOString(),
+          updatedBy: assignedToName || "System"
+        }
+      ];
+
+      // حفظ الطلب في requests بنفس الهيكل المطلوب
+      await saveRequestToFirestore({
+        orderNumber,
+        customerId,
+        assignedTo: assignedTo || "",
+        assignedToName: assignedToName || "",
+        serviceName: originalServiceName,
         serviceId: serviceData.serviceId || serviceId || "",
-        providers, // ← كما في الخدمة
+        providers,
         paidAmount: finalPrice,
-        printingFee: printingFee,
+        printingFee,
         coinsUsed: useCoins ? coinDiscountValue : 0,
         coinsGiven: willGetCashback ? cashbackCoins : 0,
-        createdAt: new Date().toISOString(),
-        status: "paid",
-        attachments: uploadedDocs || {}
+        uploadedDocs,
+        status: "completed",
+        statusHistory
       });
 
-      // إشعار العميل (بلغة الواجهة)
+      // إشعار العميل
       await addDoc(collection(firestore, "notifications"), {
         targetId: customerId,
         title: lang === "ar" ? "تم الدفع" : "Payment Successful",
         body: lang === "ar"
-          ? `دفعت لخدمة ${uiServiceName} بقيمة ${finalPrice.toFixed(2)} د.إ${useCoins ? ` واستخدمت خصم الكوينات (${coinDiscountValue.toFixed(2)} د.إ)` : ""}.\nرقم التتبع: ${orderNumber}`
-          : `You paid for ${uiServiceName} (${finalPrice.toFixed(2)} AED${useCoins ? `, using coins discount (${coinDiscountValue.toFixed(2)} AED)` : ""}).\nTracking No.: ${orderNumber}`,
+          ? `دفعت لخدمة ${originalServiceName} بقيمة ${finalPrice.toFixed(2)} د.إ${useCoins ? ` واستخدمت خصم الكوينات (${coinDiscountValue.toFixed(2)} د.إ)` : ""}.\nرقم التتبع: ${orderNumber}`
+          : `You paid for ${originalServiceName} (${finalPrice.toFixed(2)} AED${useCoins ? `, using coins discount (${coinDiscountValue.toFixed(2)} AED)` : ""}).\nTracking No.: ${orderNumber}`,
         timestamp: new Date().toISOString(),
         isRead: false
       });
 
-      // إرسال إيميل تأكيد (بلغة الواجهة)
       await fetch("/api/sendOrderEmail", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           to: userEmail,
           orderNumber,
-          serviceName: uiServiceName,
+          serviceName: originalServiceName,
           price: finalPrice.toFixed(2)
         }),
       });
 
       setMsgSuccess(true);
       setPayMsg(lang === "ar" ? "تم الدفع بنجاح!" : "Payment successful!");
-      if (typeof onPaid === "function") {
-        onPaid();
-      }
+      if (typeof onPaid === "function") { onPaid(); }
       setTimeout(() => onClose(), 1200);
 
     } catch (e) {
@@ -205,7 +223,6 @@ export default function ServicePayModal({
     setMsgSuccess(false);
 
     try {
-      // اسم الخدمة حسب اللغة
       const uiServiceName =
         lang === "ar"
           ? serviceName
@@ -216,23 +233,21 @@ export default function ServicePayModal({
               fieldKey: `service:${serviceId || serviceName}:name:en`,
             });
 
-      // اطلب clientSecret ورقم الطلب من API
       const response = await fetch("/api/create-payment-intent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          amount: finalPriceWithFees, // السعر النهائي شامل رسوم سترايب
+          amount: finalPriceWithFees,
           serviceName: uiServiceName,
           customerId,
           userEmail,
           printingFee,
-          vat: 0 // لو عندك قيمة ضريبة أضفها هنا أو مررها
+          vat: 0
         }),
       });
 
       const result = await response.json();
       if (result.clientSecret) {
-        // حفظ بيانات الدفع في localStorage بنفس الحسابات
         localStorage.setItem("paymentData", JSON.stringify({
           clientSecret: result.clientSecret,
           service: {
@@ -244,14 +259,13 @@ export default function ServicePayModal({
             coinDiscount: useCoins ? coinDiscountValue : 0,
             userEmail
           },
-          totalPrice, // الإجمالي قبل الخصم
-          finalPrice: finalPriceWithFees, // السعر النهائي بعد الخصم + سترايب
+          totalPrice,
+          finalPrice: finalPriceWithFees,
           processingFee: stripeFeeValue,
           customerId,
           lang,
           orderNumber: result.orderNumber
         }));
-        // تحويل المستخدم لصفحة الدفع بالكارت
         router.push("/payment/service");
       } else {
         setPayMsg(lang === "ar" ? "تعذر فتح بوابة الدفع." : "Failed to open payment gateway.");
