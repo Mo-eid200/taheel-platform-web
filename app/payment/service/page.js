@@ -4,6 +4,8 @@ import { loadStripe } from "@stripe/stripe-js";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import Image from "next/image";
 import PaymentSuccessPage from "../PaymentSuccess/PaymentSuccessPage";
+import { doc, getDoc, deleteDoc, setDoc } from "firebase/firestore";
+import { firestore } from "@/lib/firebase.client";
 
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
 
@@ -45,6 +47,23 @@ const LANG = {
     processing: "جارٍ الدفع..."
   }
 };
+
+async function moveOrderToRequests(paymentData, paymentId, orderNumber) {
+  try {
+    // نقل الطلب المدفوع إلى requests
+    await setDoc(doc(firestore, "requests", orderNumber), {
+      ...paymentData,
+      paymentId,
+      status: "paid",
+      createdAt: new Date().toISOString()
+    });
+
+    // حذف الطلب من pendingPayments
+    await deleteDoc(doc(firestore, "pendingPayments", orderNumber));
+  } catch (error) {
+    console.error("Error moving order:", error);
+  }
+}
 
 function CardForm({ paymentData, lang = "ar", onSuccess }) {
   const stripe = useStripe();
@@ -106,6 +125,9 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
           lang
         }),
       });
+
+      // نقل الطلب من pendingPayments إلى requests
+      await moveOrderToRequests(paymentData, paymentIntent.id, orderNumber);
 
       setTimeout(() => {
         onSuccess(paymentIntent.id, orderNumber);
@@ -234,8 +256,30 @@ export default function CardPaymentPage() {
   const [paymentData, setPaymentData] = useState(null);
 
   useEffect(() => {
-    const data = JSON.parse(localStorage.getItem("paymentData"));
-    setPaymentData(data);
+    // جلب رقم الطلب من رابط الصفحة
+    const params = new URLSearchParams(window.location.search);
+    const orderNum = params.get("order");
+    if (orderNum) {
+      // جلب بيانات الدفع من Firestore
+      const fetchPaymentData = async () => {
+        try {
+          const docRef = doc(firestore, "pendingPayments", orderNum);
+          const snap = await getDoc(docRef);
+          if (snap.exists()) {
+            setPaymentData({ ...snap.data().paymentData, orderNumber: orderNum }); // orderNumber مهم للقسم التالي
+          } else {
+            setPaymentData(null);
+          }
+        } catch (err) {
+          setPaymentData(null);
+        }
+      };
+      fetchPaymentData();
+    } else {
+      // fallback للـ localStorage (لو محتاج تدعم الحالة القديمة)
+      const data = JSON.parse(localStorage.getItem("paymentData"));
+      setPaymentData(data);
+    }
   }, []);
 
   if (!paymentData || !paymentData.clientSecret) {
