@@ -47,6 +47,9 @@ export default function ServicesManagementSection({ employeeData, lang }) {
   const [orderCreated, setOrderCreated] = useState(false);
   const [orderInfo, setOrderInfo] = useState(null);
 
+  // لينك الدفع
+  const [paymentUrl, setPaymentUrl] = useState("");
+
   const router = useRouter();
 
   async function fetchOtherServices() {
@@ -176,7 +179,7 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     return `REQ-${part1}-${part2}`;
   }
 
-  // دالة بدء عملية الدفع وتجهيز بيانات الطلب
+  // دالة تجهيز بيانات الدفع وعرض لينك الدفع للموظف ليقوم بنسخه وإرساله للعميل
   function handleStartPayment({
     client,
     selectedService,
@@ -184,8 +187,7 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     employeeData,
     lang,
     setOrderCreated,
-    setOrderInfo,
-    router
+    setOrderInfo
   }) {
     const orderNumber = generateOrderNumber();
     const servicePrice = Number(selectedService.price) || 0;
@@ -231,16 +233,16 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     };
 
     localStorage.setItem("paymentData", JSON.stringify(paymentData));
-    if (router) {
-      router.push("/payment/service");
-    } else {
-      window.location.href = "/payment/service";
-    }
+
+    // أنشئ لينك صفحة الدفع
+    const link = `${window.location.origin}/payment/service`;
+
     setOrderCreated(true);
     setOrderInfo({
       orderNumber,
-      paymentUrl: "/payment/service"
+      paymentUrl: link
     });
+    setPaymentUrl(link);
   }
 
   function ClientInfoBox() {
@@ -355,8 +357,7 @@ export default function ServicesManagementSection({ employeeData, lang }) {
                       employeeData,
                       lang,
                       setOrderCreated,
-                      setOrderInfo,
-                      router
+                      setOrderInfo
                     });
                   }}
                 >
@@ -367,21 +368,34 @@ export default function ServicesManagementSection({ employeeData, lang }) {
               {orderCreated && orderInfo && (
                 <div className="mt-4 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 shadow text-center font-bold text-lg text-emerald-700">
                   <div>
-                    {lang === "ar" ? "تم إنشاء الطلب بنجاح!" : "Order Created Successfully!"}
+                    {lang === "ar" ? "تم تجهيز الطلب بنجاح!" : "Order Prepared Successfully!"}
                   </div>
                   <div style={{ marginTop: 8 }}>
                     <b>{lang === "ar" ? "رقم الطلب:" : "Order Number:"}</b> {orderInfo.orderNumber}
                   </div>
                   <div style={{ marginTop: 8 }}>
                     <b>{lang === "ar" ? "لينك الدفع:" : "Payment Link:"}</b>
-                    <a
-                      href={orderInfo.paymentUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline text-blue-700 ml-2"
+                    <input
+                      type="text"
+                      value={orderInfo.paymentUrl}
+                      readOnly
+                      style={{ width: "80%", margin: "8px 0", fontWeight: "bold", color: "#1565c0", textAlign: "center" }}
+                      onClick={e => e.target.select()}
+                    />
+                    <button
+                      style={{ padding: "6px 12px", marginLeft: "8px" }}
+                      onClick={() => {
+                        navigator.clipboard.writeText(orderInfo.paymentUrl);
+                        alert(lang === "ar" ? "تم نسخ الرابط!" : "Link copied!");
+                      }}
                     >
-                      {orderInfo.paymentUrl}
-                    </a>
+                      {lang === "ar" ? "نسخ الرابط" : "Copy Link"}
+                    </button>
+                  </div>
+                  <div style={{ marginTop: 8, color: "#333", fontSize: "14px", fontWeight: "normal" }}>
+                    {lang === "ar"
+                      ? "يرجى إرسال الرابط للعميل للدفع. الطلب النهائي لن يُنشأ إلا بعد الدفع."
+                      : "Please send the link to the client for payment. The final order will be created only after payment."}
                   </div>
                 </div>
               )}
