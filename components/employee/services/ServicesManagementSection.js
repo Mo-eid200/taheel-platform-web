@@ -235,7 +235,8 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     localStorage.setItem("paymentData", JSON.stringify(paymentData));
 
     // أنشئ لينك صفحة الدفع
-    const link = `${window.location.origin}/payment/service`;
+    const link = `${window.location.origin}/payment/service?order=${orderNumber}`;
+
 
     setOrderCreated(true);
     setOrderInfo({
