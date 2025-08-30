@@ -233,12 +233,12 @@ useEffect(() => {
   function ServiceDetailsBox() {
     if (!client || !selectedService) return null;
 
-    // حساب الرسوم الإضافية حسب منطقك أو بيانات الخدمة
+    // حساب الرسوم
     const servicePrice = Number(selectedService.price) || 0;
     const printingFee = Number(selectedService.printingFee) || 0;
-    // احسب الضريبة (مثلاً 5% من سعر الخدمة فقط)
-    const vat = +(servicePrice * 0.05).toFixed(2);
-    // المجموع الكلي
+    // الضريبة 5% على رسوم الطباعة فقط
+    const vat = +(printingFee * 0.05).toFixed(2);
+    // المجموع الكلي: سعر الخدمة + رسوم الطباعة + ضريبة رسوم الطباعة
     const total = +(servicePrice + printingFee + vat).toFixed(2);
 
     const requiredDocs = Array.isArray(selectedService.requiredDocuments)
@@ -286,7 +286,7 @@ useEffect(() => {
                   <td className="text-right">{printingFee.toFixed(2)} AED</td>
                 </tr>
                 <tr>
-                  <td>{lang === "ar" ? "ضريبة القيمة المضافة 5%" : "VAT 5%"}</td>
+                  <td>{lang === "ar" ? "ضريبة القيمة المضافة 5% على رسوم الطباعة" : "VAT 5% on Printing Fee"}</td>
                   <td className="text-right">{vat.toFixed(2)} AED</td>
                 </tr>
                 <tr>
