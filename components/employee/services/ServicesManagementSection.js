@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { FaSearch } from "react-icons/fa";
 import { firestore } from "@/lib/firebase.client";
 import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
+import ServiceUploadModal from "./ServiceUploadModal";
 
 const PREFIXES = [
   { key: "RES", labelAr: "مقيم", labelEn: "Resident" },
@@ -36,6 +37,10 @@ export default function ServicesManagementSection({ employeeData, lang }) {
   const [serviceSearch, setServiceSearch] = useState("");
   const [servicesDropdownOpen, setServicesDropdownOpen] = useState(false);
   const dropdownRef = useRef();
+
+  // مودال رفع المستندات
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [uploadedDocs, setUploadedDocs] = useState({});
 
   // جلب الخدمات الأخرى من مصدرين
   async function fetchOtherServices() {
@@ -183,24 +188,16 @@ export default function ServicesManagementSection({ employeeData, lang }) {
       : (selectedService.requiredDocuments ? Object.values(selectedService.requiredDocuments) : []);
     const requireUpload = selectedService.requireUpload || requiredDocs.length > 0;
 
-    function UploadDocButtons() {
-      if (!requireUpload || requiredDocs.length === 0) return null;
+    function UploadDocButton() {
+      if (!selectedService || requiredDocs.length === 0) return null;
       return (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {requiredDocs.map((doc, idx) => {
-            let docName = typeof doc === "string" ? doc : (doc.ar || doc.en || doc.name || doc.label || `مستند ${idx+1}`);
-            return (
-              <button
-                key={idx}
-                type="button"
-                className="px-4 py-2 rounded-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-base shadow"
-                onClick={() => alert(`رفع مستند: ${docName}`)}
-              >
-                {lang === "ar" ? `رفع: ${docName}` : `Upload: ${docName}`}
-              </button>
-            );
-          })}
-        </div>
+        <button
+          type="button"
+          className="px-5 py-2 rounded-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-base shadow mt-3"
+          onClick={() => setUploadModalOpen(true)}
+        >
+          {lang === "ar" ? "رفع المستندات المطلوبة" : "Upload Required Documents"}
+        </button>
       );
     }
 
@@ -230,10 +227,22 @@ export default function ServicesManagementSection({ employeeData, lang }) {
                   <li key={idx}>{typeof doc === "string" ? doc : (doc.ar || doc.en || doc.name || doc.label)}</li>
                 ))}
               </ul>
-              <UploadDocButtons />
+              <UploadDocButton />
             </div>
           )}
         </div>
+        <ServiceUploadModal
+          open={uploadModalOpen}
+          onClose={() => setUploadModalOpen(false)}
+          service={selectedService}
+          userId={client?.customerId}
+          lang={lang}
+          setUploadedDocs={setUploadedDocs}
+          uploadedDocs={uploadedDocs}
+          requiredDocs={requiredDocs.map((doc, idx) => `doc_${idx}`)}
+          displayDocs={requiredDocs.map(doc => typeof doc === "string" ? doc : (doc.ar || doc.en || doc.name || doc.label || ""))}
+          onAllDocsUploaded={() => setUploadModalOpen(false)}
+        />
       </div>
     );
   }
