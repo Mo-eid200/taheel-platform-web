@@ -31,16 +31,7 @@ export default function ServiceUploadModal({
   }, [requiredDocs, displayDocs]);
 
   // تحقق إذا تم رفع كل المستندات
-  useEffect(() => {
-    if (!open) return;
-    const allUploaded = docItems.length > 0 && docItems.every((d) => !!uploadedDocs[d.key]);
-    if (allUploaded) {
-      // إغلاق تلقائي بعد رفع كل المستندات المطلوبة
-      if (typeof onAllDocsUploaded === "function") onAllDocsUploaded();
-      onClose && onClose();
-    }
-    // لا تفرغ الملفات عند الإغلاق، تظل محفوظة في الـ parent
-  }, [uploadedDocs, docItems, open, onAllDocsUploaded, onClose]);
+  const allUploaded = docItems.length > 0 && docItems.every((d) => !!uploadedDocs[d.key]);
 
   // إغلاق المودال عند الضغط خارج
   useEffect(() => {
@@ -180,10 +171,13 @@ export default function ServiceUploadModal({
         className="relative bg-gradient-to-br from-cyan-50 via-white to-cyan-100 rounded-3xl shadow-2xl px-6 py-8 w-full max-w-md border border-cyan-200 flex flex-col items-center"
         style={{ maxHeight: "calc(100vh - 60px)", minHeight: "340px", overflowY: "auto" }}
       >
+        {/* زر الإغلاق */}
         <button
-          className="absolute top-3 right-3 bg-gray-100 hover:bg-red-500 text-gray-400 hover:text-white rounded-full w-8 h-8 flex items-center justify-center text-xl shadow transition duration-200"
+          className="absolute top-3 right-3 bg-gray-100 hover:bg-red-500 text-gray-400 hover:text-white rounded-full w-8 h-8 flex items-center justify-center text-xl shadow transition duration-200 cursor-pointer"
           onClick={onClose}
           title={lang === "ar" ? "إغلاق" : "Close"}
+          type="button"
+          style={{ cursor: "pointer" }}
         >
           <FaTimes />
         </button>
@@ -217,7 +211,7 @@ export default function ServiceUploadModal({
                       className={`flex flex-col items-center justify-center w-full py-2 rounded-2xl border-2 border-dashed
                         ${selected ? "border-emerald-400 bg-emerald-50" : "border-cyan-300 bg-cyan-50 hover:bg-cyan-100"} cursor-pointer transition`}
                       tabIndex={0}
-                      style={{ minHeight: 60 }}
+                      style={{ minHeight: 60, cursor: "pointer" }}
                     >
                       <FaUpload className={`text-2xl mb-1 ${selected ? "text-emerald-700" : "text-cyan-400"}`} />
                       <span className={`font-bold text-sm ${selected ? "text-emerald-800" : "text-cyan-700"}`}>
@@ -245,7 +239,7 @@ export default function ServiceUploadModal({
                         ${isUploading || !selected
                           ? "bg-cyan-200 text-white cursor-not-allowed"
                           : "bg-gradient-to-r from-emerald-500 to-cyan-400 hover:from-emerald-600 hover:to-cyan-500 text-white cursor-pointer"}`}
-                      style={{ fontSize: "1.05rem", letterSpacing: "1px" }}
+                      style={{ fontSize: "1.05rem", letterSpacing: "1px", cursor: "pointer" }}
                       onClick={(e) => handleUpload(e, docKey)}
                     >
                       {isUploading ? (
@@ -267,14 +261,16 @@ export default function ServiceUploadModal({
                         target="_blank"
                         rel="noopener noreferrer"
                         className="underline text-emerald-800 font-bold"
+                        style={{ cursor: "pointer" }}
                       >
                         {uploadedDocs[docKey].name}
                       </a>
                     </div>
                     <button
                       type="button"
-                      className="mt-2 px-4 py-1 bg-yellow-500 hover:bg-yellow-700 text-white rounded-full font-bold text-sm"
+                      className="mt-2 px-4 py-1 bg-yellow-500 hover:bg-yellow-700 text-white rounded-full font-bold text-sm cursor-pointer"
                       onClick={() => handleReplaceFile(docKey)}
+                      style={{ cursor: "pointer" }}
                     >
                       {lang === "ar" ? "استبدال المستند" : "Replace Document"}
                     </button>
@@ -297,12 +293,20 @@ export default function ServiceUploadModal({
           })}
         </form>
 
-        <button
-          className="mt-4 px-7 py-2 bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-600 hover:to-emerald-600 text-white rounded-xl font-bold shadow transition duration-200"
-          onClick={onClose}
-        >
-          {lang === "ar" ? "إغلاق" : "Close"}
-        </button>
+        {/* زر موافق يظهر فقط بعد رفع كل المستندات المطلوبة */}
+        {allUploaded && (
+          <button
+            className="mt-4 px-7 py-2 bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-white rounded-xl font-bold shadow transition duration-200 cursor-pointer"
+            onClick={() => {
+              onAllDocsUploaded && onAllDocsUploaded();
+              onClose && onClose();
+            }}
+            style={{ cursor: "pointer" }}
+            type="button"
+          >
+            {lang === "ar" ? "موافق" : "OK"}
+          </button>
+        )}
 
         <div className="mt-4 text-xs text-center text-gray-500 font-bold">
           {lang === "ar"

@@ -193,11 +193,8 @@ export default function ServicesManagementSection({ employeeData, lang }) {
         createdAt: new Date().toISOString(),
       };
 
-      // إنشاء الطلب في فايرستور
       await addDoc(collection(firestore, "orders"), orderData);
 
-      // هنا ممكن توليد لينك دفع حقيقي حسب النظام (Stripe, PayTabs...)
-      // بشكل تجريبي نرسل لينك وهمي
       const paymentUrl = "https://payment.example.com/pay?order=" + orderNumber;
 
       setOrderCreated(true);
@@ -240,18 +237,19 @@ export default function ServicesManagementSection({ employeeData, lang }) {
       : (selectedService.requiredDocuments ? Object.values(selectedService.requiredDocuments) : []);
     const requireUpload = selectedService.requireUpload || requiredDocs.length > 0;
 
-function UploadDocButton() {
-  if (!selectedService || requiredDocs.length === 0) return null;
-  return (
-    <button
-      type="button"
-      className="px-5 py-2 rounded-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-base shadow mt-3"
-      onClick={() => setUploadModalOpen(true)}
-    >
-      {lang === "ar" ? "رفع المستندات المطلوبة" : "Upload Required Documents"}
-    </button>
-  );
-}
+    function UploadDocButton() {
+      if (!selectedService || requiredDocs.length === 0) return null;
+      return (
+        <button
+          type="button"
+          className="px-5 py-2 rounded-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-base shadow mt-3 cursor-pointer"
+          onClick={() => setUploadModalOpen(true)}
+          style={{ cursor: "pointer" }}
+        >
+          {lang === "ar" ? "رفع المستندات المطلوبة" : "Upload Required Documents"}
+        </button>
+      );
+    }
 
     return (
       <div className="w-full rounded-xl overflow-hidden shadow border border-emerald-100 bg-white animate-fade-in">
@@ -281,18 +279,17 @@ function UploadDocButton() {
               </ul>
               <UploadDocButton />
 
-              {/* زر توليد الطلب يظهر فقط بعد اكتمال رفع المستندات */}
               {allDocsUploaded && !orderCreated && (
                 <button
                   type="button"
-                  className="px-6 py-2 rounded-full bg-emerald-700 hover:bg-emerald-900 text-white font-bold text-base shadow mt-4"
+                  className="px-6 py-2 rounded-full bg-emerald-700 hover:bg-emerald-900 text-white font-bold text-base shadow mt-4 cursor-pointer"
                   onClick={handleCreateOrder}
+                  style={{ cursor: "pointer" }}
                 >
                   {lang === "ar" ? "إنشاء الطلب وإرسال لينك الدفع" : "Create Order & Send Payment Link"}
                 </button>
               )}
 
-              {/* بعد إنشاء الطلب أظهر رقم الطلب واللينك */}
               {orderCreated && orderInfo && (
                 <div className="mt-4 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 shadow text-center font-bold text-lg text-emerald-700">
                   <div>
@@ -308,6 +305,7 @@ function UploadDocButton() {
                       target="_blank"
                       rel="noopener noreferrer"
                       className="underline text-blue-700 ml-2"
+                      style={{ cursor: "pointer" }}
                     >
                       {orderInfo.paymentUrl}
                     </a>
@@ -338,13 +336,12 @@ function UploadDocButton() {
     return found ? (lang === "ar" ? found.labelAr : found.labelEn) : "";
   }
 
-  // قائمة الخدمات المنسدلة مع تقسيم فرعي واضح
   function ServicesDropdown() {
     return (
       <div ref={dropdownRef} className="relative w-full">
         <div
-          className={`border-2 rounded-lg px-2 py-1 bg-white shadow w-full flex items-center cursor-pointer ${!client ? "opacity-60" : ""}`}
-          style={{ height: 38 }}
+          className={`border-2 rounded-lg px-2 py-1 bg-white shadow w-full flex items-center ${!client ? "opacity-60" : ""} cursor-pointer`}
+          style={{ height: 38, cursor: "pointer" }}
           onClick={() => client && setServicesDropdownOpen(true)}
           tabIndex={0}
         >
@@ -372,14 +369,14 @@ function UploadDocButton() {
               ? "-- اختر الخدمة --"
               : "-- Select Service --"}
           </span>
-          <span className="ml-2 text-gray-500">
+          <span className="ml-2 text-gray-500" style={{ cursor: "pointer" }}>
             <FaSearch />
           </span>
         </div>
         {servicesDropdownOpen && client && (
           <div
             className="absolute left-0 right-0 z-30 bg-white border-2 border-emerald-100 rounded-lg mt-1 shadow-xl overflow-y-auto"
-            style={{ maxHeight: 330 }}
+            style={{ maxHeight: 330, cursor: "pointer" }}
           >
             <div className="px-2 py-2 border-b border-gray-100 bg-gray-50">
               <input
@@ -398,7 +395,6 @@ function UploadDocButton() {
                 }}
               />
             </div>
-            {/* قائمة فرعية: خدمات الفئة الحالية */}
             <div>
               <div className="px-3 py-1 font-bold text-emerald-700 text-sm bg-white border-b" style={{background:"#f1f8fc"}}>
                 {lang === "ar" ? `خدمات ${getCurrentTypeLabel()}` : `Services ${getCurrentTypeLabel()}`}
@@ -407,18 +403,18 @@ function UploadDocButton() {
                 filteredServices.map(s => (
                   <div
                     key={s.id}
-                    className="flex flex-row items-center px-3 py-2 cursor-pointer hover:bg-emerald-50"
+                    className="flex flex-row items-center px-3 py-2 hover:bg-emerald-50 cursor-pointer"
                     onClick={() => {
                       setSelectedServiceId(s.id);
                       setServicesDropdownOpen(false);
                     }}
-                    style={{ borderBottom: "1px solid #f3f5f7" }}
+                    style={{ borderBottom: "1px solid #f3f5f7", cursor: "pointer" }}
                   >
-                    <span style={{ color: "#1c7ed6", fontWeight: "bold", fontSize: "17px" }}>{s.name}</span>
+                    <span style={{ color: "#1c7ed6", fontWeight: "bold", fontSize: "17px", cursor: "pointer" }}>{s.name}</span>
                     {s.providers && s.providers.length > 0 && (
                       <span
                         className="ml-2"
-                        style={{ color: "#e53935", fontWeight: "bold", fontSize: "15px" }}
+                        style={{ color: "#e53935", fontWeight: "bold", fontSize: "15px", cursor: "pointer" }}
                       >
                         | {lang === "ar" ? "جهة الخدمة:" : "Service Authority:"} {s.providers.join(", ")}
                       </span>
@@ -429,7 +425,6 @@ function UploadDocButton() {
                 <div className="px-4 py-1 text-gray-400 text-center">{lang === "ar" ? "لا يوجد خدمات مطابقة" : "No matching services found"}</div>
               )}
             </div>
-            {/* قائمة فرعية: خدمات أخرى */}
             <div>
               <div className="px-3 py-1 font-bold text-emerald-700 text-sm bg-white border-b" style={{background:"#f8e9e9"}}>
                 {lang === "ar" ? "خدمات أخرى" : "Other Services"}
@@ -438,18 +433,18 @@ function UploadDocButton() {
                 filteredOtherServices.map(s => (
                   <div
                     key={s.id}
-                    className="flex flex-row items-center px-3 py-2 cursor-pointer hover:bg-emerald-50"
+                    className="flex flex-row items-center px-3 py-2 hover:bg-emerald-50 cursor-pointer"
                     onClick={() => {
                       setSelectedServiceId(s.id);
                       setServicesDropdownOpen(false);
                     }}
-                    style={{ borderBottom: "1px solid #f3f5f7" }}
+                    style={{ borderBottom: "1px solid #f3f5f7", cursor: "pointer" }}
                   >
-                    <span style={{ color: "#1c7ed6", fontWeight: "bold", fontSize: "17px" }}>{s.name}</span>
+                    <span style={{ color: "#1c7ed6", fontWeight: "bold", fontSize: "17px", cursor: "pointer" }}>{s.name}</span>
                     {s.providers && s.providers.length > 0 && (
                       <span
                         className="ml-2"
-                        style={{ color: "#e53935", fontWeight: "bold", fontSize: "15px" }}
+                        style={{ color: "#e53935", fontWeight: "bold", fontSize: "15px", cursor: "pointer" }}
                       >
                         | {lang === "ar" ? "جهة الخدمة:" : "Service Authority:"} {s.providers.join(", ")}
                       </span>
@@ -482,7 +477,7 @@ function UploadDocButton() {
             className="border-2 rounded-lg px-2 py-1 w-full shadow focus:outline-emerald-500 text-base font-bold text-emerald-900 bg-white"
             value={prefix}
             onChange={e => setPrefix(e.target.value)}
-            style={{ height: 38 }}
+            style={{ height: 38, cursor: "pointer" }}
           >
             {PREFIXES.map(p => (
               <option key={p.key} value={p.key}>{lang === "ar" ? p.labelAr : p.labelEn}</option>
@@ -499,13 +494,13 @@ function UploadDocButton() {
               placeholder={lang === "ar" ? "2009180" : "2009180"}
               className="border-2 rounded-lg px-3 py-1 w-full shadow focus:outline-emerald-500 text-base font-bold text-emerald-900 tracking-widest bg-white text-center"
               maxLength={8}
-              style={{ height: 38, letterSpacing: "2px", fontSize: "22px" }}
+              style={{ height: 38, letterSpacing: "2px", fontSize: "22px", cursor: "pointer" }}
               autoComplete="off"
             />
             <button
               type="submit"
-              className="ml-2 px-4 py-1 rounded-full bg-emerald-600 hover:bg-emerald-800 text-white flex items-center gap-1 font-bold text-base"
-              style={{ height: 38, minWidth: "72px", fontSize: "18px" }}
+              className="ml-2 px-4 py-1 rounded-full bg-emerald-600 hover:bg-emerald-800 text-white flex items-center gap-1 font-bold text-base cursor-pointer"
+              style={{ height: 38, minWidth: "72px", fontSize: "18px", cursor: "pointer" }}
               title={lang === "ar" ? "بحث" : "Search"}
             >
               <FaSearch />
@@ -532,6 +527,12 @@ function UploadDocButton() {
           </div>
         )}
       </div>
+      {/* ستايل يجعل كل زرار الماوس "يد" */}
+      <style jsx>{`
+        button, .cursor-pointer, select, input[type="text"], a {
+          cursor: pointer !important;
+        }
+      `}</style>
     </div>
   );
 }
