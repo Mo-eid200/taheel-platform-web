@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { FaSearch } from "react-icons/fa";
 import { firestore } from "@/lib/firebase.client";
-import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
+import { doc, getDoc, collection, query, where, getDocs, setDoc } from "firebase/firestore";
 import ServiceUploadModal from "./ServiceUploadModal";
 import { useRouter } from "next/navigation";
 
@@ -21,6 +21,48 @@ function normalizeArabic(text) {
     .replace(/ئ/g, "ي")
     .replace(/ً|ٌ|ٍ|َ|ُ|ِ|ّ|ْ/g, "")
     .toLowerCase();
+}
+
+// دالة موحدة لحفظ الطلب في Firestore بنفس الحقول لكل النظام
+async function createOrderInFirestore({
+  orderNumber,
+  client,
+  selectedService,
+  employeeData,
+  uploadedDocs,
+  vat,
+  totalPrice,
+  lang,
+  assignedTo,
+  assignedToName,
+  status = "pending_payment"
+}) {
+  const servicePrice = Number(selectedService.price) || 0;
+  const printingFee = Number(selectedService.printingFee) || 0;
+  const serviceProviders = Array.isArray(selectedService.providers) ? selectedService.providers : [];
+  await setDoc(doc(firestore, "orders", orderNumber), {
+    orderNumber,
+    clientId: client?.customerId,
+    clientName: `${client?.firstName || ""} ${client?.lastName || ""}`.trim(),
+    clientType: client?.accountType || client?.type || "",
+    serviceId: selectedService.id,
+    serviceName: selectedService.name,
+    price: servicePrice,
+    printingFee,
+    vat,
+    coinDiscount: selectedService.coinDiscount || 0,
+    totalPrice,
+    assignedTo,
+    assignedToName,
+    employeeData,
+    providers: serviceProviders,
+    uploadedDocs: uploadedDocs || {},
+    status, // "pending_payment" أو "paid"
+    lang,
+    userEmail: client?.email,
+    createdAt: new Date().toISOString()
+    // يمكنك إضافة أي حقل آخر متفق عليه
+  });
 }
 
 export default function ServicesManagementSection({ employeeData, lang }) {
@@ -179,8 +221,8 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     return `REQ-${part1}-${part2}`;
   }
 
-  // دالة تجهيز بيانات الدفع وعرض لينك الدفع للموظف ليقوم بنسخه وإرساله للعميل
-  function handleStartPayment({
+  // دالة تجهيز بيانات الدفع وعرض لينك الدفع للموظف + حفظ الطلب في Firestore بنفس الحقول الموحدة
+  async function handleStartPayment({
     client,
     selectedService,
     uploadedDocs,
@@ -232,11 +274,26 @@ export default function ServicesManagementSection({ employeeData, lang }) {
       lang
     };
 
+    // حفظ الطلب في قاعدة البيانات (orders) بنفس الحقول الموحدة
+    await createOrderInFirestore({
+      orderNumber,
+      client,
+      selectedService,
+      employeeData,
+      uploadedDocs,
+      vat,
+      totalPrice: total,
+      lang,
+      assignedTo,
+      assignedToName,
+      status: "pending_payment"
+    });
+
+    // حفظ بيانات الدفع في localStorage (لصفحة الدفع بالكارت)
     localStorage.setItem("paymentData", JSON.stringify(paymentData));
 
     // أنشئ لينك صفحة الدفع
     const link = `${window.location.origin}/payment/service?order=${orderNumber}`;
-
 
     setOrderCreated(true);
     setOrderInfo({

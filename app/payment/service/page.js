@@ -4,7 +4,7 @@ import { loadStripe } from "@stripe/stripe-js";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import Image from "next/image";
 import PaymentSuccessPage from "../PaymentSuccess/PaymentSuccessPage";
-import { doc, getDoc, deleteDoc, setDoc } from "firebase/firestore";
+import { collection, query, where, getDocs, setDoc } from "firebase/firestore";
 import { firestore } from "@/lib/firebase.client";
 
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
@@ -58,8 +58,8 @@ async function moveOrderToRequests(paymentData, paymentId, orderNumber) {
       createdAt: new Date().toISOString()
     });
 
-    // حذف الطلب من pendingPayments
-    await deleteDoc(doc(firestore, "pendingPayments", orderNumber));
+    // يمكنك حذف الطلب من orders لو أردت (اختياري)
+    // await deleteDoc(doc(firestore, "orders", ...)); 
   } catch (error) {
     console.error("Error moving order:", error);
   }
@@ -126,7 +126,7 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
         }),
       });
 
-      // نقل الطلب من pendingPayments إلى requests
+      // نقل الطلب من orders إلى requests لو حبيت
       await moveOrderToRequests(paymentData, paymentIntent.id, orderNumber);
 
       setTimeout(() => {
@@ -260,13 +260,17 @@ export default function CardPaymentPage() {
     const params = new URLSearchParams(window.location.search);
     const orderNum = params.get("order");
     if (orderNum) {
-      // جلب بيانات الدفع من Firestore
+      // جلب بيانات الدفع من كولكشن orders وليس pendingPayments
       const fetchPaymentData = async () => {
         try {
-          const docRef = doc(firestore, "pendingPayments", orderNum);
-          const snap = await getDoc(docRef);
-          if (snap.exists()) {
-            setPaymentData({ ...snap.data().paymentData, orderNumber: orderNum }); // orderNumber مهم للقسم التالي
+          const q = query(
+            collection(firestore, "orders"),
+            where("orderNumber", "==", orderNum)
+          );
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+            const docData = snap.docs[0].data();
+            setPaymentData({ ...docData, orderNumber: orderNum });
           } else {
             setPaymentData(null);
           }
