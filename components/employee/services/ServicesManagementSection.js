@@ -303,7 +303,11 @@ export default function ServicesManagementSection({ employeeData, lang }) {
                 autoFocus
                 className="w-full border rounded px-2 py-1 text-base font-bold focus:outline-none"
                 placeholder={lang === "ar" ? "اكتب اسم الخدمة أو جهة الخدمة..." : "Type service name or authority..."}
-                style={{ fontSize: "18px" }}
+                style={{
+                  fontSize: "18px",
+                  color: "#153A6B", // كحلي واضح
+                  backgroundColor: "#f8f9fb"
+                }}
               />
             </div>
             {/* خدمات الفئة */}
