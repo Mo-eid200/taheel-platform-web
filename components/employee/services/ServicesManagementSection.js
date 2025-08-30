@@ -22,6 +22,19 @@ export default function ServicesManagementSection({ employeeData, lang }) {
   const [selectedServiceId, setSelectedServiceId] = useState("");
   const [selectedService, setSelectedService] = useState(null);
 
+  // فلترة الخدمات بالاسم
+  const [serviceSearch, setServiceSearch] = useState("");
+  const filteredServices = serviceSearch.trim()
+    ? services.filter(s =>
+        (s.name || "").toLowerCase().includes(serviceSearch.trim().toLowerCase())
+      )
+    : services;
+  const filteredOtherServices = serviceSearch.trim()
+    ? otherServices.filter(s =>
+        (s.name || "").toLowerCase().includes(serviceSearch.trim().toLowerCase())
+      )
+    : otherServices;
+
   // إضافة "-" بعد أول 3 أرقام
   function handleClientNumberChange(e) {
     let value = e.target.value.replace(/\D/g, "");
@@ -193,6 +206,12 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     );
   }
 
+  // تجميع اسم الفئة الحالية للعرض (مقيم/غير مقيم/شركة)
+  function getCurrentTypeLabel() {
+    const found = PREFIXES.find(p => p.key === prefix);
+    return found ? (lang === "ar" ? found.labelAr : found.labelEn) : "";
+  }
+
   // توسيع المكان الرئيسي للحقول
   return (
     <div className="w-full max-w-4xl mx-auto">
@@ -243,9 +262,19 @@ export default function ServicesManagementSection({ employeeData, lang }) {
             </button>
           </div>
         </div>
-        {/* الخدمة */}
+        {/* الخدمة (Autocomplete + تقسيم العرض) */}
         <div className="flex flex-col items-start flex-1" style={{ minWidth: "350px" }}>
           <label className="font-bold text-emerald-700 mb-1 text-sm">{lang === "ar" ? "الخدمة" : "Service"}</label>
+          <input
+            type="text"
+            value={serviceSearch}
+            onChange={e => setServiceSearch(e.target.value)}
+            placeholder={lang === "ar" ? "اكتب اسم الخدمة..." : "Type service name..."}
+            className="border-2 rounded-lg px-2 py-1 w-full shadow focus:outline-emerald-500 text-base font-bold text-emerald-900 bg-white mb-2"
+            style={{ height: 38, fontSize: "18px" }}
+            disabled={!client}
+            autoComplete="off"
+          />
           <select
             className="border-2 rounded-lg px-2 py-1 shadow text-base font-bold text-emerald-900 bg-white w-full"
             value={selectedServiceId}
@@ -254,13 +283,31 @@ export default function ServicesManagementSection({ employeeData, lang }) {
             style={{ height: 38, fontSize: "18px" }}
           >
             <option value="">{lang === "ar" ? "-- اختر الخدمة --" : "-- Select Service --"}</option>
-            {services.map(s => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-            {otherServices.length > 0 && (
+            {/* قسم خدمات الفئة الحالية */}
+            {filteredServices.length > 0 && (
+              <optgroup label={`${lang === "ar" ? "خدمات" : "Services"} ${getCurrentTypeLabel()}`}>
+                {filteredServices.map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                    {s.providers && Array.isArray(s.providers) && s.providers.length > 0
+                      ? ` | ${lang === "ar" ? "البروفايدر:" : "Provider:"} ${s.providers.join(", ")}`
+                      : ""
+                    }
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {/* قسم الخدمات الأخرى */}
+            {filteredOtherServices.length > 0 && (
               <optgroup label={lang === "ar" ? "خدمات أخرى" : "Other Services"}>
-                {otherServices.map(s => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
+                {filteredOtherServices.map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                    {s.providers && Array.isArray(s.providers) && s.providers.length > 0
+                      ? ` | ${lang === "ar" ? "البروفايدر:" : "Provider:"} ${s.providers.join(", ")}`
+                      : ""
+                    }
+                  </option>
                 ))}
               </optgroup>
             )}
