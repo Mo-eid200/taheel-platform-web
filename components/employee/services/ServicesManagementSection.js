@@ -285,161 +285,158 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     );
   }
 
-function ServiceDetailsBox() {
-  if (!client || !selectedService) return null;
+  function ServiceDetailsBox() {
+    if (!client || !selectedService) return null;
 
-  const servicePrice = Number(selectedService.price) || 0;
-  const printingFee = Number(selectedService.printingFee) || 0;
-  const vat = +(printingFee * 0.05).toFixed(2);
-  const total = +(servicePrice + printingFee + vat).toFixed(2);
+    const servicePrice = Number(selectedService.price) || 0;
+    const printingFee = Number(selectedService.printingFee) || 0;
+    const vat = +(printingFee * 0.05).toFixed(2);
+    const total = +(servicePrice + printingFee + vat).toFixed(2);
 
-  const requiredDocs = Array.isArray(selectedService.requiredDocuments)
-    ? selectedService.requiredDocuments
-    : (selectedService.requiredDocuments ? Object.values(selectedService.requiredDocuments) : []);
-  const requireUpload = selectedService.requireUpload || requiredDocs.length > 0;
+    const requiredDocs = Array.isArray(selectedService.requiredDocuments)
+      ? selectedService.requiredDocuments
+      : (selectedService.requiredDocuments ? Object.values(selectedService.requiredDocuments) : []);
 
-  function UploadDocButton() {
-    if (!selectedService || requiredDocs.length === 0) return null;
+    function UploadDocButton() {
+      if (!selectedService || requiredDocs.length === 0) return null;
+      return (
+        <button
+          type="button"
+          className="px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-sm shadow mt-3 cursor-pointer"
+          style={{ minWidth: 120, fontSize: 15 }}
+          onClick={() => {
+            setAllDocsUploaded(false);
+            setUploadModalOpen(true);
+          }}
+        >
+          {lang === "ar" ? "رفع المستندات المطلوبة" : "Upload Required Documents"}
+        </button>
+      );
+    }
+
     return (
-      <button
-        type="button"
-        className="px-5 py-2 rounded-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-base shadow mt-3 cursor-pointer"
-        onClick={() => {
-          setAllDocsUploaded(false);
-          setUploadModalOpen(true);
-        }}
-      >
-        {lang === "ar" ? "رفع المستندات المطلوبة" : "Upload Required Documents"}
-      </button>
+      <div className="w-full rounded-xl overflow-hidden shadow border border-emerald-100 bg-white animate-fade-in">
+        <div className="bg-emerald-50 px-4 py-2 text-center font-bold text-emerald-800 text-lg">
+          {lang === "ar" ? "تفاصيل الخدمة" : "Service Details"}
+        </div>
+        <div className="px-4 py-4 grid grid-cols-1 gap-3 text-base font-semibold text-gray-800">
+          <div>
+            <span className="inline-block w-32 text-emerald-700">{lang === "ar" ? "الخدمة:" : "Service:"}</span>
+            <span style={{ color: "#1c7ed6", fontWeight: "bold" }}>{selectedService.name}</span>
+          </div>
+          <div>
+            <span className="inline-block w-32 text-emerald-700">{lang === "ar" ? "السعر:" : "Price:"}</span>
+            <span>{servicePrice.toFixed(2)} AED</span>
+          </div>
+          <div className="mt-2">
+            <table className="w-full text-xs text-gray-800 font-bold border-separate border-spacing-y-1">
+              <tbody>
+                <tr>
+                  <td>{lang === "ar" ? "رسوم الطباعة" : "Printing Fee"}</td>
+                  <td className="text-right">{printingFee.toFixed(2)} AED</td>
+                </tr>
+                <tr>
+                  <td>{lang === "ar" ? "ضريبة القيمة المضافة 5% على رسوم الطباعة" : "VAT 5% on Printing Fee"}</td>
+                  <td className="text-right">{vat.toFixed(2)} AED</td>
+                </tr>
+                <tr>
+                  <td className="font-extrabold text-emerald-700">{lang === "ar" ? "المجموع الكلي" : "Total"}</td>
+                  <td className="font-extrabold text-emerald-800 text-right">{total.toFixed(2)} AED</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <span className="inline-block w-32 text-emerald-700">{lang === "ar" ? "الوصف:" : "Description:"}</span>
+            <span>{selectedService.desc || selectedService.description}</span>
+          </div>
+          {/* مستندات مطلوبة */}
+          {requiredDocs.length > 0 && (
+            <div>
+              <span className="inline-block w-32 text-emerald-700">{lang === "ar" ? "المستندات المطلوبة:" : "Required Documents:"}</span>
+              <ul className="list-disc list-inside text-gray-700 text-sm mt-1 ml-2">
+                {requiredDocs.map((doc, idx) => (
+                  <li key={idx}>{typeof doc === "string" ? doc : (doc.ar || doc.en || doc.name || doc.label)}</li>
+                ))}
+              </ul>
+              <UploadDocButton />
+            </div>
+          )}
+
+          {/* زر الإنشاء يظهر فقط بعد رفع المستندات المطلوبة أو إذا لا توجد مستندات مطلوبة */}
+          {!orderCreated && (
+            (requiredDocs.length === 0 || allDocsUploaded) &&
+            <button
+              type="button"
+              className="px-3 py-1 rounded bg-emerald-700 hover:bg-emerald-900 text-white font-bold text-sm shadow mt-4"
+              style={{ minWidth: 120, fontSize: 15 }}
+              onClick={() => {
+                handleStartPayment({
+                  client,
+                  selectedService,
+                  uploadedDocs,
+                  employeeData,
+                  lang,
+                  setOrderCreated,
+                  setOrderInfo
+                });
+              }}
+            >
+              {lang === "ar" ? "إنشاء الطلب وإرسال لينك الدفع" : "Create Order & Send Payment Link"}
+            </button>
+          )}
+
+          {/* رسالة نجاح وإنشاء الطلب */}
+          {orderCreated && orderInfo && (
+            <div className="mt-4 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 shadow text-center font-bold text-lg text-emerald-700">
+              <div>
+                {lang === "ar" ? "تم تجهيز الطلب بنجاح!" : "Order Prepared Successfully!"}
+              </div>
+              <div style={{ marginTop: 8 }}>
+                <b>{lang === "ar" ? "رقم الطلب:" : "Order Number:"}</b> {orderInfo.orderNumber}
+              </div>
+              <div style={{ marginTop: 8 }}>
+                <b>{lang === "ar" ? "لينك الدفع:" : "Payment Link:"}</b>
+                <input
+                  type="text"
+                  value={orderInfo.paymentUrl}
+                  readOnly
+                  style={{ width: "80%", margin: "8px 0", fontWeight: "bold", color: "#1565c0", textAlign: "center" }}
+                  onClick={e => e.target.select()}
+                />
+                <button
+                  style={{ padding: "4px 9px", marginLeft: "8px", fontSize: 13 }}
+                  onClick={() => {
+                    navigator.clipboard.writeText(orderInfo.paymentUrl);
+                    alert(lang === "ar" ? "تم نسخ الرابط!" : "Link copied!");
+                  }}
+                >
+                  {lang === "ar" ? "نسخ الرابط" : "Copy Link"}
+                </button>
+              </div>
+              <div style={{ marginTop: 8, color: "#333", fontSize: "14px", fontWeight: "normal" }}>
+                {lang === "ar"
+                  ? "يرجى إرسال الرابط للعميل للدفع. الطلب النهائي لن يُنشأ إلا بعد الدفع."
+                  : "Please send the link to the client for payment. The final order will be created only after payment."}
+              </div>
+            </div>
+          )}
+        </div>
+        <ServiceUploadModal
+          open={uploadModalOpen}
+          onClose={() => setUploadModalOpen(false)}
+          service={selectedService}
+          userId={client?.customerId}
+          lang={lang}
+          setUploadedDocs={setUploadedDocs}
+          uploadedDocs={uploadedDocs}
+          requiredDocs={requiredDocs.map((doc, idx) => `doc_${idx}`)}
+          displayDocs={requiredDocs.map(doc => typeof doc === "string" ? doc : (doc.ar || doc.en || doc.name || doc.label || ""))}
+          onAllDocsUploaded={() => { setUploadModalOpen(false); setAllDocsUploaded(true); }}
+        />
+      </div>
     );
   }
-
-  return (
-    <div className="w-full rounded-xl overflow-hidden shadow border border-emerald-100 bg-white animate-fade-in">
-      <div className="bg-emerald-50 px-4 py-2 text-center font-bold text-emerald-800 text-lg">
-        {lang === "ar" ? "تفاصيل الخدمة" : "Service Details"}
-      </div>
-      <div className="px-4 py-4 grid grid-cols-1 gap-3 text-base font-semibold text-gray-800">
-        <div>
-          <span className="inline-block w-32 text-emerald-700">{lang === "ar" ? "الخدمة:" : "Service:"}</span>
-          <span style={{ color: "#1c7ed6", fontWeight: "bold" }}>{selectedService.name}</span>
-        </div>
-        <div>
-          <span className="inline-block w-32 text-emerald-700">{lang === "ar" ? "السعر:" : "Price:"}</span>
-          <span>{servicePrice.toFixed(2)} AED</span>
-        </div>
-        <div className="mt-2">
-          <table className="w-full text-xs text-gray-800 font-bold border-separate border-spacing-y-1">
-            <tbody>
-              <tr>
-                <td>{lang === "ar" ? "رسوم الطباعة" : "Printing Fee"}</td>
-                <td className="text-right">{printingFee.toFixed(2)} AED</td>
-              </tr>
-              <tr>
-                <td>{lang === "ar" ? "ضريبة القيمة المضافة 5% على رسوم الطباعة" : "VAT 5% on Printing Fee"}</td>
-                <td className="text-right">{vat.toFixed(2)} AED</td>
-              </tr>
-              <tr>
-                <td className="font-extrabold text-emerald-700">{lang === "ar" ? "المجموع الكلي" : "Total"}</td>
-                <td className="font-extrabold text-emerald-800 text-right">{total.toFixed(2)} AED</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div>
-          <span className="inline-block w-32 text-emerald-700">{lang === "ar" ? "الوصف:" : "Description:"}</span>
-          <span>{selectedService.desc || selectedService.description}</span>
-        </div>
-        {/* مستندات مطلوبة */}
-        {requiredDocs.length > 0 && (
-          <div>
-            <span className="inline-block w-32 text-emerald-700">{lang === "ar" ? "المستندات المطلوبة:" : "Required Documents:"}</span>
-            <ul className="list-disc list-inside text-gray-700 text-sm mt-1 ml-2">
-              {requiredDocs.map((doc, idx) => (
-                <li key={idx}>{typeof doc === "string" ? doc : (doc.ar || doc.en || doc.name || doc.label)}</li>
-              ))}
-            </ul>
-            <UploadDocButton />
-          </div>
-        )}
-
-        {/* زر الإنشاء يظهر دائماً بعد اختيار الخدمة */}
-        {!orderCreated && (
-          <button
-            type="button"
-            className="px-6 py-2 rounded-full bg-emerald-700 hover:bg-emerald-900 text-white font-bold text-base shadow mt-4"
-            onClick={() => {
-              // إذا هناك مستندات مطلوبة ولم يتم رفعها بعد، امنع الإنشاء!
-              if (requiredDocs.length > 0 && !allDocsUploaded) {
-                alert(lang === "ar" ? "يرجى رفع المستندات المطلوبة أولاً" : "Please upload required documents first");
-                return;
-              }
-              handleStartPayment({
-                client,
-                selectedService,
-                uploadedDocs,
-                employeeData,
-                lang,
-                setOrderCreated,
-                setOrderInfo
-              });
-            }}
-          >
-            {lang === "ar" ? "إنشاء الطلب وإرسال لينك الدفع" : "Create Order & Send Payment Link"}
-          </button>
-        )}
-
-        {/* رسالة نجاح وإنشاء الطلب */}
-        {orderCreated && orderInfo && (
-          <div className="mt-4 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 shadow text-center font-bold text-lg text-emerald-700">
-            <div>
-              {lang === "ar" ? "تم تجهيز الطلب بنجاح!" : "Order Prepared Successfully!"}
-            </div>
-            <div style={{ marginTop: 8 }}>
-              <b>{lang === "ar" ? "رقم الطلب:" : "Order Number:"}</b> {orderInfo.orderNumber}
-            </div>
-            <div style={{ marginTop: 8 }}>
-              <b>{lang === "ar" ? "لينك الدفع:" : "Payment Link:"}</b>
-              <input
-                type="text"
-                value={orderInfo.paymentUrl}
-                readOnly
-                style={{ width: "80%", margin: "8px 0", fontWeight: "bold", color: "#1565c0", textAlign: "center" }}
-                onClick={e => e.target.select()}
-              />
-              <button
-                style={{ padding: "6px 12px", marginLeft: "8px" }}
-                onClick={() => {
-                  navigator.clipboard.writeText(orderInfo.paymentUrl);
-                  alert(lang === "ar" ? "تم نسخ الرابط!" : "Link copied!");
-                }}
-              >
-                {lang === "ar" ? "نسخ الرابط" : "Copy Link"}
-              </button>
-            </div>
-            <div style={{ marginTop: 8, color: "#333", fontSize: "14px", fontWeight: "normal" }}>
-              {lang === "ar"
-                ? "يرجى إرسال الرابط للعميل للدفع. الطلب النهائي لن يُنشأ إلا بعد الدفع."
-                : "Please send the link to the client for payment. The final order will be created only after payment."}
-            </div>
-          </div>
-        )}
-      </div>
-      <ServiceUploadModal
-        open={uploadModalOpen}
-        onClose={() => setUploadModalOpen(false)}
-        service={selectedService}
-        userId={client?.customerId}
-        lang={lang}
-        setUploadedDocs={setUploadedDocs}
-        uploadedDocs={uploadedDocs}
-        requiredDocs={requiredDocs.map((doc, idx) => `doc_${idx}`)}
-        displayDocs={requiredDocs.map(doc => typeof doc === "string" ? doc : (doc.ar || doc.en || doc.name || doc.label || ""))}
-        onAllDocsUploaded={() => { setUploadModalOpen(false); setAllDocsUploaded(true); }}
-      />
-    </div>
-  );
-}
 
   function getCurrentTypeLabel() {
     const found = PREFIXES.find(p => p.key === prefix);
@@ -640,4 +637,3 @@ function ServiceDetailsBox() {
     </div>
   );
 }
-
