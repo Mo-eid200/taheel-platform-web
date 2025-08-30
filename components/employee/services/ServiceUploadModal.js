@@ -24,25 +24,19 @@ export default function ServiceUploadModal({
   const docItems = useMemo(() => {
     const list = Array.isArray(requiredDocs) ? requiredDocs : [];
     return list.map((key, i) => {
-      const rawLabel =
-        Array.isArray(displayDocs) && typeof displayDocs[i] !== "undefined"
-          ? displayDocs[i]
-          : key;
-      const label =
-        typeof rawLabel === "string"
-          ? rawLabel
-          : JSON.stringify(rawLabel ?? "");
+      const rawLabel = Array.isArray(displayDocs) && typeof displayDocs[i] !== "undefined" ? displayDocs[i] : key;
+      const label = typeof rawLabel === "string" ? rawLabel : JSON.stringify(rawLabel ?? "");
       return { key: String(key), label: String(label || key) };
     });
   }, [requiredDocs, displayDocs]);
 
-  // عند اكتمال رفع كل المطلوب
+  // تحقق إذا تم رفع كل المستندات
   useEffect(() => {
     if (!open) return;
-    const allUploaded =
-      docItems.length > 0 && docItems.every((d) => !!uploadedDocs[d.key]);
+    const allUploaded = docItems.length > 0 && docItems.every((d) => !!uploadedDocs[d.key]);
     if (allUploaded && typeof onAllDocsUploaded === "function") {
       onAllDocsUploaded();
+      // لا تغلق المودال تلقائيًا! خلي الموظف يغلقه بنفسه
     }
   }, [uploadedDocs, docItems, open, onAllDocsUploaded]);
 
@@ -55,47 +49,25 @@ export default function ServiceUploadModal({
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
-    return () =>
-      document.removeEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [open, onClose]);
 
-  // عند فتح المودال، أعد تهيئة الرسائل المؤقتة
-  useEffect(() => {
-    if (open) {
-      setMsg({});
-      setError({});
-      setSelectedFiles({});
-      // لا تفرغ uploadedDocs هنا حتى لا يمسح الملفات بعد الرفع!
-    }
-  }, [open]);
-
-  if (!open) return null;
-
-  function handleFileChange(e, docKey) {
+  // استبدال مستند مرفوع
+  function handleReplaceFile(docKey) {
     setError((prev) => ({ ...prev, [docKey]: "" }));
     setMsg((prev) => ({ ...prev, [docKey]: "" }));
-    const file = e.target.files?.[0];
-    if (!file) {
-      setSelectedFiles((prev) => ({ ...prev, [docKey]: null }));
-      return;
+    setSelectedFiles((prev) => ({ ...prev, [docKey]: null }));
+    if (fileRefs.current[docKey]) fileRefs.current[docKey].value = null;
+    if (setUploadedDocs) {
+      setUploadedDocs((prev) => {
+        const newDocs = { ...(prev || uploadedDocs || {}) };
+        delete newDocs[docKey];
+        return newDocs;
+      });
     }
-    const isPdf =
-      file.type === "application/pdf" ||
-      file.name?.toLowerCase().endsWith(".pdf");
-    if (!isPdf) {
-      setError((prev) => ({
-        ...prev,
-        [docKey]: lang === "ar"
-          ? "يرجى رفع ملف PDF فقط"
-          : "Please upload a PDF file only.",
-      }));
-      if (fileRefs.current[docKey]) fileRefs.current[docKey].value = null;
-      setSelectedFiles((prev) => ({ ...prev, [docKey]: null }));
-      return;
-    }
-    setSelectedFiles((prev) => ({ ...prev, [docKey]: file }));
   }
 
+  // رفع الملف
   async function handleUpload(e, docKey) {
     e.preventDefault();
     setError((prev) => ({ ...prev, [docKey]: "" }));
@@ -105,9 +77,7 @@ export default function ServiceUploadModal({
     if (!file) {
       setError((prev) => ({
         ...prev,
-        [docKey]: lang === "ar"
-          ? "يجب اختيار ملف PDF"
-          : "Please select a PDF file.",
+        [docKey]: lang === "ar" ? "يجب اختيار ملف PDF" : "Please select a PDF file.",
       }));
       return;
     }
@@ -126,16 +96,13 @@ export default function ServiceUploadModal({
         method: "POST",
         body: formData,
       });
-
       let data;
       try {
         data = await res.json();
       } catch {
         setError((prev) => ({
           ...prev,
-          [docKey]: lang === "ar"
-            ? "استجابة غير صحيحة من السيرفر."
-            : "Invalid server response.",
+          [docKey]: lang === "ar" ? "استجابة غير صحيحة من السيرفر." : "Invalid server response.",
         }));
         setUploading((prev) => ({ ...prev, [docKey]: false }));
         return;
@@ -154,9 +121,7 @@ export default function ServiceUploadModal({
 
         setMsg((prev) => ({
           ...prev,
-          [docKey]: lang === "ar"
-            ? "تم رفع الملف بنجاح!"
-            : "File uploaded successfully!",
+          [docKey]: lang === "ar" ? "تم رفع الملف بنجاح!" : "File uploaded successfully!",
         }));
 
         setSelectedFiles((prev) => ({ ...prev, [docKey]: null }));
@@ -171,37 +136,39 @@ export default function ServiceUploadModal({
       } else {
         setError((prev) => ({
           ...prev,
-          [docKey]:
-            data?.error ||
-            (lang === "ar"
-              ? "حدث خطأ أثناء رفع الملف."
-              : "An error occurred during upload."),
+          [docKey]: data?.error || (lang === "ar" ? "حدث خطأ أثناء رفع الملف." : "An error occurred during upload."),
         }));
       }
     } catch {
       setError((prev) => ({
         ...prev,
-        [docKey]: lang === "ar"
-          ? "حدث خطأ أثناء رفع الملف."
-          : "An error occurred during upload.",
+        [docKey]: lang === "ar" ? "حدث خطأ أثناء رفع الملف." : "An error occurred during upload.",
       }));
     }
 
     setUploading((prev) => ({ ...prev, [docKey]: false }));
   }
 
-  function handleReplaceFile(docKey) {
+  // عند اختيار ملف جديد
+  function handleFileChange(e, docKey) {
     setError((prev) => ({ ...prev, [docKey]: "" }));
     setMsg((prev) => ({ ...prev, [docKey]: "" }));
-    setSelectedFiles((prev) => ({ ...prev, [docKey]: null }));
-    if (fileRefs.current[docKey]) fileRefs.current[docKey].value = null;
-    if (setUploadedDocs) {
-      setUploadedDocs((prev) => {
-        const newDocs = { ...(prev || uploadedDocs || {}) };
-        delete newDocs[docKey];
-        return newDocs;
-      });
+    const file = e.target.files?.[0];
+    if (!file) {
+      setSelectedFiles((prev) => ({ ...prev, [docKey]: null }));
+      return;
     }
+    const isPdf = file.type === "application/pdf" || file.name?.toLowerCase().endsWith(".pdf");
+    if (!isPdf) {
+      setError((prev) => ({
+        ...prev,
+        [docKey]: lang === "ar" ? "يرجى رفع ملف PDF فقط" : "Please upload a PDF file only.",
+      }));
+      if (fileRefs.current[docKey]) fileRefs.current[docKey].value = null;
+      setSelectedFiles((prev) => ({ ...prev, [docKey]: null }));
+      return;
+    }
+    setSelectedFiles((prev) => ({ ...prev, [docKey]: file }));
   }
 
   return (
@@ -225,11 +192,10 @@ export default function ServiceUploadModal({
           {lang === "ar" ? "رفع المستندات المطلوبة" : "Upload Required Documents"}
         </div>
         <div className="text-sm text-gray-500 text-center mb-4 px-2 max-w-[90%]">
-          {lang === "ar"
-            ? "يرجى رفع ملف PDF فقط لكل مستند مطلوب."
-            : "Please upload only a PDF file for each required document."}
+          {lang === "ar" ? "يرجى رفع ملف PDF فقط لكل مستند مطلوب." : "Please upload only a PDF file for each required document."}
         </div>
 
+        {/* نموذج رفع المستندات */}
         <form className="flex flex-col items-center w-full gap-3 mt-1">
           {docItems.map(({ key: docKey, label }, idx) => {
             const isUploading = !!uploading[docKey];
@@ -237,10 +203,7 @@ export default function ServiceUploadModal({
             const hasUploaded = !!uploadedDocs[docKey];
 
             return (
-              <div
-                key={docKey}
-                className="w-full flex flex-col items-center p-3 rounded-xl border border-cyan-100 bg-cyan-50 shadow mb-2 transition-all duration-200 hover:shadow-lg"
-              >
+              <div key={docKey} className="w-full flex flex-col items-center p-3 rounded-xl border border-cyan-100 bg-cyan-50 shadow mb-2 transition-all duration-200 hover:shadow-lg">
                 <div className="font-bold text-cyan-700 mb-1 w-full text-center">
                   {label || docKey}
                 </div>
@@ -273,7 +236,6 @@ export default function ServiceUploadModal({
                         </div>
                       )}
                     </label>
-
                     <button
                       type="button"
                       disabled={isUploading || !selected}
@@ -317,6 +279,7 @@ export default function ServiceUploadModal({
                   </div>
                 )}
 
+                {/* رسائل الخطأ / النجاح */}
                 {error[docKey] && (
                   <div className="text-center text-red-600 font-bold flex items-center gap-1 mt-1 text-xs">
                     <FaExclamationCircle /> {error[docKey]}
@@ -344,29 +307,6 @@ export default function ServiceUploadModal({
             ? "جميع البيانات والمستندات مشفرة وآمنة ويتم حفظها بشكل سري."
             : "All data and documents are encrypted and securely stored."}
         </div>
-        <style jsx>{`
-          .animate-fadeIn {
-            animation: fadeIn 0.7s cubic-bezier(.37,.75,.46,1) both;
-          }
-          .animate-fadeInUp {
-            animation: fadeInUp 0.7s cubic-bezier(.37,.75,.46,1) both;
-          }
-          .animate-zoomIn {
-            animation: zoomIn 0.6s cubic-bezier(.4,.8,.24,1) both;
-          }
-          @keyframes fadeIn {
-            from { opacity: 0 }
-            to   { opacity: 1 }
-          }
-          @keyframes fadeInUp {
-            from { opacity: 0; transform: translateY(20px);}
-            to   { opacity: 1; transform: translateY(0);}
-          }
-          @keyframes zoomIn {
-            from { opacity: 0; transform: scale(0.86);}
-            to   { opacity: 1; transform: scale(1);}
-          }
-        `}</style>
       </div>
     </div>
   );
