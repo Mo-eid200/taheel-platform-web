@@ -632,3 +632,4 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     </div>
   );
 }
+
