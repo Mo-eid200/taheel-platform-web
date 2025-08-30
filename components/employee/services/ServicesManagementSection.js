@@ -232,6 +232,15 @@ useEffect(() => {
 
   function ServiceDetailsBox() {
     if (!client || !selectedService) return null;
+
+    // حساب الرسوم الإضافية حسب منطقك أو بيانات الخدمة
+    const servicePrice = Number(selectedService.price) || 0;
+    const printingFee = Number(selectedService.printingFee) || 0;
+    // احسب الضريبة (مثلاً 5% من سعر الخدمة فقط)
+    const vat = +(servicePrice * 0.05).toFixed(2);
+    // المجموع الكلي
+    const total = +(servicePrice + printingFee + vat).toFixed(2);
+
     const requiredDocs = Array.isArray(selectedService.requiredDocuments)
       ? selectedService.requiredDocuments
       : (selectedService.requiredDocuments ? Object.values(selectedService.requiredDocuments) : []);
@@ -244,8 +253,8 @@ useEffect(() => {
           type="button"
           className="px-5 py-2 rounded-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-base shadow mt-3 cursor-pointer"
           onClick={() => {
-            setAllDocsUploaded(false); // ضروري لإعادة فتح المودال دائماً
-            setUploadModalOpen(true);  // فقط هنا يفتح المودال
+            setAllDocsUploaded(false);
+            setUploadModalOpen(true);
           }}
         >
           {lang === "ar" ? "رفع المستندات المطلوبة" : "Upload Required Documents"}
@@ -263,9 +272,29 @@ useEffect(() => {
             <span className="inline-block w-32 text-emerald-700">{lang === "ar" ? "الخدمة:" : "Service:"}</span>
             <span style={{ color: "#1c7ed6", fontWeight: "bold" }}>{selectedService.name}</span>
           </div>
+          {/* سعر الخدمة الأساسي */}
           <div>
             <span className="inline-block w-32 text-emerald-700">{lang === "ar" ? "السعر:" : "Price:"}</span>
-            <span>{selectedService.price} AED</span>
+            <span>{servicePrice.toFixed(2)} AED</span>
+          </div>
+          {/* تفاصيل الرسوم الإضافية والمجموع */}
+          <div className="mt-2">
+            <table className="w-full text-xs text-gray-800 font-bold border-separate border-spacing-y-1">
+              <tbody>
+                <tr>
+                  <td>{lang === "ar" ? "رسوم الطباعة" : "Printing Fee"}</td>
+                  <td className="text-right">{printingFee.toFixed(2)} AED</td>
+                </tr>
+                <tr>
+                  <td>{lang === "ar" ? "ضريبة القيمة المضافة 5%" : "VAT 5%"}</td>
+                  <td className="text-right">{vat.toFixed(2)} AED</td>
+                </tr>
+                <tr>
+                  <td className="font-extrabold text-emerald-700">{lang === "ar" ? "المجموع الكلي" : "Total"}</td>
+                  <td className="font-extrabold text-emerald-800 text-right">{total.toFixed(2)} AED</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
           <div>
             <span className="inline-block w-32 text-emerald-700">{lang === "ar" ? "الوصف:" : "Description:"}</span>
