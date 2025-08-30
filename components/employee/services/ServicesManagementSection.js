@@ -10,7 +10,6 @@ const PREFIXES = [
   { key: "COM", labelAr: "شركة", labelEn: "Company" }
 ];
 
-// دالة تطبيع النص العربي
 function normalizeArabic(text) {
   if (!text) return "";
   return text
@@ -19,7 +18,7 @@ function normalizeArabic(text) {
     .replace(/ى/g, "ي")
     .replace(/ؤ/g, "و")
     .replace(/ئ/g, "ي")
-    .replace(/ً|ٌ|ٍ|َ|ُ|ِ|ّ|ْ/g, "") // إزالة التشكيل
+    .replace(/ً|ٌ|ٍ|َ|ُ|ِ|ّ|ْ/g, "")
     .toLowerCase();
 }
 
@@ -47,7 +46,6 @@ export default function ServicesManagementSection({ employeeData, lang }) {
   const [orderCreated, setOrderCreated] = useState(false);
   const [orderInfo, setOrderInfo] = useState(null);
 
-  // جلب الخدمات الأخرى من مصدرين
   async function fetchOtherServices() {
     const q = query(collection(firestore, "services"), where("type", "==", "other"));
     const snap = await getDocs(q);
@@ -68,7 +66,6 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     setOtherServices(arr);
   }
 
-  // بحث مرن بالتطبيع العربي
   function filterFlexible(arr) {
     const searchNorm = normalizeArabic(serviceSearch.trim());
     return searchNorm
@@ -163,16 +160,16 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     const all = [...services, ...otherServices];
     const srv = all.find(s => s.id === selectedServiceId);
     setSelectedService(srv || null);
+    // ممنوع هنا تفتح المودال!
+    // setUploadModalOpen(false); // ممكن تغلق المودال عند تغيير الخدمة لو تحب
   }, [selectedServiceId, services, otherServices]);
 
-  // دالة توليد رقم تتبع (طلب)
   function generateOrderNumber() {
-    const part1 = Math.floor(100 + Math.random() * 900); // 3 أرقام
-    const part2 = Math.floor(1000 + Math.random() * 9000); // 4 أرقام
+    const part1 = Math.floor(100 + Math.random() * 900);
+    const part2 = Math.floor(1000 + Math.random() * 9000);
     return `REQ-${part1}-${part2}`;
   }
 
-  // دالة إنشاء الطلب وحفظه في فايرستور
   async function handleCreateOrder() {
     if (!client || !selectedService || !uploadedDocs || Object.keys(uploadedDocs).length === 0) {
       alert(lang === "ar" ? "يجب رفع كل المستندات أولاً." : "Please upload all required documents first.");
@@ -188,16 +185,13 @@ export default function ServicesManagementSection({ employeeData, lang }) {
         serviceId: selectedService.id,
         serviceName: selectedService.name,
         price: selectedService.price,
-        uploadedDocs, // روابط المستندات
+        uploadedDocs,
         status: "pending_payment",
         createdAt: new Date().toISOString(),
       };
 
-      // إنشاء الطلب في فايرستور
       await addDoc(collection(firestore, "orders"), orderData);
 
-      // هنا ممكن توليد لينك دفع حقيقي حسب النظام (Stripe, PayTabs...)
-      // بشكل تجريبي نرسل لينك وهمي
       const paymentUrl = "https://payment.example.com/pay?order=" + orderNumber;
 
       setOrderCreated(true);
@@ -240,21 +234,21 @@ export default function ServicesManagementSection({ employeeData, lang }) {
       : (selectedService.requiredDocuments ? Object.values(selectedService.requiredDocuments) : []);
     const requireUpload = selectedService.requireUpload || requiredDocs.length > 0;
 
-function UploadDocButton() {
-  if (!selectedService || requiredDocs.length === 0) return null;
-  return (
-    <button
-      type="button"
-      className="px-5 py-2 rounded-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-base shadow mt-3 cursor-pointer"
-      onClick={() => {
-        setAllDocsUploaded(false); // ضروري!
-        setUploadModalOpen(true);  // يفتح المودال دائماً
-      }}
-    >
-      {lang === "ar" ? "رفع المستندات المطلوبة" : "Upload Required Documents"}
-    </button>
-  );
-}
+    function UploadDocButton() {
+      if (!selectedService || requiredDocs.length === 0) return null;
+      return (
+        <button
+          type="button"
+          className="px-5 py-2 rounded-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-base shadow mt-3 cursor-pointer"
+          onClick={() => {
+            setAllDocsUploaded(false); // ضروري لإعادة فتح المودال دائماً
+            setUploadModalOpen(true);  // فقط هنا يفتح المودال
+          }}
+        >
+          {lang === "ar" ? "رفع المستندات المطلوبة" : "Upload Required Documents"}
+        </button>
+      );
+    }
 
     return (
       <div className="w-full rounded-xl overflow-hidden shadow border border-emerald-100 bg-white animate-fade-in">
@@ -284,7 +278,6 @@ function UploadDocButton() {
               </ul>
               <UploadDocButton />
 
-              {/* زر توليد الطلب يظهر فقط بعد اكتمال رفع المستندات */}
               {allDocsUploaded && !orderCreated && (
                 <button
                   type="button"
@@ -295,7 +288,6 @@ function UploadDocButton() {
                 </button>
               )}
 
-              {/* بعد إنشاء الطلب أظهر رقم الطلب واللينك */}
               {orderCreated && orderInfo && (
                 <div className="mt-4 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 shadow text-center font-bold text-lg text-emerald-700">
                   <div>
@@ -341,7 +333,6 @@ function UploadDocButton() {
     return found ? (lang === "ar" ? found.labelAr : found.labelEn) : "";
   }
 
-  // قائمة الخدمات المنسدلة مع تقسيم فرعي واضح
   function ServicesDropdown() {
     return (
       <div ref={dropdownRef} className="relative w-full">
@@ -401,7 +392,6 @@ function UploadDocButton() {
                 }}
               />
             </div>
-            {/* قائمة فرعية: خدمات الفئة الحالية */}
             <div>
               <div className="px-3 py-1 font-bold text-emerald-700 text-sm bg-white border-b" style={{background:"#f1f8fc"}}>
                 {lang === "ar" ? `خدمات ${getCurrentTypeLabel()}` : `Services ${getCurrentTypeLabel()}`}
@@ -432,7 +422,6 @@ function UploadDocButton() {
                 <div className="px-4 py-1 text-gray-400 text-center">{lang === "ar" ? "لا يوجد خدمات مطابقة" : "No matching services found"}</div>
               )}
             </div>
-            {/* قائمة فرعية: خدمات أخرى */}
             <div>
               <div className="px-3 py-1 font-bold text-emerald-700 text-sm bg-white border-b" style={{background:"#f8e9e9"}}>
                 {lang === "ar" ? "خدمات أخرى" : "Other Services"}

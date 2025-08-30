@@ -20,7 +20,6 @@ export default function ServiceUploadModal({
   const [error, setError] = useState({});
   const [selectedFiles, setSelectedFiles] = useState({});
 
-  // دمج المفاتيح مع عناوين العرض
   const docItems = useMemo(() => {
     const list = Array.isArray(requiredDocs) ? requiredDocs : [];
     return list.map((key, i) => {
@@ -30,10 +29,8 @@ export default function ServiceUploadModal({
     });
   }, [requiredDocs, displayDocs]);
 
-  // تحقق إذا تم رفع كل المستندات المطلوبة
   const allUploaded = docItems.length > 0 && docItems.every((d) => !!uploadedDocs[d.key]);
 
-  // إغلاق المودال عند الضغط خارج
   useEffect(() => {
     if (!open) return;
     function handleClickOutside(e) {
@@ -45,7 +42,6 @@ export default function ServiceUploadModal({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [open, onClose]);
 
-  // عند فتح المودال من جديد: أفرغ الأخطاء والرسائل والملفات المؤقتة
   useEffect(() => {
     if (open) {
       setUploading({});
@@ -158,7 +154,6 @@ export default function ServiceUploadModal({
     setUploading((prev) => ({ ...prev, [docKey]: false }));
   }
 
-  // استبدال مستند مرفوع
   function handleReplaceFile(docKey) {
     setError((prev) => ({ ...prev, [docKey]: "" }));
     setMsg((prev) => ({ ...prev, [docKey]: "" }));
@@ -180,13 +175,11 @@ export default function ServiceUploadModal({
         className="relative bg-gradient-to-br from-cyan-50 via-white to-cyan-100 rounded-3xl shadow-2xl px-6 py-8 w-full max-w-md border border-cyan-200 flex flex-col items-center"
         style={{ maxHeight: "calc(100vh - 60px)", minHeight: "340px", overflowY: "auto" }}
       >
-        {/* زر الإغلاق */}
         <button
           className="absolute top-3 right-3 bg-gray-100 hover:bg-red-500 text-gray-400 hover:text-white rounded-full w-8 h-8 flex items-center justify-center text-xl shadow transition duration-200 cursor-pointer"
           onClick={onClose}
           title={lang === "ar" ? "إغلاق" : "Close"}
           type="button"
-          style={{ cursor: "pointer" }}
         >
           <FaTimes />
         </button>
@@ -300,7 +293,6 @@ export default function ServiceUploadModal({
           })}
         </form>
 
-        {/* إذا رفعت كل المستندات المطلوبة، أظهر زر موافق لإغلاق المودال */}
         {allUploaded && (
           <button
             className="mt-4 px-7 py-2 bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-white rounded-xl font-bold shadow transition duration-200 cursor-pointer"
@@ -329,29 +321,6 @@ export default function ServiceUploadModal({
             ? "جميع البيانات والمستندات مشفرة وآمنة ويتم حفظها بشكل سري."
             : "All data and documents are encrypted and securely stored."}
         </div>
-        <style jsx>{`
-          .animate-fadeIn {
-            animation: fadeIn 0.7s cubic-bezier(.37,.75,.46,1) both;
-          }
-          .animate-fadeInUp {
-            animation: fadeInUp 0.7s cubic-bezier(.37,.75,.46,1) both;
-          }
-          .animate-zoomIn {
-            animation: zoomIn 0.6s cubic-bezier(.4,.8,.24,1) both;
-          }
-          @keyframes fadeIn {
-            from { opacity: 0 }
-            to   { opacity: 1 }
-          }
-          @keyframes fadeInUp {
-            from { opacity: 0; transform: translateY(20px);}
-            to   { opacity: 1; transform: translateY(0);}
-          }
-          @keyframes zoomIn {
-            from { opacity: 0; transform: scale(0.86);}
-            to   { opacity: 1; transform: scale(1);}
-          }
-        `}</style>
       </div>
     </div>
   );
