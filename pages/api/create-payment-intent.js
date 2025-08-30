@@ -35,6 +35,10 @@ export default async function handler(req, res) {
     providers = [],
     coinsUsed = 0,
     coinsGiven = 0,
+    assignedTo = "",       // معرف الموظف لو الطلب من الموظف
+    assignedToName = "",   // اسم الموظف
+    status = "pending",    // الحالة الابتدائية
+    employeeData = {},     // بيانات الموظف الإضافية إذا احتجت
   } = req.body;
 
   if (!amount || !serviceName || !customerId || !userEmail) {
@@ -64,10 +68,21 @@ export default async function handler(req, res) {
       coinsUsed,
       coinsGiven,
       createdAt: new Date().toISOString(),
-      status: "pending",
+      lastUpdated: new Date().toISOString(),
+      status,
       userEmail,
       attachments,
       providers,
+      assignedTo,
+      assignedToName,
+      employeeData,
+      statusHistory: [
+        {
+          status,
+          timestamp: new Date().toISOString(),
+          updatedBy: assignedToName || userEmail || "system"
+        }
+      ]
     });
 
     // أرجع clientSecret ورقم الطلب للواجهة
