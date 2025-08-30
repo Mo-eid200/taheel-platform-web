@@ -10,34 +10,28 @@ const PREFIXES = [
 ];
 
 export default function ServicesManagementSection({ employeeData, lang }) {
-  // البحث
   const [prefix, setPrefix] = useState("RES");
   const [clientNumber, setClientNumber] = useState("");
   const [fullClientId, setFullClientId] = useState("");
   const [client, setClient] = useState(null);
 
-  // الخدمات
   const [services, setServices] = useState([]);
   const [otherServices, setOtherServices] = useState([]);
   const [selectedServiceId, setSelectedServiceId] = useState("");
   const [selectedService, setSelectedService] = useState(null);
 
-  // فلترة الخدمات بالاسم
   const [serviceSearch, setServiceSearch] = useState("");
-  // قائمة منسدلة للخدمات
   const [servicesDropdownOpen, setServicesDropdownOpen] = useState(false);
   const dropdownRef = useRef();
 
-  // دمج الخدمات الأخرى من مصدرين: مجموعة services و servicesByClientType.other
+  // جلب الخدمات الأخرى من مصدرين
   async function fetchOtherServices() {
-    // جلب من مجموعة services (type == other)
     const q = query(collection(firestore, "services"), where("type", "==", "other"));
     const snap = await getDocs(q);
     let arr = [];
     snap.forEach(doc => {
       arr.push({ id: doc.id, ...doc.data() });
     });
-    // جلب من servicesByClientType > other
     const docRef = doc(firestore, "servicesByClientType", "other");
     const snapOther = await getDoc(docRef);
     if (snapOther.exists()) {
@@ -47,38 +41,28 @@ export default function ServicesManagementSection({ employeeData, lang }) {
         .map(([key, val]) => ({ id: key, ...val }));
       arr = arr.concat(otherArr);
     }
-    // فلترة التكرار بالـ id
     arr = arr.filter((srv, idx, self) => self.findIndex(s => s.id === srv.id) === idx);
     setOtherServices(arr);
   }
 
-  // فلترة الخدمات حسب البحث (مرونة عالية: يشمل كل الخدمات)
-  const filteredServices = serviceSearch.trim()
-    ? services.filter(
+  // البحث المرن باسم الخدمة أو جهة الخدمة
+  function filterFlexible(arr) {
+    return serviceSearch.trim()
+      ? arr.filter(
         s =>
           (s.name || "").toLowerCase().includes(serviceSearch.trim().toLowerCase()) ||
           (Array.isArray(s.providers)
             ? s.providers.join(", ").toLowerCase().includes(serviceSearch.trim().toLowerCase())
             : false)
       )
-    : services;
-  const filteredOtherServices = serviceSearch.trim()
-    ? otherServices.filter(
-        s =>
-          (s.name || "").toLowerCase().includes(serviceSearch.trim().toLowerCase()) ||
-          (Array.isArray(s.providers)
-            ? s.providers.join(", ").toLowerCase().includes(serviceSearch.trim().toLowerCase())
-            : false)
-      )
-    : otherServices;
+      : arr;
+  }
+  const filteredServices = filterFlexible(services);
+  const filteredOtherServices = filterFlexible(otherServices);
 
-  // إغلاق القائمة عند الضغط خارجها
   useEffect(() => {
     function handleClick(e) {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(e.target)
-      ) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
         setServicesDropdownOpen(false);
       }
     }
@@ -88,7 +72,6 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     return () => document.removeEventListener("mousedown", handleClick);
   }, [servicesDropdownOpen]);
 
-  // إضافة "-" بعد أول 3 أرقام
   function handleClientNumberChange(e) {
     let value = e.target.value.replace(/\D/g, "");
     if (value.length > 7) value = value.slice(0, 7);
@@ -99,7 +82,6 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     setClientNumber(formatted);
   }
 
-  // الضغط على زر البحث
   async function handleSearch(e) {
     e.preventDefault();
     const isValid = /^\d{3}-\d{4}$/.test(clientNumber);
@@ -135,12 +117,10 @@ export default function ServicesManagementSection({ employeeData, lang }) {
   async function fetchServicesForType(type) {
     if (!type) return setServices([]);
     const clientType = String(type).toLowerCase();
-    // جلب الوثيقة نفسها
     const docRef = doc(firestore, "servicesByClientType", clientType);
     const snap = await getDoc(docRef);
     if (snap.exists()) {
       const data = snap.data();
-      // استخراج كل الحقول التي تبدأ بـ service و active = true
       const servicesArr = Object.entries(data)
         .filter(([key, val]) => key.startsWith("service") && val.active)
         .map(([key, val]) => ({ id: key, ...val }));
@@ -157,7 +137,6 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     setSelectedService(srv || null);
   }, [selectedServiceId, services, otherServices]);
 
-  // بيانات العميل فقط (بدون تفاصيل خدمة)
   function ClientInfoBox() {
     if (!client) return null;
     return (
@@ -183,7 +162,6 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     );
   }
 
-  // تفاصيل الخدمة (تظهر فقط بعد اختيار خدمة)
   function ServiceDetailsBox() {
     if (!client || !selectedService) return null;
     const requiredDocs = Array.isArray(selectedService.requiredDocuments)
@@ -246,13 +224,12 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     );
   }
 
-  // اسم الفئة
   function getCurrentTypeLabel() {
     const found = PREFIXES.find(p => p.key === prefix);
     return found ? (lang === "ar" ? found.labelAr : found.labelEn) : "";
   }
 
-  // قائمة الخدمات المخصصة
+  // قائمة الخدمات المنسدلة مع تقسيم فرعي واضح
   function ServicesDropdown() {
     return (
       <div ref={dropdownRef} className="relative w-full">
@@ -306,15 +283,19 @@ export default function ServicesManagementSection({ employeeData, lang }) {
                 style={{
                   fontSize: "18px",
                   color: "#153A6B", // كحلي واضح
-                  backgroundColor: "#f8f9fb"
+                  backgroundColor: "#f8f9fb",
+                  fontWeight: 700,
+                  letterSpacing: "1px"
                 }}
               />
             </div>
-            {/* خدمات الفئة */}
-            {filteredServices.length > 0 && (
-              <div>
-                <div className="px-3 py-1 font-bold text-emerald-700 text-sm bg-white border-b">{lang === "ar" ? `خدمات ${getCurrentTypeLabel()}` : `Services ${getCurrentTypeLabel()}`}</div>
-                {filteredServices.map(s => (
+            {/* قائمة فرعية: خدمات الفئة الحالية */}
+            <div>
+              <div className="px-3 py-1 font-bold text-emerald-700 text-sm bg-white border-b" style={{background:"#f1f8fc"}}>
+                {lang === "ar" ? `خدمات ${getCurrentTypeLabel()}` : `Services ${getCurrentTypeLabel()}`}
+              </div>
+              {filteredServices.length > 0 ? (
+                filteredServices.map(s => (
                   <div
                     key={s.id}
                     className="flex flex-row items-center px-3 py-2 cursor-pointer hover:bg-emerald-50"
@@ -334,14 +315,18 @@ export default function ServicesManagementSection({ employeeData, lang }) {
                       </span>
                     )}
                   </div>
-                ))}
+                ))
+              ) : (
+                <div className="px-4 py-1 text-gray-400 text-center">{lang === "ar" ? "لا يوجد خدمات مطابقة" : "No matching services found"}</div>
+              )}
+            </div>
+            {/* قائمة فرعية: خدمات أخرى */}
+            <div>
+              <div className="px-3 py-1 font-bold text-emerald-700 text-sm bg-white border-b" style={{background:"#f8e9e9"}}>
+                {lang === "ar" ? "خدمات أخرى" : "Other Services"}
               </div>
-            )}
-            {/* خدمات أخرى - تظهر للجميع */}
-            {filteredOtherServices.length > 0 && (
-              <div>
-                <div className="px-3 py-1 font-bold text-emerald-700 text-sm bg-white border-b">{lang === "ar" ? "خدمات أخرى" : "Other Services"}</div>
-                {filteredOtherServices.map(s => (
+              {filteredOtherServices.length > 0 ? (
+                filteredOtherServices.map(s => (
                   <div
                     key={s.id}
                     className="flex flex-row items-center px-3 py-2 cursor-pointer hover:bg-emerald-50"
@@ -361,20 +346,17 @@ export default function ServicesManagementSection({ employeeData, lang }) {
                       </span>
                     )}
                   </div>
-                ))}
-              </div>
-            )}
-            {/* إذا لا يوجد اقتراحات */}
-            {filteredServices.length === 0 && filteredOtherServices.length === 0 && (
-              <div className="px-4 py-4 text-gray-400 text-center font-bold">{lang === "ar" ? "لا يوجد خدمات مطابقة" : "No matching services found"}</div>
-            )}
+                ))
+              ) : (
+                <div className="px-4 py-1 text-gray-400 text-center">{lang === "ar" ? "لا يوجد خدمات مطابقة" : "No matching services found"}</div>
+              )}
+            </div>
           </div>
         )}
       </div>
     );
   }
 
-  // الشكل النهائي
   return (
     <div className="w-full max-w-4xl mx-auto">
       <h2 className="text-xl sm:text-2xl font-extrabold text-emerald-700 mb-6 text-center tracking-tight drop-shadow">
@@ -385,7 +367,6 @@ export default function ServicesManagementSection({ employeeData, lang }) {
         style={{ minHeight: 80 }}
         onSubmit={handleSearch}
       >
-        {/* نوع العميل */}
         <div className="flex flex-col items-start" style={{ width: "120px", minWidth: "90px" }}>
           <label className="font-bold text-emerald-700 mb-1 text-sm">{lang === "ar" ? "نوع العميل" : "Client Type"}</label>
           <select
@@ -399,7 +380,6 @@ export default function ServicesManagementSection({ employeeData, lang }) {
             ))}
           </select>
         </div>
-        {/* رقم العميل */}
         <div className="flex flex-col items-start" style={{ width: "290px", minWidth: "160px" }}>
           <label className="font-bold text-emerald-700 mb-1 text-sm">{lang === "ar" ? "رقم العميل" : "Client Number"}</label>
           <div className="relative w-full flex flex-row items-center">
@@ -424,13 +404,11 @@ export default function ServicesManagementSection({ employeeData, lang }) {
             </button>
           </div>
         </div>
-        {/* الخدمات (Dropdown مخصص) */}
         <div className="flex flex-col items-start flex-1" style={{ minWidth: "350px" }}>
           <label className="font-bold text-emerald-700 mb-1 text-sm">{lang === "ar" ? "الخدمة" : "Service"}</label>
           <ServicesDropdown />
         </div>
       </form>
-      {/* بيانات العميل تظهر بعد البحث */}
       <div className="rounded-xl bg-white/95 p-4 shadow-lg border border-emerald-100 mt-4">
         {client && <ClientInfoBox />}
         {client && selectedService && <ServiceDetailsBox />}
