@@ -180,7 +180,7 @@ export default function ServicesManagementSection({ employeeData, lang }) {
         <div className="px-4 py-4 grid grid-cols-1 gap-3 text-base font-semibold text-gray-800">
           <div>
             <span className="inline-block w-32 text-emerald-700">{lang === "ar" ? "الخدمة:" : "Service:"}</span>
-            <span>{selectedService.name}</span>
+            <span style={{ color: "#c41e1e", fontWeight: "bold" }}>{selectedService.name}</span>
           </div>
           <div>
             <span className="inline-block w-32 text-emerald-700">{lang === "ar" ? "السعر:" : "Price:"}</span>
@@ -265,53 +265,68 @@ export default function ServicesManagementSection({ employeeData, lang }) {
         {/* الخدمة (Autocomplete + تقسيم العرض) */}
         <div className="flex flex-col items-start flex-1" style={{ minWidth: "350px" }}>
           <label className="font-bold text-emerald-700 mb-1 text-sm">{lang === "ar" ? "الخدمة" : "Service"}</label>
-          <input
-            type="text"
-            value={serviceSearch}
-            onChange={e => setServiceSearch(e.target.value)}
-            placeholder={lang === "ar" ? "اكتب اسم الخدمة..." : "Type service name..."}
-            className="border-2 rounded-lg px-2 py-1 w-full shadow focus:outline-emerald-500 text-base font-bold text-emerald-900 bg-white mb-2"
-            style={{ height: 38, fontSize: "18px" }}
-            disabled={!client}
-            autoComplete="off"
-          />
-          <select
-            className="border-2 rounded-lg px-2 py-1 shadow text-base font-bold text-emerald-900 bg-white w-full"
-            value={selectedServiceId}
-            onChange={e => setSelectedServiceId(e.target.value)}
-            disabled={!client}
-            style={{ height: 38, fontSize: "18px" }}
-          >
-            <option value="">{lang === "ar" ? "-- اختر الخدمة --" : "-- Select Service --"}</option>
-            {/* قسم خدمات الفئة الحالية */}
-            {filteredServices.length > 0 && (
-              <optgroup label={`${lang === "ar" ? "خدمات" : "Services"} ${getCurrentTypeLabel()}`}>
-                {filteredServices.map(s => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                    {s.providers && Array.isArray(s.providers) && s.providers.length > 0
-                      ? ` | ${lang === "ar" ? "البروفايدر:" : "Provider:"} ${s.providers.join(", ")}`
-                      : ""
-                    }
-                  </option>
-                ))}
-              </optgroup>
-            )}
-            {/* قسم الخدمات الأخرى */}
-            {filteredOtherServices.length > 0 && (
-              <optgroup label={lang === "ar" ? "خدمات أخرى" : "Other Services"}>
-                {filteredOtherServices.map(s => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                    {s.providers && Array.isArray(s.providers) && s.providers.length > 0
-                      ? ` | ${lang === "ar" ? "البروفايدر:" : "Provider:"} ${s.providers.join(", ")}`
-                      : ""
-                    }
-                  </option>
-                ))}
-              </optgroup>
-            )}
-          </select>
+          <div className="w-full relative">
+            <select
+              className="border-2 rounded-lg px-2 py-1 shadow text-base font-bold text-emerald-900 bg-white w-full"
+              value={selectedServiceId}
+              onChange={e => setSelectedServiceId(e.target.value)}
+              disabled={!client}
+              style={{ height: 38, fontSize: "18px" }}
+            >
+              <option value="">{lang === "ar" ? "-- اختر الخدمة --" : "-- Select Service --"}</option>
+              {/* قسم خدمات الفئة الحالية */}
+              {filteredServices.length > 0 && (
+                <optgroup label={`${lang === "ar" ? "خدمات" : "Services"} ${getCurrentTypeLabel()}`}>
+                  {filteredServices.map(s => (
+                    <option key={s.id} value={s.id}>
+                      <span style={{ color: "#c41e1e", fontWeight: "bold" }}>{s.name}</span>
+                      {s.providers && Array.isArray(s.providers) && s.providers.length > 0
+                        ? ` | ${lang === "ar" ? "جهة الخدمة:" : "Provider:"} `
+                          + s.providers.map((p, i) =>
+                            <span key={i} style={{ color: "red", fontWeight: "bold" }}>{p}</span>
+                          ).join(", ")
+                        : ""
+                      }
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {/* قسم الخدمات الأخرى */}
+              {filteredOtherServices.length > 0 && (
+                <optgroup label={lang === "ar" ? "خدمات أخرى" : "Other Services"}>
+                  {filteredOtherServices.map(s => (
+                    <option key={s.id} value={s.id}>
+                      <span style={{ color: "#c41e1e", fontWeight: "bold" }}>{s.name}</span>
+                      {s.providers && Array.isArray(s.providers) && s.providers.length > 0
+                        ? ` | ${lang === "ar" ? "جهة الخدمة:" : "Provider:"} `
+                          + s.providers.map((p, i) =>
+                            <span key={i} style={{ color: "red", fontWeight: "bold" }}>{p}</span>
+                          ).join(", ")
+                        : ""
+                      }
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+            {/* حقل البحث يظهر داخل حقل الخدمات (position absolute) */}
+            <input
+              type="text"
+              value={serviceSearch}
+              onChange={e => setServiceSearch(e.target.value)}
+              placeholder={lang === "ar" ? "اكتب اسم الخدمة..." : "Type service name..."}
+              className="absolute top-1 right-1 left-1 border-2 rounded-lg px-2 py-1 shadow text-base font-bold bg-white"
+              style={{
+                height: 34,
+                fontSize: "16px",
+                zIndex: 2,
+                margin: "2px 0",
+                pointerEvents: !client ? "none" : "auto",
+              }}
+              disabled={!client}
+              autoComplete="off"
+            />
+          </div>
         </div>
       </form>
       {/* بيانات العميل تظهر بعد البحث */}
