@@ -244,12 +244,16 @@ export default function ServicesManagementSection({ employeeData, lang }) {
       if (!selectedService || requiredDocs.length === 0) return null;
       return (
         <button
-          type="button"
-          className="px-5 py-2 rounded-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-base shadow mt-3"
-          onClick={() => setUploadModalOpen(true)}
-        >
-          {lang === "ar" ? "رفع المستندات المطلوبة" : "Upload Required Documents"}
-        </button>
+  type="button"
+  className="px-5 py-2 rounded-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-base shadow mt-3 cursor-pointer"
+  onClick={() => {
+    setAllDocsUploaded(false); // هذا مهم جداً!
+    setUploadModalOpen(true);
+  }}
+>
+  {lang === "ar" ? "رفع المستندات المطلوبة" : "Upload Required Documents"}
+</button>
+
       );
     }
 
