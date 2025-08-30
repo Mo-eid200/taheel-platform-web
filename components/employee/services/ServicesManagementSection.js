@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { FaSearch } from "react-icons/fa";
 import { firestore } from "@/lib/firebase.client";
 import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
@@ -24,6 +24,10 @@ export default function ServicesManagementSection({ employeeData, lang }) {
 
   // فلترة الخدمات بالاسم
   const [serviceSearch, setServiceSearch] = useState("");
+  // قائمة منسدلة للخدمات
+  const [servicesDropdownOpen, setServicesDropdownOpen] = useState(false);
+  const dropdownRef = useRef();
+
   const filteredServices = serviceSearch.trim()
     ? services.filter(s =>
         (s.name || "").toLowerCase().includes(serviceSearch.trim().toLowerCase())
@@ -34,6 +38,22 @@ export default function ServicesManagementSection({ employeeData, lang }) {
         (s.name || "").toLowerCase().includes(serviceSearch.trim().toLowerCase())
       )
     : otherServices;
+
+  // إغلاق القائمة عند الضغط خارجها
+  useEffect(() => {
+    function handleClick(e) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target)
+      ) {
+        setServicesDropdownOpen(false);
+      }
+    }
+    if (servicesDropdownOpen) {
+      document.addEventListener("mousedown", handleClick);
+    }
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [servicesDropdownOpen]);
 
   // إضافة "-" بعد أول 3 أرقام
   function handleClientNumberChange(e) {
@@ -143,19 +163,16 @@ export default function ServicesManagementSection({ employeeData, lang }) {
   // تفاصيل الخدمة (تظهر فقط بعد اختيار خدمة)
   function ServiceDetailsBox() {
     if (!client || !selectedService) return null;
-
     const requiredDocs = Array.isArray(selectedService.requiredDocuments)
       ? selectedService.requiredDocuments
       : (selectedService.requiredDocuments ? Object.values(selectedService.requiredDocuments) : []);
     const requireUpload = selectedService.requireUpload || requiredDocs.length > 0;
 
-    // زر رفع مستند منفصل لكل مستند
     function UploadDocButtons() {
       if (!requireUpload || requiredDocs.length === 0) return null;
       return (
         <div className="mt-3 flex flex-wrap gap-2">
           {requiredDocs.map((doc, idx) => {
-            // اسم المستند للعرض
             let docName = typeof doc === "string" ? doc : (doc.ar || doc.en || doc.name || doc.label || `مستند ${idx+1}`);
             return (
               <button
@@ -206,13 +223,126 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     );
   }
 
-  // تجميع اسم الفئة الحالية للعرض (مقيم/غير مقيم/شركة)
+  // اسم الفئة
   function getCurrentTypeLabel() {
     const found = PREFIXES.find(p => p.key === prefix);
     return found ? (lang === "ar" ? found.labelAr : found.labelEn) : "";
   }
 
-  // توسيع المكان الرئيسي للحقول
+  // قائمة الخدمات المخصصة
+  function ServicesDropdown() {
+    return (
+      <div ref={dropdownRef} className="relative w-full">
+        <div
+          className={`border-2 rounded-lg px-2 py-1 bg-white shadow w-full flex items-center cursor-pointer ${!client ? "opacity-60" : ""}`}
+          style={{ height: 38 }}
+          onClick={() => client && setServicesDropdownOpen(true)}
+          tabIndex={0}
+        >
+          <span className="font-bold text-emerald-900 text-base flex-1 truncate">
+            {selectedServiceId
+              ? (() => {
+                  const all = [...services, ...otherServices];
+                  const srv = all.find(s => s.id === selectedServiceId);
+                  return srv
+                    ? `${srv.name} ${
+                        srv.providers && srv.providers.length
+                          ? `| ${lang === "ar" ? "جهة الخدمة:" : "Service Authority:"} ${srv.providers.join(", ")}`
+                          : ""
+                      }`
+                    : lang === "ar"
+                    ? "-- اختر الخدمة --"
+                    : "-- Select Service --";
+                })()
+              : lang === "ar"
+              ? "-- اختر الخدمة --"
+              : "-- Select Service --"}
+          </span>
+          <span className="ml-2 text-gray-500">
+            <FaSearch />
+          </span>
+        </div>
+        {servicesDropdownOpen && client && (
+          <div
+            className="absolute left-0 right-0 z-30 bg-white border-2 border-emerald-100 rounded-lg mt-1 shadow-xl overflow-y-auto"
+            style={{ maxHeight: 330 }}
+          >
+            <div className="px-2 py-2 border-b border-gray-100 bg-gray-50">
+              <input
+                type="text"
+                value={serviceSearch}
+                onChange={e => setServiceSearch(e.target.value)}
+                autoFocus
+                className="w-full border rounded px-2 py-1 text-base font-bold focus:outline-none"
+                placeholder={lang === "ar" ? "اكتب اسم الخدمة..." : "Type service name..."}
+                style={{ fontSize: "18px" }}
+              />
+            </div>
+            {/* خدمات الفئة */}
+            {filteredServices.length > 0 && (
+              <div>
+                <div className="px-3 py-1 font-bold text-emerald-700 text-sm bg-white border-b">{lang === "ar" ? `خدمات ${getCurrentTypeLabel()}` : `Services ${getCurrentTypeLabel()}`}</div>
+                {filteredServices.map(s => (
+                  <div
+                    key={s.id}
+                    className="flex flex-row items-center px-3 py-2 cursor-pointer hover:bg-emerald-50"
+                    onClick={() => {
+                      setSelectedServiceId(s.id);
+                      setServicesDropdownOpen(false);
+                    }}
+                    style={{ borderBottom: "1px solid #f3f5f7" }}
+                  >
+                    <span style={{ color: "#c41e1e", fontWeight: "bold", fontSize: "17px" }}>{s.name}</span>
+                    {s.providers && s.providers.length > 0 && (
+                      <span
+                        className="ml-2"
+                        style={{ color: "#e53935", fontWeight: "bold", fontSize: "15px" }}
+                      >
+                        | {lang === "ar" ? "جهة الخدمة:" : "Service Authority:"} {s.providers.join(", ")}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* خدمات أخرى */}
+            {filteredOtherServices.length > 0 && (
+              <div>
+                <div className="px-3 py-1 font-bold text-emerald-700 text-sm bg-white border-b">{lang === "ar" ? "خدمات أخرى" : "Other Services"}</div>
+                {filteredOtherServices.map(s => (
+                  <div
+                    key={s.id}
+                    className="flex flex-row items-center px-3 py-2 cursor-pointer hover:bg-emerald-50"
+                    onClick={() => {
+                      setSelectedServiceId(s.id);
+                      setServicesDropdownOpen(false);
+                    }}
+                    style={{ borderBottom: "1px solid #f3f5f7" }}
+                  >
+                    <span style={{ color: "#c41e1e", fontWeight: "bold", fontSize: "17px" }}>{s.name}</span>
+                    {s.providers && s.providers.length > 0 && (
+                      <span
+                        className="ml-2"
+                        style={{ color: "#e53935", fontWeight: "bold", fontSize: "15px" }}
+                      >
+                        | {lang === "ar" ? "جهة الخدمة:" : "Service Authority:"} {s.providers.join(", ")}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* إذا لا يوجد اقتراحات */}
+            {filteredServices.length === 0 && filteredOtherServices.length === 0 && (
+              <div className="px-4 py-4 text-gray-400 text-center font-bold">{lang === "ar" ? "لا يوجد خدمات مطابقة" : "No matching services found"}</div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // الشكل النهائي
   return (
     <div className="w-full max-w-4xl mx-auto">
       <h2 className="text-xl sm:text-2xl font-extrabold text-emerald-700 mb-6 text-center tracking-tight drop-shadow">
@@ -262,56 +392,10 @@ export default function ServicesManagementSection({ employeeData, lang }) {
             </button>
           </div>
         </div>
-        {/* الخدمة (Autocomplete + تقسيم العرض) */}
+        {/* الخدمات (Dropdown مخصص) */}
         <div className="flex flex-col items-start flex-1" style={{ minWidth: "350px" }}>
           <label className="font-bold text-emerald-700 mb-1 text-sm">{lang === "ar" ? "الخدمة" : "Service"}</label>
-          <input
-            type="text"
-            value={serviceSearch}
-            onChange={e => setServiceSearch(e.target.value)}
-            placeholder={lang === "ar" ? "اكتب اسم الخدمة..." : "Type service name..."}
-            className="border-2 rounded-lg px-2 py-1 w-full shadow focus:outline-emerald-500 text-base font-bold text-emerald-900 bg-white mb-2"
-            style={{ height: 38, fontSize: "18px" }}
-            disabled={!client}
-            autoComplete="off"
-          />
-          <select
-            className="border-2 rounded-lg px-2 py-1 shadow text-base font-bold text-emerald-900 bg-white w-full"
-            value={selectedServiceId}
-            onChange={e => setSelectedServiceId(e.target.value)}
-            disabled={!client}
-            style={{ height: 38, fontSize: "18px" }}
-          >
-            <option value="">{lang === "ar" ? "-- اختر الخدمة --" : "-- Select Service --"}</option>
-            {/* قسم خدمات الفئة الحالية */}
-            {filteredServices.length > 0 && (
-              <optgroup label={`${lang === "ar" ? "خدمات" : "Services"} ${getCurrentTypeLabel()}`}>
-                {filteredServices.map(s => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                    {s.providers && Array.isArray(s.providers) && s.providers.length > 0
-                      ? ` | ${lang === "ar" ? "جهة الخدمة:" : "Service Authority:"} ${s.providers.join(", ")}`
-                      : ""
-                    }
-                  </option>
-                ))}
-              </optgroup>
-            )}
-            {/* قسم الخدمات الأخرى (يظهر دائمًا مع أى نوع عميل) */}
-            {filteredOtherServices.length > 0 && (
-              <optgroup label={lang === "ar" ? "خدمات أخرى" : "Other Services"}>
-                {filteredOtherServices.map(s => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                    {s.providers && Array.isArray(s.providers) && s.providers.length > 0
-                      ? ` | ${lang === "ar" ? "جهة الخدمة:" : "Service Authority:"} ${s.providers.join(", ")}`
-                      : ""
-                    }
-                  </option>
-                ))}
-              </optgroup>
-            )}
-          </select>
+          <ServicesDropdown />
         </div>
       </form>
       {/* بيانات العميل تظهر بعد البحث */}
