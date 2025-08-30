@@ -200,7 +200,6 @@ export default function ServiceUploadModal({
           {lang === "ar" ? "يرجى رفع ملف PDF فقط لكل مستند مطلوب." : "Please upload only a PDF file for each required document."}
         </div>
 
-        {/* نموذج رفع المستندات */}
         <form className="flex flex-col items-center w-full gap-3 mt-1">
           {docItems.map(({ key: docKey, label }, idx) => {
             const isUploading = !!uploading[docKey];
