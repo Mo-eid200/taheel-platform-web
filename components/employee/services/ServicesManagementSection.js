@@ -9,6 +9,19 @@ const PREFIXES = [
   { key: "COM", labelAr: "شركة", labelEn: "Company" }
 ];
 
+// دالة تطبيع النص العربي
+function normalizeArabic(text) {
+  if (!text) return "";
+  return text
+    .replace(/أ|إ|آ/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/ى/g, "ي")
+    .replace(/ؤ/g, "و")
+    .replace(/ئ/g, "ي")
+    .replace(/ً|ٌ|ٍ|َ|ُ|ِ|ّ|ْ/g, "") // إزالة التشكيل
+    .toLowerCase();
+}
+
 export default function ServicesManagementSection({ employeeData, lang }) {
   const [prefix, setPrefix] = useState("RES");
   const [clientNumber, setClientNumber] = useState("");
@@ -45,14 +58,15 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     setOtherServices(arr);
   }
 
-  // البحث المرن باسم الخدمة أو جهة الخدمة
+  // بحث مرن بالتطبيع العربي
   function filterFlexible(arr) {
-    return serviceSearch.trim()
+    const searchNorm = normalizeArabic(serviceSearch.trim());
+    return searchNorm
       ? arr.filter(
         s =>
-          (s.name || "").toLowerCase().includes(serviceSearch.trim().toLowerCase()) ||
+          normalizeArabic(s.name || "").includes(searchNorm) ||
           (Array.isArray(s.providers)
-            ? s.providers.join(", ").toLowerCase().includes(serviceSearch.trim().toLowerCase())
+            ? normalizeArabic(s.providers.join(", ")).includes(searchNorm)
             : false)
       )
       : arr;
@@ -282,7 +296,7 @@ export default function ServicesManagementSection({ employeeData, lang }) {
                 placeholder={lang === "ar" ? "اكتب اسم الخدمة أو جهة الخدمة..." : "Type service name or authority..."}
                 style={{
                   fontSize: "18px",
-                  color: "#153A6B", // كحلي واضح
+                  color: "#153A6B",
                   backgroundColor: "#f8f9fb",
                   fontWeight: 700,
                   letterSpacing: "1px"
