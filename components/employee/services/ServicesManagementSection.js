@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import { FaSearch } from "react-icons/fa";
 import { firestore } from "@/lib/firebase.client";
-import { doc, getDoc, collection, query, where, getDocs, addDoc } from "firebase/firestore";
+import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
 import ServiceUploadModal from "./ServiceUploadModal";
+import { useRouter } from "next/navigation";
 
 const PREFIXES = [
   { key: "RES", labelAr: "مقيم", labelEn: "Resident" },
@@ -45,6 +46,8 @@ export default function ServicesManagementSection({ employeeData, lang }) {
   // حالة الطلب الجديد
   const [orderCreated, setOrderCreated] = useState(false);
   const [orderInfo, setOrderInfo] = useState(null);
+
+  const router = useRouter();
 
   async function fetchOtherServices() {
     const q = query(collection(firestore, "services"), where("type", "==", "other"));
@@ -155,17 +158,17 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     }
   }
 
-useEffect(() => {
-  if (!selectedServiceId) {
-    setSelectedService(null);
+  useEffect(() => {
+    if (!selectedServiceId) {
+      setSelectedService(null);
+      setUploadModalOpen(false); // يغلق المودال عند تغيير الخدمة
+      return;
+    }
+    const all = [...services, ...otherServices];
+    const srv = all.find(s => s.id === selectedServiceId);
+    setSelectedService(srv || null);
     setUploadModalOpen(false); // يغلق المودال عند تغيير الخدمة
-    return;
-  }
-  const all = [...services, ...otherServices];
-  const srv = all.find(s => s.id === selectedServiceId);
-  setSelectedService(srv || null);
-  setUploadModalOpen(false); // يغلق المودال عند تغيير الخدمة
-}, [selectedServiceId, services, otherServices]);
+  }, [selectedServiceId, services, otherServices]);
 
   function generateOrderNumber() {
     const part1 = Math.floor(100 + Math.random() * 900);
@@ -173,36 +176,71 @@ useEffect(() => {
     return `REQ-${part1}-${part2}`;
   }
 
-  async function handleCreateOrder() {
-    if (!client || !selectedService || !uploadedDocs || Object.keys(uploadedDocs).length === 0) {
-      alert(lang === "ar" ? "يجب رفع كل المستندات أولاً." : "Please upload all required documents first.");
-      return;
+  // دالة بدء عملية الدفع وتجهيز بيانات الطلب
+  function handleStartPayment({
+    client,
+    selectedService,
+    uploadedDocs,
+    employeeData,
+    lang,
+    setOrderCreated,
+    setOrderInfo,
+    router
+  }) {
+    const orderNumber = generateOrderNumber();
+    const servicePrice = Number(selectedService.price) || 0;
+    const printingFee = Number(selectedService.printingFee) || 0;
+    const vat = +(printingFee * 0.05).toFixed(2);
+    const total = +(servicePrice + printingFee + vat).toFixed(2);
+
+    const serviceProviders = Array.isArray(selectedService.providers) ? selectedService.providers : [];
+    const isSpecialist =
+      serviceProviders.some(
+        p =>
+          p === employeeData?.providerName ||
+          p === employeeData?.speciality ||
+          p === employeeData?.id ||
+          p === employeeData?.name
+      );
+    const assignedTo = isSpecialist ? employeeData.id : "";
+    const assignedToName = isSpecialist ? employeeData.name : "";
+
+    // تجهيز بيانات الدفع (لصفحة الدفع)
+    const paymentData = {
+      orderNumber,
+      service: {
+        ...selectedService,
+        employeeData,
+        userId: client?.customerId,
+        userName: client?.firstName + " " + client?.lastName,
+        userEmail: client?.email,
+        printingFee,
+        vat,
+        providers: serviceProviders
+      },
+      client,
+      employeeData,
+      uploadedDocs,
+      price: servicePrice,
+      printingFee,
+      vat,
+      totalPrice: total,
+      assignedTo,
+      assignedToName,
+      lang
+    };
+
+    localStorage.setItem("paymentData", JSON.stringify(paymentData));
+    if (router) {
+      router.push("/payment/service");
+    } else {
+      window.location.href = "/payment/service";
     }
-
-    try {
-      const orderNumber = generateOrderNumber();
-      const orderData = {
-        orderNumber,
-        clientId: client.customerId,
-        clientName: client.firstName + " " + client.lastName,
-        serviceId: selectedService.id,
-        serviceName: selectedService.name,
-        price: selectedService.price,
-        uploadedDocs,
-        status: "pending_payment",
-        createdAt: new Date().toISOString(),
-      };
-
-      await addDoc(collection(firestore, "orders"), orderData);
-
-      const paymentUrl = "https://payment.example.com/pay?order=" + orderNumber;
-
-      setOrderCreated(true);
-      setOrderInfo({ ...orderData, paymentUrl });
-    } catch (error) {
-      alert(lang === "ar" ? "حدث خطأ أثناء إنشاء الطلب." : "Error creating order.");
-      console.error(error);
-    }
+    setOrderCreated(true);
+    setOrderInfo({
+      orderNumber,
+      paymentUrl: "/payment/service"
+    });
   }
 
   function ClientInfoBox() {
@@ -233,12 +271,9 @@ useEffect(() => {
   function ServiceDetailsBox() {
     if (!client || !selectedService) return null;
 
-    // حساب الرسوم
     const servicePrice = Number(selectedService.price) || 0;
     const printingFee = Number(selectedService.printingFee) || 0;
-    // الضريبة 5% على رسوم الطباعة فقط
     const vat = +(printingFee * 0.05).toFixed(2);
-    // المجموع الكلي: سعر الخدمة + رسوم الطباعة + ضريبة رسوم الطباعة
     const total = +(servicePrice + printingFee + vat).toFixed(2);
 
     const requiredDocs = Array.isArray(selectedService.requiredDocuments)
@@ -272,12 +307,10 @@ useEffect(() => {
             <span className="inline-block w-32 text-emerald-700">{lang === "ar" ? "الخدمة:" : "Service:"}</span>
             <span style={{ color: "#1c7ed6", fontWeight: "bold" }}>{selectedService.name}</span>
           </div>
-          {/* سعر الخدمة الأساسي */}
           <div>
             <span className="inline-block w-32 text-emerald-700">{lang === "ar" ? "السعر:" : "Price:"}</span>
             <span>{servicePrice.toFixed(2)} AED</span>
           </div>
-          {/* تفاصيل الرسوم الإضافية والمجموع */}
           <div className="mt-2">
             <table className="w-full text-xs text-gray-800 font-bold border-separate border-spacing-y-1">
               <tbody>
@@ -314,7 +347,18 @@ useEffect(() => {
                 <button
                   type="button"
                   className="px-6 py-2 rounded-full bg-emerald-700 hover:bg-emerald-900 text-white font-bold text-base shadow mt-4"
-                  onClick={handleCreateOrder}
+                  onClick={() => {
+                    handleStartPayment({
+                      client,
+                      selectedService,
+                      uploadedDocs,
+                      employeeData,
+                      lang,
+                      setOrderCreated,
+                      setOrderInfo,
+                      router
+                    });
+                  }}
                 >
                   {lang === "ar" ? "إنشاء الطلب وإرسال لينك الدفع" : "Create Order & Send Payment Link"}
                 </button>
