@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { FaSearch } from "react-icons/fa";
 import { firestore } from "@/lib/firebase.client";
-import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
+import { doc, getDoc, collection, query, where, getDocs, addDoc } from "firebase/firestore";
 import ServiceUploadModal from "./ServiceUploadModal";
 
 const PREFIXES = [
@@ -41,6 +41,11 @@ export default function ServicesManagementSection({ employeeData, lang }) {
   // مودال رفع المستندات
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [uploadedDocs, setUploadedDocs] = useState({});
+  const [allDocsUploaded, setAllDocsUploaded] = useState(false);
+
+  // حالة الطلب الجديد
+  const [orderCreated, setOrderCreated] = useState(false);
+  const [orderInfo, setOrderInfo] = useState(null);
 
   // جلب الخدمات الأخرى من مصدرين
   async function fetchOtherServices() {
@@ -103,6 +108,10 @@ export default function ServicesManagementSection({ employeeData, lang }) {
 
   async function handleSearch(e) {
     e.preventDefault();
+    setOrderCreated(false);
+    setOrderInfo(null);
+    setAllDocsUploaded(false);
+    setUploadedDocs({});
     const isValid = /^\d{3}-\d{4}$/.test(clientNumber);
     const clientId = isValid ? `${prefix}-${clientNumber}` : "";
     setFullClientId(clientId);
@@ -155,6 +164,49 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     const srv = all.find(s => s.id === selectedServiceId);
     setSelectedService(srv || null);
   }, [selectedServiceId, services, otherServices]);
+
+  // دالة توليد رقم تتبع (طلب)
+  function generateOrderNumber() {
+    const part1 = Math.floor(100 + Math.random() * 900); // 3 أرقام
+    const part2 = Math.floor(1000 + Math.random() * 9000); // 4 أرقام
+    return `REQ-${part1}-${part2}`;
+  }
+
+  // دالة إنشاء الطلب وحفظه في فايرستور
+  async function handleCreateOrder() {
+    if (!client || !selectedService || !uploadedDocs || Object.keys(uploadedDocs).length === 0) {
+      alert(lang === "ar" ? "يجب رفع كل المستندات أولاً." : "Please upload all required documents first.");
+      return;
+    }
+
+    try {
+      const orderNumber = generateOrderNumber();
+      const orderData = {
+        orderNumber,
+        clientId: client.customerId,
+        clientName: client.firstName + " " + client.lastName,
+        serviceId: selectedService.id,
+        serviceName: selectedService.name,
+        price: selectedService.price,
+        uploadedDocs, // روابط المستندات
+        status: "pending_payment",
+        createdAt: new Date().toISOString(),
+      };
+
+      // إنشاء الطلب في فايرستور
+      await addDoc(collection(firestore, "orders"), orderData);
+
+      // هنا ممكن توليد لينك دفع حقيقي حسب النظام (Stripe, PayTabs...)
+      // بشكل تجريبي نرسل لينك وهمي
+      const paymentUrl = "https://payment.example.com/pay?order=" + orderNumber;
+
+      setOrderCreated(true);
+      setOrderInfo({ ...orderData, paymentUrl });
+    } catch (error) {
+      alert(lang === "ar" ? "حدث خطأ أثناء إنشاء الطلب." : "Error creating order.");
+      console.error(error);
+    }
+  }
 
   function ClientInfoBox() {
     if (!client) return null;
@@ -228,6 +280,40 @@ export default function ServicesManagementSection({ employeeData, lang }) {
                 ))}
               </ul>
               <UploadDocButton />
+
+              {/* زر توليد الطلب يظهر فقط بعد اكتمال رفع المستندات */}
+              {allDocsUploaded && !orderCreated && (
+                <button
+                  type="button"
+                  className="px-6 py-2 rounded-full bg-emerald-700 hover:bg-emerald-900 text-white font-bold text-base shadow mt-4"
+                  onClick={handleCreateOrder}
+                >
+                  {lang === "ar" ? "إنشاء الطلب وإرسال لينك الدفع" : "Create Order & Send Payment Link"}
+                </button>
+              )}
+
+              {/* بعد إنشاء الطلب أظهر رقم الطلب واللينك */}
+              {orderCreated && orderInfo && (
+                <div className="mt-4 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 shadow text-center font-bold text-lg text-emerald-700">
+                  <div>
+                    {lang === "ar" ? "تم إنشاء الطلب بنجاح!" : "Order Created Successfully!"}
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <b>{lang === "ar" ? "رقم الطلب:" : "Order Number:"}</b> {orderInfo.orderNumber}
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <b>{lang === "ar" ? "لينك الدفع:" : "Payment Link:"}</b>
+                    <a
+                      href={orderInfo.paymentUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline text-blue-700 ml-2"
+                    >
+                      {orderInfo.paymentUrl}
+                    </a>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -241,7 +327,7 @@ export default function ServicesManagementSection({ employeeData, lang }) {
           uploadedDocs={uploadedDocs}
           requiredDocs={requiredDocs.map((doc, idx) => `doc_${idx}`)}
           displayDocs={requiredDocs.map(doc => typeof doc === "string" ? doc : (doc.ar || doc.en || doc.name || doc.label || ""))}
-          onAllDocsUploaded={() => setUploadModalOpen(false)}
+          onAllDocsUploaded={() => { setUploadModalOpen(false); setAllDocsUploaded(true); }}
         />
       </div>
     );
