@@ -4,6 +4,7 @@ import { firestore } from "@/lib/firebase.client";
 import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
 import ServiceUploadModal from "./ServiceUploadModal";
 import { useRouter } from "next/navigation";
+import calcStripeFees from "@/utils/calcStripeFees"; // ✅ الاستيراد الصحيح لدالة الرسوم
 
 const PREFIXES = [
   { key: "RES", labelAr: "مقيم", labelEn: "Resident" },
@@ -188,6 +189,11 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     const vat = +(printingFee * 0.05).toFixed(2);
     const total = +(servicePrice + printingFee + vat).toFixed(2);
 
+    // ✅ حساب الرسوم بنفس دالة العميل
+    const stripeFeesResult = calcStripeFees(total);
+    const processingFee = stripeFeesResult.stripeFee;
+    const finalPrice = stripeFeesResult.totalAmount;
+
     const serviceProviders = Array.isArray(selectedService.providers) ? selectedService.providers : [];
     const isSpecialist =
       serviceProviders.some(
@@ -205,7 +211,7 @@ export default function ServicesManagementSection({ employeeData, lang }) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        amount: total,
+        amount: finalPrice,
         serviceId: selectedService.id,
         serviceName: selectedService.name,
         customerId: client?.customerId,
@@ -245,6 +251,8 @@ export default function ServicesManagementSection({ employeeData, lang }) {
       printingFee,
       vat,
       totalPrice: total,
+      processingFee, // الرسوم من دالة Stripe
+      finalPrice,    // السعر النهائى بعد الرسوم
       assignedTo,
       assignedToName,
       lang
