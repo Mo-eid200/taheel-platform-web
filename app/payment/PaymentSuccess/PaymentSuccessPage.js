@@ -4,8 +4,6 @@ import { loadStripe } from "@stripe/stripe-js";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import Image from "next/image";
 import PaymentSuccessPage from "../PaymentSuccess/PaymentSuccessPage";
-
-// >>>> أضف استيراد فايرستور هنا <<<<
 import { addDoc, collection } from "firebase/firestore";
 import { firestore } from "@/lib/firebase.client";
 
@@ -50,7 +48,7 @@ const LANG = {
   }
 };
 
-// >>>> الدالة الجديدة لإنشاء الطلب وتوزيع العمولة بعد الدفع <<<<
+// دالة إنشاء الطلب بعد الدفع وتوزيع العمولة
 async function createOrderAfterPayment(paymentData, paymentId) {
   try {
     const {
@@ -64,15 +62,14 @@ async function createOrderAfterPayment(paymentData, paymentId) {
       userEmail,
       processingFee,
       lang,
-      customerId, // ممكن يكون اسم المستخدم أو رقم العميل أو ID
-      uploadedDocs // لو عندك مستندات مرفوعة
+      customerId,
+      uploadedDocs
     } = paymentData;
 
-    // بيانات الموظف (يجب أن تكون مخزنة في service داخل paymentData)
-    const employeeData = service.employeeData;
+    const employeeData = service?.employeeData || {};
 
     // تحقق من تخصص الموظف
-    const serviceProviders = Array.isArray(service.providers) ? service.providers : [];
+    const serviceProviders = Array.isArray(service?.providers) ? service.providers : [];
     const isSpecialist =
       serviceProviders.some(
         p =>
@@ -87,16 +84,16 @@ async function createOrderAfterPayment(paymentData, paymentId) {
 
     const orderDoc = {
       orderNumber,
-      clientId: customerId || service.userId,
-      clientName: service.userName,
-      serviceId: service.id,
-      serviceName: service.name,
-      price: Number(service.price),
-      printingFee: Number(service.printingFee),
-      vat: Number(service.vat),
-      coinDiscount: Number(service.coinDiscount),
-      processingFee: Number(processingFee),
-      finalPrice: Number(finalPrice),
+      clientId: customerId || service?.userId,
+      clientName: service?.userName,
+      serviceId: service?.id,
+      serviceName: service?.name,
+      price: Number(service?.price) || 0,
+      printingFee: Number(service?.printingFee) || 0,
+      vat: Number(service?.vat) || 0,
+      coinDiscount: Number(service?.coinDiscount) || 0,
+      processingFee: Number(processingFee) || 0,
+      finalPrice: Number(finalPrice) || 0,
       status: "paid",
       providers: serviceProviders,
       assignedTo,
@@ -111,10 +108,10 @@ async function createOrderAfterPayment(paymentData, paymentId) {
     await addDoc(collection(firestore, "requests"), orderDoc);
 
     // إضافة العمولة لو الموظف متخصص
-    if (isSpecialist && Number(service.printingFee) > 0) {
-      const commission = +(Number(service.printingFee) * 0.2).toFixed(2);
+    if (isSpecialist && Number(service?.printingFee) > 0) {
+      const commission = +(Number(service?.printingFee) * 0.2).toFixed(2);
       await addDoc(collection(firestore, "commissions"), {
-        employeeId: employeeData.id,
+        employeeId: employeeData?.id,
         orderId: orderNumber,
         type: "creation",
         amount: commission,
@@ -133,15 +130,18 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
   const [payMsg, setPayMsg] = useState("");
   const [msgSuccess, setMsgSuccess] = useState(false);
 
-  // البيانات المرسلة من المودال
-  const {
-    service,
-    totalPrice,
-    finalPrice,
-    orderNumber,
-    clientSecret,
-    processingFee // رسوم معالجة الدفع الإلكتروني
-  } = paymentData;
+  // استخراج البيانات بأمان
+  const serviceName = paymentData.service?.name || paymentData.serviceName || "اسم غير متوفر";
+  const servicePrice = paymentData.service?.price || paymentData.price || 0;
+  const printingFee = paymentData.service?.printingFee || paymentData.printingFee || 0;
+  const vat = paymentData.service?.vat || paymentData.vat || 0;
+  const coinDiscount = paymentData.service?.coinDiscount || paymentData.coinDiscount || 0;
+  const totalPrice = paymentData.totalPrice || paymentData.price || 0;
+  const finalPrice = paymentData.finalPrice || paymentData.price || 0;
+  const processingFee = paymentData.processingFee || 0;
+  const orderNumber = paymentData.orderNumber;
+  const clientSecret = paymentData.clientSecret;
+  const userEmail = paymentData.userEmail || paymentData.service?.userEmail || "";
   const dir = lang === "ar" ? "rtl" : "ltr";
 
   const handleSubmit = async (e) => {
@@ -172,14 +172,14 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          to: service.userEmail,
+          to: userEmail,
           orderNumber,
-          serviceName: service.name,
-          price: service.price,
-          printingFee: service.printingFee,
-          vat: service.vat,
-          coinDiscount: service.coinDiscount,
-          processingFee, // أضفها في الإيميل أيضاً
+          serviceName,
+          price: servicePrice,
+          printingFee,
+          vat,
+          coinDiscount,
+          processingFee,
           finalPrice,
           paymentId: paymentIntent.id,
           paymentMethod: "gateway",
@@ -187,7 +187,6 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
         }),
       });
 
-      // <<<<< أضف هنا استدعاء الدالة الجديدة >>>>>
       await createOrderAfterPayment(paymentData, paymentIntent.id);
 
       setTimeout(() => {
@@ -198,8 +197,6 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
     }
     setLoading(false);
   };
-
-  // ... باقي الكود كما هو (بدون أي تعديل)
 
   return (
     <form
@@ -219,29 +216,29 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
           <tbody>
             <tr>
               <td className="text-gray-300">{LANG[lang].service}:</td>
-              <td className="text-emerald-200 font-bold">{service.name}</td>
+              <td className="text-emerald-200 font-bold">{serviceName}</td>
             </tr>
             <tr>
               <td className="text-gray-300">{LANG[lang].amount}:</td>
-              <td>{Number(service.price).toFixed(2)} د.إ</td>
+              <td>{Number(servicePrice).toFixed(2)} د.إ</td>
             </tr>
-            {service.printingFee > 0 && (
+            {printingFee > 0 && (
               <tr>
                 <td className="text-gray-300">{LANG[lang].print}:</td>
-                <td>{Number(service.printingFee).toFixed(2)} د.إ</td>
+                <td>{Number(printingFee).toFixed(2)} د.إ</td>
               </tr>
             )}
-            {service.vat > 0 && (
+            {vat > 0 && (
               <tr>
                 <td className="text-gray-300">{LANG[lang].vat}:</td>
-                <td>{Number(service.vat).toFixed(2)} د.إ</td>
+                <td>{Number(vat).toFixed(2)} د.إ</td>
               </tr>
             )}
             <tr>
               <td className="text-gray-300">{LANG[lang].coinDiscount}:</td>
               <td>
-                {service.coinDiscount && Number(service.coinDiscount) > 0
-                  ? `-${Number(service.coinDiscount).toFixed(2)} د.إ`
+                {coinDiscount && Number(coinDiscount) > 0
+                  ? `-${Number(coinDiscount).toFixed(2)} د.إ`
                   : "0 د.إ"}
               </td>
             </tr>
@@ -335,11 +332,11 @@ export default function CardPaymentPage() {
     return (
       <PaymentSuccessPage
         paymentId={paymentId}
-        amount={paymentData.finalPrice}
-        serviceName={paymentData.service?.name}
+        amount={paymentData.finalPrice || paymentData.price || 0}
+        serviceName={paymentData.service?.name || paymentData.serviceName || "اسم غير متوفر"}
         orderNumber={orderNumber}
-        printingFee={paymentData.service?.printingFee || 0}
-        vat={paymentData.service?.vat || 0}
+        printingFee={paymentData.service?.printingFee || paymentData.printingFee || 0}
+        vat={paymentData.service?.vat || paymentData.vat || 0}
         processingFee={paymentData.processingFee || 0}
         lang={paymentData.lang}
       />

@@ -153,53 +153,53 @@ await fetch("/api/sendOrderEmail", {
       <div className="text-gray-200 text-sm mb-4 text-center">{LANG[lang].subtitle}</div>
       <div className="bg-[#22304a]/70 rounded-xl p-4 mb-3 w-full text-center shadow">
         <table className="w-full text-sm text-right mb-2 border-separate border-spacing-y-1">
-          <tbody>
-            <tr>
-              <td className="text-gray-300">{LANG[lang].service}:</td>
-              <td className="text-emerald-200 font-bold">{service.name}</td>
-            </tr>
-            <tr>
-              <td className="text-gray-300">{LANG[lang].amount}:</td>
-              <td>{Number(service.price).toFixed(2)} د.إ</td>
-            </tr>
-            {service.printingFee > 0 && (
-              <tr>
-                <td className="text-gray-300">{LANG[lang].print}:</td>
-                <td>{Number(service.printingFee).toFixed(2)} د.إ</td>
-              </tr>
-            )}
-            {service.vat > 0 && (
-              <tr>
-                <td className="text-gray-300">{LANG[lang].vat}:</td>
-                <td>{Number(service.vat).toFixed(2)} د.إ</td>
-              </tr>
-            )}
-            <tr>
-              <td className="text-gray-300">{LANG[lang].coinDiscount}:</td>
-              <td>
-                {service.coinDiscount && Number(service.coinDiscount) > 0
-                  ? `-${Number(service.coinDiscount).toFixed(2)} د.إ`
-                  : "0 د.إ"}
-              </td>
-            </tr>
-            <tr>
-              <td className="text-gray-300">{LANG[lang].processingFee}:</td>
-              <td>
-                {processingFee
-                  ? `${Number(processingFee).toFixed(2)} د.إ`
-                  : "0 د.إ"}
-              </td>
-            </tr>
-            <tr>
-              <td className="text-gray-300">{LANG[lang].totalBeforeDiscount}:</td>
-              <td>{Number(totalPrice).toFixed(2)} د.إ</td>
-            </tr>
-            <tr>
-              <td className="font-bold text-emerald-400">{LANG[lang].total}:</td>
-              <td className="font-bold text-emerald-300">{Number(finalPrice).toFixed(2)} د.إ</td>
-            </tr>
-          </tbody>
-        </table>
+  <tbody>
+    <tr>
+      <td className="text-gray-300">{LANG[lang].service}:</td>
+      <td className="text-emerald-200 font-bold">{serviceName}</td>
+    </tr>
+    <tr>
+      <td className="text-gray-300">{LANG[lang].amount}:</td>
+      <td>{Number(servicePrice).toFixed(2)} د.إ</td>
+    </tr>
+    {printingFee > 0 && (
+      <tr>
+        <td className="text-gray-300">{LANG[lang].print}:</td>
+        <td>{Number(printingFee).toFixed(2)} د.إ</td>
+      </tr>
+    )}
+    {vat > 0 && (
+      <tr>
+        <td className="text-gray-300">{LANG[lang].vat}:</td>
+        <td>{Number(vat).toFixed(2)} د.إ</td>
+      </tr>
+    )}
+    <tr>
+      <td className="text-gray-300">{LANG[lang].coinDiscount}:</td>
+      <td>
+        {coinDiscount && Number(coinDiscount) > 0
+          ? `-${Number(coinDiscount).toFixed(2)} د.إ`
+          : "0 د.إ"}
+      </td>
+    </tr>
+    <tr>
+      <td className="text-gray-300">{LANG[lang].processingFee}:</td>
+      <td>
+        {processingFee
+          ? `${Number(processingFee).toFixed(2)} د.إ`
+          : "0 د.إ"}
+      </td>
+    </tr>
+    <tr>
+      <td className="text-gray-300">{LANG[lang].totalBeforeDiscount}:</td>
+      <td>{Number(totalPrice).toFixed(2)} د.إ</td>
+    </tr>
+    <tr>
+      <td className="font-bold text-emerald-400">{LANG[lang].total}:</td>
+      <td className="font-bold text-emerald-300">{Number(finalPrice).toFixed(2)} د.إ</td>
+    </tr>
+  </tbody>
+</table>
       </div>
       <div className="w-full mb-3">
         <label className="text-emerald-200 font-bold text-sm mb-1 block">{LANG[lang].cardLabel}</label>
