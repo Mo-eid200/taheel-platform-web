@@ -69,15 +69,18 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
   const [payMsg, setPayMsg] = useState("");
   const [msgSuccess, setMsgSuccess] = useState(false);
 
+  const serviceName = paymentData.service?.name || paymentData.serviceName || "اسم غير متوفر";
+  const servicePrice = paymentData.service?.price || paymentData.paidAmount || 0;
+  const printingFee = paymentData.service?.printingFee || paymentData.printingFee || 0;
+  const vat = paymentData.service?.vat || paymentData.vat || 0;
+  const coinDiscount = paymentData.service?.coinDiscount || paymentData.coinDiscount || 0;
+  const totalPrice = paymentData.totalPrice || paymentData.paidAmount || 0;
+  const finalPrice = paymentData.finalPrice || paymentData.paidAmount || 0;
+  const processingFee = paymentData.processingFee || 0;
+  const orderNumber = paymentData.orderNumber;
+  const clientSecret = paymentData.clientSecret;
+
   // البيانات المرسلة من المودال
-  const {
-    service,
-    totalPrice,
-    finalPrice,
-    orderNumber,
-    clientSecret,
-    processingFee // رسوم معالجة الدفع الإلكتروني
-  } = paymentData;
   const dir = lang === "ar" ? "rtl" : "ltr";
 
   const handleSubmit = async (e) => {
@@ -104,24 +107,24 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
       setMsgSuccess(true);
       setPayMsg(LANG[lang].success);
 
-      await fetch("/api/sendOrderEmail", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to: service.userEmail,
-          orderNumber,
-          serviceName: service.name,
-          price: service.price,
-          printingFee: service.printingFee,
-          vat: service.vat,
-          coinDiscount: service.coinDiscount,
-          processingFee,
-          finalPrice,
-          paymentId: paymentIntent.id,
-          paymentMethod: "gateway",
-          lang
-        }),
-      });
+await fetch("/api/sendOrderEmail", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      to: paymentData.userEmail,
+      orderNumber,
+      serviceName,
+      price: servicePrice,
+      printingFee: printingFee,
+      vat: vat,
+      coinDiscount: coinDiscount,
+      processingFee,
+      finalPrice,
+      paymentId: paymentIntent.id,
+      paymentMethod: "gateway",
+      lang
+    }),
+  });
 
       // تحديث الطلب المدفوع في requests
       await moveOrderToRequests(paymentData, paymentIntent.id, orderNumber);
