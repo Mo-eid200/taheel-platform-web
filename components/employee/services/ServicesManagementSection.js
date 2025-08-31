@@ -173,7 +173,7 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     setUploadModalOpen(false);
   }, [selectedServiceId, services, otherServices]);
 
-  // دالة تجهيز بيانات الدفع وإنشاء الطلب والدفع عبر Stripe API
+  // دالة موحدة لإنشاء الطلب والدفع عبر Stripe API للموظف أو العميل
   async function handleStartPayment({
     client,
     selectedService,
