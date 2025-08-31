@@ -58,32 +58,33 @@ export default async function handler(req, res) {
     });
 
     // سجل الطلب في فايرستور
-    await firestore.collection("requests").doc(requestId).set({
-      requestId,
-      paymentIntentId: paymentIntent.id,
-      customerId,
-      serviceId: serviceId || "",
-      serviceName,
-      paidAmount: amount,
-      coinsUsed,
-      coinsGiven,
-      createdAt: new Date().toISOString(),
-      lastUpdated: new Date().toISOString(),
+await firestore.collection("requests").doc(requestId).set({
+  requestId,
+  paymentIntentId: paymentIntent.id,
+  clientSecret: paymentIntent.client_secret, // ← أضف هذا السطر!
+  customerId,
+  serviceId: serviceId || "",
+  serviceName,
+  paidAmount: amount,
+  coinsUsed,
+  coinsGiven,
+  createdAt: new Date().toISOString(),
+  lastUpdated: new Date().toISOString(),
+  status,
+  userEmail,
+  attachments,
+  providers,
+  assignedTo,
+  assignedToName,
+  employeeData,
+  statusHistory: [
+    {
       status,
-      userEmail,
-      attachments,
-      providers,
-      assignedTo,
-      assignedToName,
-      employeeData,
-      statusHistory: [
-        {
-          status,
-          timestamp: new Date().toISOString(),
-          updatedBy: assignedToName || userEmail || "system"
-        }
-      ]
-    });
+      timestamp: new Date().toISOString(),
+      updatedBy: assignedToName || userEmail || "system"
+    }
+  ]
+});
 
     // أرجع clientSecret ورقم الطلب للواجهة
     res.status(200).json({ clientSecret: paymentIntent.client_secret, orderNumber: requestId });
