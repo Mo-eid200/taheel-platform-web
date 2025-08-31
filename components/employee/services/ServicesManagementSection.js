@@ -4,7 +4,7 @@ import { firestore } from "@/lib/firebase.client";
 import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
 import ServiceUploadModal from "./ServiceUploadModal";
 import { useRouter } from "next/navigation";
-import calcStripeFees from "@/utils/calcStripeFees"; // ✅ الاستيراد الصحيح لدالة الرسوم
+import calcStripeFees from "@/utils/calcStripeFees";
 
 const PREFIXES = [
   { key: "RES", labelAr: "مقيم", labelEn: "Resident" },
@@ -187,82 +187,41 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     const servicePrice = Number(selectedService.price) || 0;
     const printingFee = Number(selectedService.printingFee) || 0;
     const vat = +(printingFee * 0.05).toFixed(2);
-    const total = +(servicePrice + printingFee + vat).toFixed(2);
 
-    // ✅ حساب الرسوم بنفس دالة العميل
-    const stripeFeesResult = calcStripeFees(total);
+    // خصم الكوينات: يمكنك حسابه بناءً على رصيد العميل أو طلب الموظف
+    const coinDiscountValue = 0; // أو حسب المطلوب
+
+    const totalBeforeDiscount = +(servicePrice + printingFee + vat).toFixed(2);
+
+    // الرسوم الالكترونية بنفس دالة العميل
+    const stripeFeesResult = calcStripeFees(totalBeforeDiscount);
     const processingFee = stripeFeesResult.stripeFee;
-    const finalPrice = stripeFeesResult.totalAmount;
+    const finalPrice = +(stripeFeesResult.totalAmount - coinDiscountValue).toFixed(2);
 
-    const serviceProviders = Array.isArray(selectedService.providers) ? selectedService.providers : [];
-    const isSpecialist =
-      serviceProviders.some(
-        p =>
-          p === employeeData?.providerName ||
-          p === employeeData?.speciality ||
-          p === employeeData?.id ||
-          p === employeeData?.name
-      );
-    const assignedTo = isSpecialist ? employeeData.id : "";
-    const assignedToName = isSpecialist ? employeeData.name : "";
-
-    // استدعاء API لإنشاء الطلب والدفع في Stripe
-    const res = await fetch("/api/create-payment-intent", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        amount: finalPrice,
-        serviceId: selectedService.id,
-        serviceName: selectedService.name,
-        customerId: client?.customerId,
-        userEmail: client?.email,
-        attachments: uploadedDocs,
-        providers: serviceProviders,
-        assignedTo,
-        assignedToName,
-        employeeData,
-        lang
-      }),
-    });
-    const result = await res.json();
-
-    if (!result.clientSecret) {
-      alert(lang === "ar" ? "تعذر إنشاء بوابة الدفع، يرجى المحاولة لاحقاً." : "Could not create payment gateway. Please try again later.");
-      return;
-    }
-
+    // تجهيز بيانات الدفع تمامًا مثل شاشة العميل
     const paymentData = {
-      orderNumber: result.orderNumber,
-      clientSecret: result.clientSecret,
+      orderNumber: "ORD-" + Math.floor(Math.random() * 10000000), // أو من API
       service: {
-        ...selectedService,
-        employeeData,
-        userId: client?.customerId,
-        userName: client?.firstName + " " + client?.lastName,
-        userEmail: client?.email,
+        name: selectedService.name,
+        id: selectedService.id,
+        price: servicePrice,
         printingFee,
         vat,
-        providers: serviceProviders
+        coinDiscount: coinDiscountValue,
+        userEmail: client?.email
       },
-      client,
-      employeeData,
-      uploadedDocs,
-      price: servicePrice,
-      printingFee,
-      vat,
-      totalPrice: total,
-      processingFee, // الرسوم من دالة Stripe
-      finalPrice,    // السعر النهائى بعد الرسوم
-      assignedTo,
-      assignedToName,
+      totalPrice: totalBeforeDiscount,
+      processingFee,
+      finalPrice,
+      customerId: client?.customerId,
       lang
     };
 
     localStorage.setItem("paymentData", JSON.stringify(paymentData));
-    const link = `${window.location.origin}/payment/service?order=${result.orderNumber}`;
+    const link = `${window.location.origin}/payment/service?order=${paymentData.orderNumber}`;
     setOrderCreated(true);
     setOrderInfo({
-      orderNumber: result.orderNumber,
+      orderNumber: paymentData.orderNumber,
       paymentUrl: link
     });
     setPaymentUrl(link);
@@ -299,28 +258,16 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     const servicePrice = Number(selectedService.price) || 0;
     const printingFee = Number(selectedService.printingFee) || 0;
     const vat = +(printingFee * 0.05).toFixed(2);
-    const total = +(servicePrice + printingFee + vat).toFixed(2);
 
-    const requiredDocs = Array.isArray(selectedService.requiredDocuments)
-      ? selectedService.requiredDocuments
-      : (selectedService.requiredDocuments ? Object.values(selectedService.requiredDocuments) : []);
+    // خصم الكوينات: يمكنك حسابه بناءً على رصيد العميل أو طلب الموظف
+    const coinDiscountValue = 0; // أو حسب المطلوب
 
-    function UploadDocButton() {
-      if (!selectedService || requiredDocs.length === 0) return null;
-      return (
-        <button
-          type="button"
-          className="px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-sm shadow mt-3 cursor-pointer"
-          style={{ minWidth: 120, fontSize: 15 }}
-          onClick={() => {
-            setAllDocsUploaded(false);
-            setUploadModalOpen(true);
-          }}
-        >
-          {lang === "ar" ? "رفع المستندات المطلوبة" : "Upload Required Documents"}
-        </button>
-      );
-    }
+    const totalBeforeDiscount = +(servicePrice + printingFee + vat).toFixed(2);
+
+    // الرسوم الالكترونية بنفس دالة العميل
+    const stripeFeesResult = calcStripeFees(totalBeforeDiscount);
+    const processingFee = stripeFeesResult.stripeFee;
+    const finalPrice = +(stripeFeesResult.totalAmount - coinDiscountValue).toFixed(2);
 
     return (
       <div className="w-full rounded-xl overflow-hidden shadow border border-emerald-100 bg-white animate-fade-in">
@@ -328,52 +275,72 @@ export default function ServicesManagementSection({ employeeData, lang }) {
           {lang === "ar" ? "تفاصيل الخدمة" : "Service Details"}
         </div>
         <div className="px-4 py-4 grid grid-cols-1 gap-3 text-base font-semibold text-gray-800">
-          <div>
-            <span className="inline-block w-32 text-emerald-700">{lang === "ar" ? "الخدمة:" : "Service:"}</span>
-            <span style={{ color: "#1c7ed6", fontWeight: "bold" }}>{selectedService.name}</span>
-          </div>
-          <div>
-            <span className="inline-block w-32 text-emerald-700">{lang === "ar" ? "السعر:" : "Price:"}</span>
-            <span>{servicePrice.toFixed(2)} AED</span>
-          </div>
-          <div className="mt-2">
-            <table className="w-full text-xs text-gray-800 font-bold border-separate border-spacing-y-1">
-              <tbody>
-                <tr>
-                  <td>{lang === "ar" ? "رسوم الطباعة" : "Printing Fee"}</td>
-                  <td className="text-right">{printingFee.toFixed(2)} AED</td>
-                </tr>
-                <tr>
-                  <td>{lang === "ar" ? "ضريبة القيمة المضافة 5% على رسوم الطباعة" : "VAT 5% on Printing Fee"}</td>
-                  <td className="text-right">{vat.toFixed(2)} AED</td>
-                </tr>
-                <tr>
-                  <td className="font-extrabold text-emerald-700">{lang === "ar" ? "المجموع الكلي" : "Total"}</td>
-                  <td className="font-extrabold text-emerald-800 text-right">{total.toFixed(2)} AED</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <table className="w-full text-sm text-right mb-2 border-separate border-spacing-y-1">
+            <tbody>
+              <tr>
+                <td className="text-gray-600">{lang === "ar" ? "الخدمة:" : "Service:"}</td>
+                <td className="text-emerald-700 font-bold">{selectedService.name}</td>
+              </tr>
+              <tr>
+                <td className="text-gray-600">{lang === "ar" ? "السعر:" : "Price:"}</td>
+                <td>{servicePrice.toFixed(2)} د.إ</td>
+              </tr>
+              <tr>
+                <td className="text-gray-600">{lang === "ar" ? "رسوم الطباعة:" : "Printing Fee:"}</td>
+                <td>{printingFee.toFixed(2)} د.إ</td>
+              </tr>
+              <tr>
+                <td className="text-gray-600">{lang === "ar" ? "ضريبة القيمة المضافة:" : "VAT:"}</td>
+                <td>{vat.toFixed(2)} د.إ</td>
+              </tr>
+              <tr>
+                <td className="text-gray-600">{lang === "ar" ? "خصم الكوينات:" : "Coins Discount:"}</td>
+                <td>{coinDiscountValue > 0 ? `-${coinDiscountValue.toFixed(2)} د.إ` : "0 د.إ"}</td>
+              </tr>
+              <tr>
+                <td className="text-gray-600">{lang === "ar" ? "الإجمالي قبل الخصم:" : "Total Before Discount:"}</td>
+                <td>{totalBeforeDiscount.toFixed(2)} د.إ</td>
+              </tr>
+              <tr>
+                <td className="text-gray-600">{lang === "ar" ? "رسوم معالجة الدفع الإلكتروني:" : "Processing Fee:"}</td>
+                <td>{processingFee.toFixed(2)} د.إ</td>
+              </tr>
+              <tr>
+                <td className="font-bold text-emerald-700">{lang === "ar" ? "الإجمالي:" : "Total:"}</td>
+                <td className="font-bold text-emerald-800">{finalPrice.toFixed(2)} د.إ</td>
+              </tr>
+            </tbody>
+          </table>
           <div>
             <span className="inline-block w-32 text-emerald-700">{lang === "ar" ? "الوصف:" : "Description:"}</span>
             <span>{selectedService.desc || selectedService.description}</span>
           </div>
           {/* مستندات مطلوبة */}
-          {requiredDocs.length > 0 && (
+          {Array.isArray(selectedService.requiredDocuments) && selectedService.requiredDocuments.length > 0 && (
             <div>
               <span className="inline-block w-32 text-emerald-700">{lang === "ar" ? "المستندات المطلوبة:" : "Required Documents:"}</span>
               <ul className="list-disc list-inside text-gray-700 text-sm mt-1 ml-2">
-                {requiredDocs.map((doc, idx) => (
+                {selectedService.requiredDocuments.map((doc, idx) => (
                   <li key={idx}>{typeof doc === "string" ? doc : (doc.ar || doc.en || doc.name || doc.label)}</li>
                 ))}
               </ul>
-              <UploadDocButton />
+              <button
+                type="button"
+                className="px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-sm shadow mt-3 cursor-pointer"
+                style={{ minWidth: 120, fontSize: 15 }}
+                onClick={() => {
+                  setAllDocsUploaded(false);
+                  setUploadModalOpen(true);
+                }}
+              >
+                {lang === "ar" ? "رفع المستندات المطلوبة" : "Upload Required Documents"}
+              </button>
             </div>
           )}
 
           {/* زر الإنشاء يظهر فقط بعد رفع المستندات المطلوبة أو إذا لا توجد مستندات مطلوبة */}
           {!orderCreated && (
-            (requiredDocs.length === 0 || allDocsUploaded) &&
+            (!selectedService.requiredDocuments || selectedService.requiredDocuments.length === 0 || allDocsUploaded) &&
             <button
               type="button"
               className="px-3 py-1 rounded bg-emerald-700 hover:bg-emerald-900 text-white font-bold text-sm shadow mt-4"
@@ -438,8 +405,8 @@ export default function ServicesManagementSection({ employeeData, lang }) {
           lang={lang}
           setUploadedDocs={setUploadedDocs}
           uploadedDocs={uploadedDocs}
-          requiredDocs={requiredDocs.map((doc, idx) => `doc_${idx}`)}
-          displayDocs={requiredDocs.map(doc => typeof doc === "string" ? doc : (doc.ar || doc.en || doc.name || doc.label || ""))}
+          requiredDocs={selectedService.requiredDocuments ? selectedService.requiredDocuments.map((doc, idx) => `doc_${idx}`) : []}
+          displayDocs={selectedService.requiredDocuments ? selectedService.requiredDocuments.map(doc => typeof doc === "string" ? doc : (doc.ar || doc.en || doc.name || doc.label || "")) : []}
           onAllDocsUploaded={() => { setUploadModalOpen(false); setAllDocsUploaded(true); }}
         />
       </div>
