@@ -184,40 +184,77 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     setOrderCreated,
     setOrderInfo
   }) {
-const servicePrice = Number(selectedService.price) || 0;
-const printingFee = Number(selectedService.printingFee) || 0;
-const vat = +(printingFee * 0.05).toFixed(2);
-const total = +(servicePrice + printingFee + vat).toFixed(2);
+    const servicePrice = Number(selectedService.price) || 0;
+    const printingFee = Number(selectedService.printingFee) || 0;
+    const vat = +(printingFee * 0.05).toFixed(2);
+    const total = +(servicePrice + printingFee + vat).toFixed(2);
 
-const stripeFeesResult = calcStripeFees(total);
-const processingFee = stripeFeesResult.stripeFee;
-const finalPrice = stripeFeesResult.totalAmount;
+    const stripeFeesResult = calcStripeFees(total);
+    const processingFee = stripeFeesResult.stripeFee;
+    const finalPrice = stripeFeesResult.totalAmount;
 
-const paymentData = {
-  orderNumber: result.orderNumber,
-  clientSecret: result.clientSecret,
-  service: {
-    name: selectedService.name,
-    id: selectedService.id,
-    price: servicePrice,
-    printingFee,
-    vat,
-    coinDiscount: 0,
-    userEmail: client?.email,
-    providers: serviceProviders,
-    employeeData
-  },
-  totalPrice: total,
-  processingFee,
-  finalPrice,
-  customerId: client?.customerId,
-  lang,
-  uploadedDocs,
-  assignedTo,
-  assignedToName
-};
+    const serviceProviders = Array.isArray(selectedService.providers) ? selectedService.providers : [];
+    const isSpecialist =
+      serviceProviders.some(
+        p =>
+          p === employeeData?.providerName ||
+          p === employeeData?.speciality ||
+          p === employeeData?.id ||
+          p === employeeData?.name
+      );
+    const assignedTo = isSpecialist ? employeeData.id : "";
+    const assignedToName = isSpecialist ? employeeData.name : "";
 
-localStorage.setItem("paymentData", JSON.stringify(paymentData));
+    // استدعاء API لإنشاء الطلب والدفع في Stripe
+    const res = await fetch("/api/create-payment-intent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        amount: finalPrice,
+        serviceId: selectedService.id,
+        serviceName: selectedService.name,
+        customerId: client?.customerId,
+        userEmail: client?.email,
+        attachments: uploadedDocs,
+        providers: serviceProviders,
+        assignedTo,
+        assignedToName,
+        employeeData,
+        lang
+      }),
+    });
+    const result = await res.json();
+
+    if (!result || !result.clientSecret) {
+      alert(lang === "ar" ? "تعذر إنشاء بوابة الدفع، يرجى المحاولة لاحقاً." : "Could not create payment gateway. Please try again later.");
+      return;
+    }
+
+    const paymentData = {
+      orderNumber: result.orderNumber,
+      clientSecret: result.clientSecret,
+      service: {
+        name: selectedService.name,
+        id: selectedService.id,
+        price: servicePrice,
+        printingFee,
+        vat,
+        coinDiscount: 0,
+        userEmail: client?.email,
+        providers: serviceProviders,
+        employeeData
+      },
+      totalPrice: total,
+      processingFee,
+      finalPrice,
+      customerId: client?.customerId,
+      lang,
+      uploadedDocs,
+      assignedTo,
+      assignedToName
+    };
+
+    localStorage.setItem("paymentData", JSON.stringify(paymentData));
     const link = `${window.location.origin}/payment/service?order=${result.orderNumber}`;
     setOrderCreated(true);
     setOrderInfo({
@@ -603,4 +640,4 @@ localStorage.setItem("paymentData", JSON.stringify(paymentData));
       </div>
     </div>
   );
-}    
+}
