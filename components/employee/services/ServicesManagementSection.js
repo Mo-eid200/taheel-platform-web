@@ -77,12 +77,12 @@ export default function ServicesManagementSection({ employeeData, lang }) {
     const searchNorm = normalizeArabic(serviceSearch.trim());
     return searchNorm
       ? arr.filter(
-        s =>
-          normalizeArabic(s.name || "").includes(searchNorm) ||
-          (Array.isArray(s.providers)
-            ? normalizeArabic(s.providers.join(", ")).includes(searchNorm)
-            : false)
-      )
+          s =>
+            normalizeArabic(s.name || "").includes(searchNorm) ||
+            (Array.isArray(s.providers)
+              ? normalizeArabic(s.providers.join(", ")).includes(searchNorm)
+              : false)
+        )
       : arr;
   }
   const filteredServices = filterFlexible(services);
@@ -175,103 +175,98 @@ export default function ServicesManagementSection({ employeeData, lang }) {
   }, [selectedServiceId, services, otherServices]);
 
   // دالة موحدة لإنشاء الطلب والدفع عبر Stripe API للموظف أو العميل
-async function handleStartPayment({
-  client,
-  selectedService,
-  uploadedDocs,
-  employeeData,
-  lang,
-  setOrderCreated,
-  setOrderInfo
-}) {
-  // حساب كل القيم مثل العميل بالضبط
-  const servicePrice = Number(selectedService.price) || 0;
-  const printingFee = Number(selectedService.printingFee) || 0;
-  const vat = +(printingFee * 0.05).toFixed(2);
+  async function handleStartPayment({
+    client,
+    selectedService,
+    uploadedDocs,
+    employeeData,
+    lang,
+    setOrderCreated,
+    setOrderInfo
+  }) {
+    // الحسابات بنفس منطق العميل
+    const servicePrice = Number(selectedService.price) || 0;
+    const printingFee = Number(selectedService.printingFee) || 0;
+    const vat = +(printingFee * 0.05).toFixed(2);
+    const totalPrice = +(servicePrice + printingFee + vat).toFixed(2);
+    const coinDiscount = 0; // خصم الكوينات (لو فيه، أضفه هنا)
+    const finalPriceBeforeGateway = +(totalPrice - coinDiscount).toFixed(2);
 
-  // الإجمالي قبل أي خصم أو رسوم بوابة دفع
-  const totalPrice = +(servicePrice + printingFee + vat).toFixed(2);
+    const stripeFeesResult = calcStripeFees(finalPriceBeforeGateway);
+    const processingFee = stripeFeesResult.stripeFee;
+    const finalPrice = stripeFeesResult.totalAmount;
 
-  // خصم الكوينات (ممكن تطويره لاحقاً)
-  const coinDiscount = 0; // عدل لاحقاً لو فيه كوينات للعميل
-  const finalPriceBeforeGateway = +(totalPrice - coinDiscount).toFixed(2);
-
-  // حساب رسوم بوابة Stripe
-  const stripeFeesResult = calcStripeFees(finalPriceBeforeGateway);
-  const processingFee = stripeFeesResult.stripeFee;
-  const finalPrice = stripeFeesResult.totalAmount;
-
-  const serviceProviders = Array.isArray(selectedService.providers) ? selectedService.providers : [];
-  const isSpecialist =
-    serviceProviders.some(
+    const serviceProviders = Array.isArray(selectedService.providers) ? selectedService.providers : [];
+    const isSpecialist = serviceProviders.some(
       p =>
         p === employeeData?.providerName ||
         p === employeeData?.speciality ||
         p === employeeData?.id ||
         p === employeeData?.name
     );
-  const assignedTo = isSpecialist ? employeeData.id : "";
-  const assignedToName = isSpecialist ? employeeData.name : "";
+    const assignedTo = isSpecialist ? employeeData.id : "";
+    const assignedToName = isSpecialist ? employeeData.name : "";
 
-  // استدعاء API لإنشاء الطلب والدفع في Stripe
-  const res = await fetch("/api/create-payment-intent", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      amount: finalPrice,
-      serviceId: selectedService.id,
-      serviceName: selectedService.name,
+    // استدعاء API لإنشاء الطلب والدفع في Stripe
+    const res = await fetch("/api/create-payment-intent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        amount: finalPrice,
+        serviceId: selectedService.id,
+        serviceName: selectedService.name,
+        customerId: client?.customerId,
+        userEmail: client?.email,
+        attachments: uploadedDocs,
+        providers: serviceProviders,
+        assignedTo,
+        assignedToName,
+        employeeData,
+        lang
+      }),
+    });
+    const result = await res.json();
+
+    if (!result || !result.clientSecret) {
+      alert(lang === "ar" ? "تعذر إنشاء بوابة الدفع، يرجى المحاولة لاحقاً." : "Could not create payment gateway. Please try again later.");
+      return;
+    }
+
+    // **هنا الهيكل المتطابق مع العميل**
+    const paymentData = {
+      orderNumber: result.orderNumber,
+      clientSecret: result.clientSecret,
+      service: {
+        name: selectedService.name,
+        id: selectedService.id,
+        price: servicePrice,
+        printingFee,
+        vat,
+        coinDiscount,
+        userEmail: client?.email,
+        providers: serviceProviders,
+        employeeData
+      },
+      totalPrice,
+      processingFee,
+      finalPrice,
       customerId: client?.customerId,
-      userEmail: client?.email,
-      attachments: uploadedDocs,
-      providers: serviceProviders,
+      lang,
+      uploadedDocs,
       assignedTo,
-      assignedToName,
-      employeeData,
-      lang
-    }),
-  });
-  const result = await res.json();
+      assignedToName
+    };
 
-  if (!result || !result.clientSecret) {
-    alert(lang === "ar" ? "تعذر إنشاء بوابة الدفع، يرجى المحاولة لاحقاً." : "Could not create payment gateway. Please try again later.");
-    return;
+    // حفظ بنفس هيكل العميل
+    localStorage.setItem("paymentData", JSON.stringify(paymentData));
+    const link = `${window.location.origin}/payment/service?order=${result.orderNumber}`;
+    setOrderCreated(true);
+    setOrderInfo({
+      orderNumber: result.orderNumber,
+      paymentUrl: link
+    });
+    setPaymentUrl(link);
   }
-
-  // تجهيز بيانات الدفع بنفس منطق العميل
-  const paymentData = {
-    orderNumber: result.orderNumber,
-    clientSecret: result.clientSecret,
-    service: {
-      name: selectedService.name,
-      id: selectedService.id,
-      price: servicePrice,     // السعر الأساسي فقط
-      printingFee,             // رسوم الطباعة
-      vat,                     // الضريبة
-      coinDiscount,            // خصم الكوينات (لو فيه)
-      userEmail: client?.email,
-      providers: serviceProviders,
-      employeeData
-    },
-    totalPrice,                // الإجمالي قبل أي خصم أو رسوم بوابة دفع
-    processingFee,             // رسوم Stripe
-    finalPrice,                // الإجمالي النهائي بعد Stripe
-    customerId: client?.customerId,
-    lang,
-    uploadedDocs,
-    assignedTo,
-    assignedToName
-  };
-
-  localStorage.setItem("paymentData", JSON.stringify(paymentData));
-  const link = `${window.location.origin}/payment/service?order=${result.orderNumber}`;
-  setOrderCreated(true);
-  setOrderInfo({
-    orderNumber: result.orderNumber,
-    paymentUrl: link
-  });
-  setPaymentUrl(link);
-}
 
   function ClientInfoBox() {
     if (!client) return null;
