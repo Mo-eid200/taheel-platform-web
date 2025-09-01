@@ -230,29 +230,30 @@ export default function ServicesManagementSection({ employeeData, lang }) {
       return;
     }
 
-    const paymentData = {
-      orderNumber: result.orderNumber,
-      clientSecret: result.clientSecret,
-      service: {
-        name: selectedService.name,
-        id: selectedService.id,
-        price: servicePrice,
-        printingFee,
-        vat,
-        coinDiscount: 0,
-        userEmail: client?.email,
-        providers: serviceProviders,
-        employeeData
-      },
-      totalPrice: total,
-      processingFee,
-      finalPrice,
-      customerId: client?.customerId,
-      lang,
-      uploadedDocs,
-      assignedTo,
-      assignedToName
-    };
+const paymentData = {
+  orderNumber: result.orderNumber,
+  clientSecret: result.clientSecret,
+  service: {
+    name: selectedService.name,
+    id: selectedService.id,
+    price: servicePrice,
+    printingFee,
+    vat,
+    coinDiscount: 0,
+    userEmail: client?.email,
+    providers: serviceProviders,
+    employeeData
+  },
+  totalPrice: total,
+  processingFee,
+  finalPrice,
+  customerId: client?.customerId,
+  lang,
+  uploadedDocs,
+  assignedTo,
+  assignedToName
+};
+// ثم احفظ paymentData بنفس الطريقة
 
     localStorage.setItem("paymentData", JSON.stringify(paymentData));
     const link = `${window.location.origin}/payment/service?order=${result.orderNumber}`;
