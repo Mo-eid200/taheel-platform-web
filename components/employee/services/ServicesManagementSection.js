@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { FaSearch } from "react-icons/fa";
 import { firestore } from "@/lib/firebase.client";
-import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, query, where, getDocs } from "firebase/firestore";
 import ServiceUploadModal from "./ServiceUploadModal";
 import { useRouter } from "next/navigation";
 import calcStripeFees from "@/utils/calcStripeFees"; // ✅ الاستيراد الصحيح لدالة الرسوم
@@ -259,6 +259,14 @@ export default function ServicesManagementSection({ employeeData, lang }) {
 
     // حفظ بنفس هيكل العميل
     localStorage.setItem("paymentData", JSON.stringify(paymentData));
+
+    // حفظ بيانات الدفع في Firestore/requests بنفس الهيكل الموحد
+    await setDoc(doc(firestore, "requests", result.orderNumber), {
+      ...paymentData,
+      status: "awaiting_payment",
+      createdAt: new Date().toISOString()
+    });
+
     const link = `${window.location.origin}/payment/service?order=${result.orderNumber}`;
     setOrderCreated(true);
     setOrderInfo({
@@ -311,11 +319,12 @@ export default function ServicesManagementSection({ employeeData, lang }) {
         <button
           type="button"
           className="px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-sm shadow mt-3 cursor-pointer"
-          style={{ minWidth: 120, fontSize: 15 }}
+          style={{ minWidth: 120, fontSize: 15, cursor: "pointer" }}
           onClick={() => {
             setAllDocsUploaded(false);
             setUploadModalOpen(true);
           }}
+          onMouseOver={e => e.currentTarget.style.cursor = "pointer"}
         >
           {lang === "ar" ? "رفع المستندات المطلوبة" : "Upload Required Documents"}
         </button>
@@ -377,7 +386,7 @@ export default function ServicesManagementSection({ employeeData, lang }) {
             <button
               type="button"
               className="px-3 py-1 rounded bg-emerald-700 hover:bg-emerald-900 text-white font-bold text-sm shadow mt-4"
-              style={{ minWidth: 120, fontSize: 15 }}
+              style={{ minWidth: 120, fontSize: 15, cursor: "pointer" }}
               onClick={() => {
                 handleStartPayment({
                   client,
@@ -389,6 +398,7 @@ export default function ServicesManagementSection({ employeeData, lang }) {
                   setOrderInfo
                 });
               }}
+              onMouseOver={e => e.currentTarget.style.cursor = "pointer"}
             >
               {lang === "ar" ? "إنشاء الطلب وإرسال لينك الدفع" : "Create Order & Send Payment Link"}
             </button>
@@ -413,11 +423,12 @@ export default function ServicesManagementSection({ employeeData, lang }) {
                   onClick={e => e.target.select()}
                 />
                 <button
-                  style={{ padding: "4px 9px", marginLeft: "8px", fontSize: 13 }}
+                  style={{ padding: "4px 9px", marginLeft: "8px", fontSize: 13, cursor: "pointer" }}
                   onClick={() => {
                     navigator.clipboard.writeText(orderInfo.paymentUrl);
                     alert(lang === "ar" ? "تم نسخ الرابط!" : "Link copied!");
                   }}
+                  onMouseOver={e => e.currentTarget.style.cursor = "pointer"}
                 >
                   {lang === "ar" ? "نسخ الرابط" : "Copy Link"}
                 </button>
@@ -456,9 +467,10 @@ export default function ServicesManagementSection({ employeeData, lang }) {
       <div ref={dropdownRef} className="relative w-full">
         <div
           className={`border-2 rounded-lg px-2 py-1 bg-white shadow w-full flex items-center cursor-pointer ${!client ? "opacity-60" : ""}`}
-          style={{ height: 38 }}
+          style={{ height: 38, cursor: "pointer" }}
           onClick={() => client && setServicesDropdownOpen(true)}
           tabIndex={0}
+          onMouseOver={e => e.currentTarget.style.cursor = "pointer"}
         >
           <span className="font-bold text-emerald-900 text-base flex-1 truncate">
             {selectedServiceId
@@ -523,7 +535,8 @@ export default function ServicesManagementSection({ employeeData, lang }) {
                       setSelectedServiceId(s.id);
                       setServicesDropdownOpen(false);
                     }}
-                    style={{ borderBottom: "1px solid #f3f5f7" }}
+                    style={{ borderBottom: "1px solid #f3f5f7", cursor: "pointer" }}
+                    onMouseOver={e => e.currentTarget.style.cursor = "pointer"}
                   >
                     <span style={{ color: "#1c7ed6", fontWeight: "bold", fontSize: "17px" }}>{s.name}</span>
                     {s.providers && s.providers.length > 0 && (
@@ -553,7 +566,8 @@ export default function ServicesManagementSection({ employeeData, lang }) {
                       setSelectedServiceId(s.id);
                       setServicesDropdownOpen(false);
                     }}
-                    style={{ borderBottom: "1px solid #f3f5f7" }}
+                    style={{ borderBottom: "1px solid #f3f5f7", cursor: "pointer" }}
+                    onMouseOver={e => e.currentTarget.style.cursor = "pointer"}
                   >
                     <span style={{ color: "#1c7ed6", fontWeight: "bold", fontSize: "17px" }}>{s.name}</span>
                     {s.providers && s.providers.length > 0 && (
@@ -592,7 +606,8 @@ export default function ServicesManagementSection({ employeeData, lang }) {
             className="border-2 rounded-lg px-2 py-1 w-full shadow focus:outline-emerald-500 text-base font-bold text-emerald-900 bg-white"
             value={prefix}
             onChange={e => setPrefix(e.target.value)}
-            style={{ height: 38 }}
+            style={{ height: 38, cursor: "pointer" }}
+            onMouseOver={e => e.currentTarget.style.cursor = "pointer"}
           >
             {PREFIXES.map(p => (
               <option key={p.key} value={p.key}>{lang === "ar" ? p.labelAr : p.labelEn}</option>
@@ -615,8 +630,9 @@ export default function ServicesManagementSection({ employeeData, lang }) {
             <button
               type="submit"
               className="ml-2 px-4 py-1 rounded-full bg-emerald-600 hover:bg-emerald-800 text-white flex items-center gap-1 font-bold text-base"
-              style={{ height: 38, minWidth: "72px", fontSize: "18px" }}
+              style={{ height: 38, minWidth: "72px", fontSize: "18px", cursor: "pointer" }}
               title={lang === "ar" ? "بحث" : "Search"}
+              onMouseOver={e => e.currentTarget.style.cursor = "pointer"}
             >
               <FaSearch />
               {lang === "ar" ? "بحث" : "Search"}
