@@ -95,7 +95,6 @@ function ForgotPasswordInner() {
     setOtpMsg("");
     setOtpError("");
     try {
-      // استدعاء API وهمي
       const res = await fetch("/api/send-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -107,7 +106,7 @@ function ForgotPasswordInner() {
         setStep(2);
         setOtpMsg(t.otpSent);
       } else {
-        setOtpError(data.error || t.otpError);
+        setOtpError(data.message || t.otpError);
       }
     } catch {
       setOtpError(t.otpError);
@@ -130,7 +129,7 @@ function ForgotPasswordInner() {
       if (data.success) {
         setOtpMsg(t.otpSent);
       } else {
-        setOtpError(data.error || t.otpError);
+        setOtpError(data.message || t.otpError);
       }
     } catch {
       setOtpError(t.otpError);
@@ -145,17 +144,16 @@ function ForgotPasswordInner() {
     setOtpError("");
     setOtpMsg("");
     try {
-      // تحقق الرمز عبر API
       const res = await fetch("/api/verify-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: emailForReset, otp }),
+        body: JSON.stringify({ email: emailForReset, code: otp }), // هنا المفتاح الصحيح
       });
       const data = await res.json();
       if (data.success) {
         setStep(3);
       } else {
-        setOtpError(data.error || t.otpError);
+        setOtpError(data.message || t.otpError);
       }
     } catch {
       setOtpError(t.otpError);
@@ -170,7 +168,6 @@ function ForgotPasswordInner() {
     setSuccessMsg("");
     setResetting(true);
 
-    // تحقق من تطابق كلمة المرور
     if (newPass.length < 6 || newPass !== confirmPass) {
       setPassError(t.passError);
       setResetting(false);
@@ -178,18 +175,17 @@ function ForgotPasswordInner() {
     }
 
     try {
-      // استدعاء API تغيير كلمة المرور
       const res = await fetch("/api/reset-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: emailForReset, otp, password: newPass }),
+        body: JSON.stringify({ email: emailForReset, code: otp, password: newPass }), // هنا المفتاح الصحيح
       });
       const data = await res.json();
       if (data.success) {
         setSuccessMsg(t.success);
         setStep(4);
       } else {
-        setPassError(data.error || t.passError);
+        setPassError(data.message || t.passError);
       }
     } catch {
       setPassError(t.passError);
@@ -250,7 +246,6 @@ function ForgotPasswordInner() {
 
       {/* نموذج نسيت كلمة المرور */}
       <main className="w-full max-w-md mx-auto card-global p-10 space-y-7 mt-2 z-10 relative">
-
         {/* المرحلة 1: إدخال البريد الإلكتروني */}
         {step === 1 && (
           <form onSubmit={handleSendOtp} autoComplete="on" className="space-y-5">
