@@ -12,6 +12,7 @@ export async function POST(req) {
   }
 
   // تحقق من الرمز
+  console.log("OTP Object:", otpObj, "Code Provided:", code);
   const otpObj = await getOtp(cleanEmail);
   if (!otpObj || otpObj.code !== code || Date.now() > otpObj.expires) {
     return NextResponse.json({ success: false, message: "رمز غير صالح أو منتهي" }, { status: 400 });
