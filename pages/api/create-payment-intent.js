@@ -49,47 +49,54 @@ export default async function handler(req, res) {
     const requestId = generateOrderNumber();
 
     // Stripe PaymentIntent (لـ Stripe Elements)
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(amount * 100),
-      currency: 'aed',
-      receipt_email: userEmail,
-      metadata: { requestId, customerId, serviceId: serviceId || "", serviceName },
-      description: `دفع خدمة ${serviceName}`,
-    });
-
-    // سجل الطلب في فايرستور
-await firestore.collection("requests").doc(requestId).set({
-  requestId,
-  paymentIntentId: paymentIntent.id,
-  clientSecret: paymentIntent.client_secret, // ← أضف هذا السطر!
-  customerId,
-  serviceId: serviceId || "",
-  serviceName,
-  paidAmount: amount,
-  coinsUsed,
-  coinsGiven,
-  createdAt: new Date().toISOString(),
-  lastUpdated: new Date().toISOString(),
-  status,
-  userEmail,
-  attachments,
-  providers,
-  assignedTo,
-  assignedToName,
-  employeeData,
-  statusHistory: [
-    {
-      status,
-      timestamp: new Date().toISOString(),
-      updatedBy: assignedToName || userEmail || "system"
-    }
-  ]
+const paymentIntent = await stripe.paymentIntents.create({
+  amount: Math.round(amount * 100),
+  currency: 'aed',
+  receipt_email: userEmail,
+  metadata: { requestId, customerId, serviceId: serviceId || "", serviceName },
+  description: `دفع خدمة ${serviceName}`,
 });
 
-    // أرجع clientSecret ورقم الطلب للواجهة
-    res.status(200).json({ clientSecret: paymentIntent.client_secret, orderNumber: requestId });
-  } catch (e) {
-    console.error("Stripe/Firestore error:", e);
-    res.status(500).json({ error: e.message, stack: e.stack });
+// تحقق هل العملية شحن محفظة؟
+const isWalletRecharge = 
+  serviceId === "wallet-recharge" ||
+  serviceName === "شحن المحفظة" ||
+  serviceName.toLowerCase().includes("wallet");
+
+// سجل الطلب فقط لو ليست شحن محفظة
+if (!isWalletRecharge) {
+  await firestore.collection("requests").doc(requestId).set({
+    requestId,
+    paymentIntentId: paymentIntent.id,
+    clientSecret: paymentIntent.client_secret,
+    customerId,
+    serviceId: serviceId || "",
+    serviceName,
+    paidAmount: amount,
+    coinsUsed,
+    coinsGiven,
+    createdAt: new Date().toISOString(),
+    lastUpdated: new Date().toISOString(),
+    status,
+    userEmail,
+    attachments,
+    providers,
+    assignedTo,
+    assignedToName,
+    employeeData,
+    statusHistory: [
+      {
+        status,
+        timestamp: new Date().toISOString(),
+        updatedBy: assignedToName || userEmail || "system"
+      }
+    ]
+  });
+}
+
+// أرجع clientSecret ورقم الطلب للواجهة
+res.status(200).json({ clientSecret: paymentIntent.client_secret, orderNumber: requestId });
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Internal server error' });
   }
 }

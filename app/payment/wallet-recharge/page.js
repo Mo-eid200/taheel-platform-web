@@ -6,6 +6,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { firestore } from "@/lib/firebase.client";
 import { doc, updateDoc, getDoc, collection, addDoc } from "firebase/firestore";
+import calcStripeFees from "@/utils/calcStripeFees";
 
 // Stripe publishable key
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
@@ -23,7 +24,9 @@ const LANG = {
     coins: "Bonus Coins",
     total: "Total Recharge",
     processing: "Processing...",
-    redirectMsg: "Redirecting to your account..."
+    redirectMsg: "Redirecting to your account...",
+    processingFee: "Processing Fee",
+    totalAfterFee: "Total After Fees",
   },
   ar: {
     title: "شحن المحفظة",
@@ -37,7 +40,9 @@ const LANG = {
     coins: "كوينات مجانية",
     total: "إجمالي الشحن",
     processing: "جارٍ الدفع...",
-    redirectMsg: "يتم تحويلك إلى حسابك..."
+    redirectMsg: "يتم تحويلك إلى حسابك...",
+    processingFee: "رسوم معالجة الدفع الإلكتروني",
+    totalAfterFee: "الإجمالي بعد الرسوم",
   }
 };
 
@@ -50,6 +55,9 @@ function WalletCardForm({ paymentData, lang = "ar", onSuccess }) {
 
   const { amount, coinsBonus, clientSecret, customerId, userEmail } = paymentData;
   const dir = lang === "ar" ? "rtl" : "ltr";
+
+  // حساب رسوم الدفع الإلكتروني والمجموع النهائي
+  const { stripeFee: processingFee, totalAmount: finalAmount } = calcStripeFees(amount || 0);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -108,7 +116,9 @@ function WalletCardForm({ paymentData, lang = "ar", onSuccess }) {
           coinsBonus,
           walletTotal: currentWallet + amount,
           coinsTotal: currentCoins + coinsBonus,
-          lang
+          lang,
+          processingFee,
+          finalAmount
         }),
       });
 
@@ -146,8 +156,16 @@ function WalletCardForm({ paymentData, lang = "ar", onSuccess }) {
               <td className="text-yellow-400 font-bold">{Number(coinsBonus)} كوين</td>
             </tr>
             <tr>
+              <td className="text-gray-300">{LANG[lang].processingFee}:</td>
+              <td className="text-emerald-200 font-bold">{processingFee.toFixed(2)} د.إ</td>
+            </tr>
+            <tr>
               <td className="font-bold text-emerald-400">{LANG[lang].total}:</td>
               <td className="font-bold text-emerald-300">{Number(amount).toFixed(2)} د.إ</td>
+            </tr>
+            <tr>
+              <td className="font-bold text-emerald-400">{LANG[lang].totalAfterFee}:</td>
+              <td className="font-bold text-emerald-300">{finalAmount.toFixed(2)} د.إ</td>
             </tr>
           </tbody>
         </table>
@@ -182,7 +200,7 @@ function WalletCardForm({ paymentData, lang = "ar", onSuccess }) {
         disabled={!stripe || loading}
         className={`w-full py-3 rounded-full bg-gradient-to-r from-emerald-600 via-emerald-500 to-green-700 text-white font-black text-lg mt-3 shadow-lg transition hover:scale-105 hover:brightness-110 ${loading ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
       >
-        {loading ? LANG[lang].processing : `${LANG[lang].payBtn} (${Number(amount).toFixed(2)} د.إ)`}
+        {loading ? LANG[lang].processing : `${LANG[lang].payBtn} (${finalAmount.toFixed(2)} د.إ)`}
       </button>
       {payMsg && (
         <div className={`mt-3 text-center font-bold text-xs flex flex-row items-center justify-center gap-1 ${msgSuccess ? "text-emerald-400" : "text-red-600"}`}>
@@ -211,7 +229,7 @@ export default function WalletRechargePage() {
     setPaymentData(data);
   }, []);
 
-  // حل مشكلة الـHooks: ضع useEffect هنا يراقب success
+  // مراقبة نجاح الدفع للانتقال
   useEffect(() => {
     if (success) {
       const timer = setTimeout(() => {
@@ -221,7 +239,7 @@ export default function WalletRechargePage() {
     }
   }, [success, router]);
 
-  // بيانات الدفع غير موجودة (مثلاً لو دخل الصفحة مباشرة)
+  // بيانات الدفع غير موجودة
   if (!paymentData || !paymentData.clientSecret) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center font-sans bg-black text-white">
@@ -230,21 +248,18 @@ export default function WalletRechargePage() {
     );
   }
 
-  // بعد نجاح الدفع
+  // صفحة النجاح بعد الدفع
   if (success) {
+    const { stripeFee: processingFee, totalAmount: finalAmount } = calcStripeFees(paymentData.amount || 0);
     return (
       <div className="min-h-screen flex flex-col items-center justify-center font-sans bg-black text-white animate-fade-in">
         <Image src="/logo-transparent-large.png" width={90} height={90} alt="Logo" className="mb-6 rounded-full shadow-lg ring-2 ring-emerald-500 bg-white" />
         <div className="text-emerald-400 text-2xl font-black mb-4">{LANG[paymentData.lang].success}</div>
-        <div className="text-lg mb-3">
-          {LANG[paymentData.lang].amount}: {Number(paymentData.amount).toFixed(2)} د.إ
-        </div>
-        <div className="text-lg mb-3">
-          {LANG[paymentData.lang].coins}: {Number(paymentData.coinsBonus)} كوين
-        </div>
-        <div className="text-lg mb-3">
-          رقم العملية: {paymentId}
-        </div>
+        <div className="text-lg mb-3">{LANG[paymentData.lang].amount}: {Number(paymentData.amount).toFixed(2)} د.إ</div>
+        <div className="text-lg mb-3">{LANG[paymentData.lang].coins}: {Number(paymentData.coinsBonus)} كوين</div>
+        <div className="text-lg mb-3">{LANG[paymentData.lang].processingFee}: {processingFee.toFixed(2)} د.إ</div>
+        <div className="text-lg mb-3">{LANG[paymentData.lang].totalAfterFee}: {finalAmount.toFixed(2)} د.إ</div>
+        <div className="text-lg mb-3">رقم العملية: {paymentId}</div>
         <div className="mt-8 text-xl font-bold text-emerald-300 animate-bounce">{LANG[paymentData.lang].thanks}</div>
         <div className="flex flex-col items-center justify-center mt-6 gap-2">
           <div className="loader" style={{
