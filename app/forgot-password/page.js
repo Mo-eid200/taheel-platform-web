@@ -12,7 +12,6 @@ const LANGUAGES = {
     email: "البريد الإلكتروني",
     sendOtp: "إرسال الرمز",
     otpLabel: "أدخل الرمز السري المرسل إلى بريدك",
-    verifyOtp: "تحقق من الرمز",
     newPass: "كلمة المرور الجديدة",
     confirmPass: "تأكيد كلمة المرور الجديدة",
     resetPass: "تغيير كلمة المرور",
@@ -32,7 +31,6 @@ const LANGUAGES = {
     email: "Email",
     sendOtp: "Send Code",
     otpLabel: "Enter the secret code sent to your email",
-    verifyOtp: "Verify Code",
     newPass: "New Password",
     confirmPass: "Confirm New Password",
     resetPass: "Change Password",
@@ -54,31 +52,28 @@ function ForgotPasswordInner() {
   const [lang, setLang] = useState(searchParams.get("lang") === "en" ? "en" : "ar");
   const t = LANGUAGES[lang];
 
-  // مراحل الخطوات
+  // الخطوة الحالية
   const [step, setStep] = useState(1);
 
-  // المرحلة 1: إرسال الرمز
+  // البريد
   const [email, setEmail] = useState("");
   const [sendingOtp, setSendingOtp] = useState(false);
   const [otpMsg, setOtpMsg] = useState("");
   const [otpError, setOtpError] = useState("");
 
-  // المرحلة 2: تحقق الرمز
+  // بيانات الخطوة الثانية
   const [otp, setOtp] = useState("");
-  const [verifyingOtp, setVerifyingOtp] = useState(false);
-
-  // المرحلة 3: تغيير كلمة المرور
   const [newPass, setNewPass] = useState("");
   const [confirmPass, setConfirmPass] = useState("");
   const [resetting, setResetting] = useState(false);
   const [passError, setPassError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
 
-  // حفظ البريد لعملية التحقق وتغيير كلمة المرور
-  const [emailForReset, setEmailForReset] = useState("");
-
-  // مرحلة إعادة إرسال الرمز
+  // إعادة إرسال الرمز
   const [resendingOtp, setResendingOtp] = useState(false);
+
+  // حفظ البريد لعملية التحقق
+  const [emailForReset, setEmailForReset] = useState("");
 
   // تبديل اللغة
   const handleLang = (lng) => {
@@ -137,31 +132,7 @@ function ForgotPasswordInner() {
     setResendingOtp(false);
   };
 
-  // تحقق الرمز
-  const handleVerifyOtp = async (e) => {
-    e.preventDefault();
-    setVerifyingOtp(true);
-    setOtpError("");
-    setOtpMsg("");
-    try {
-      const res = await fetch("/api/verify-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: emailForReset, code: otp }), // هنا المفتاح الصحيح
-      });
-      const data = await res.json();
-      if (data.success) {
-        setStep(3);
-      } else {
-        setOtpError(data.message || t.otpError);
-      }
-    } catch {
-      setOtpError(t.otpError);
-    }
-    setVerifyingOtp(false);
-  };
-
-  // تغيير كلمة المرور
+  // تحقق وتغيير كلمة المرور في نفس الطلب
   const handleResetPass = async (e) => {
     e.preventDefault();
     setPassError("");
@@ -178,17 +149,21 @@ function ForgotPasswordInner() {
       const res = await fetch("/api/reset-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: emailForReset, code: otp, password: newPass }), // هنا المفتاح الصحيح
+        body: JSON.stringify({
+          email: emailForReset,
+          code: otp,
+          password: newPass
+        }),
       });
       const data = await res.json();
       if (data.success) {
         setSuccessMsg(t.success);
-        setStep(4);
+        setStep(3);
       } else {
-        setPassError(data.message || t.passError);
+        setPassError(data.message || t.otpError);
       }
     } catch {
-      setPassError(t.passError);
+      setPassError(t.otpError);
     }
     setResetting(false);
   };
@@ -246,7 +221,7 @@ function ForgotPasswordInner() {
 
       {/* نموذج نسيت كلمة المرور */}
       <main className="w-full max-w-md mx-auto card-global p-10 space-y-7 mt-2 z-10 relative">
-        {/* المرحلة 1: إدخال البريد الإلكتروني */}
+        {/* الخطوة 1: إدخال البريد الإلكتروني */}
         {step === 1 && (
           <form onSubmit={handleSendOtp} autoComplete="on" className="space-y-5">
             {otpError && <div className="bg-red-900/80 text-red-200 p-3 rounded text-center mb-2">{otpError}</div>}
@@ -285,10 +260,10 @@ function ForgotPasswordInner() {
           </form>
         )}
 
-        {/* المرحلة 2: إدخال الرمز السري */}
+        {/* الخطوة 2: إدخال الرمز السري وكلمة المرور الجديدة */}
         {step === 2 && (
-          <form onSubmit={handleVerifyOtp} autoComplete="off" className="space-y-5">
-            {otpError && <div className="bg-red-900/80 text-red-200 p-3 rounded text-center mb-2">{otpError}</div>}
+          <form onSubmit={handleResetPass} autoComplete="off" className="space-y-5">
+            {passError && <div className="bg-red-900/80 text-red-200 p-3 rounded text-center mb-2">{passError}</div>}
             {otpMsg && <div className="bg-green-900/80 text-green-200 p-3 rounded text-center mb-2">{otpMsg}</div>}
             <div className="relative">
               <input
@@ -306,46 +281,10 @@ function ForgotPasswordInner() {
               />
               <FaKey className="absolute top-1/2 right-4 -translate-y-1/2 text-emerald-400" size={20} />
             </div>
-            <button
-              type="submit"
-              disabled={verifyingOtp}
-              className="btn-global w-full py-3 rounded-2xl text-xl shadow-xl flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2"
-              style={{ cursor: verifyingOtp ? "wait" : "pointer" }}
-            >
-              {verifyingOtp ? (
-                <span className="animate-spin h-6 w-6 border-2 border-emerald-900 border-t-transparent rounded-full inline-block"></span>
-              ) : lang === "ar" ? (
-                <>
-                  {t.verifyOtp} <FaArrowLeft />
-                </>
-              ) : (
-                <>
-                  <FaArrowRight /> {t.verifyOtp}
-                </>
-              )}
-            </button>
-            <div className="flex justify-center mt-2">
-              <button
-                type="button"
-                className="text-emerald-400 hover:underline text-sm"
-                onClick={handleResendOtp}
-                disabled={resendingOtp}
-              >
-                {resendingOtp ? t.sendingOtp : t.resendOtp}
-              </button>
-            </div>
-          </form>
-        )}
-
-        {/* المرحلة 3: تغيير كلمة المرور */}
-        {step === 3 && (
-          <form onSubmit={handleResetPass} autoComplete="off" className="space-y-5">
-            {passError && <div className="bg-red-900/80 text-red-200 p-3 rounded text-center mb-2">{passError}</div>}
             <div className="relative">
               <input
                 type="password"
                 required
-                autoFocus
                 minLength={6}
                 value={newPass}
                 onChange={(e) => setNewPass(e.target.value)}
@@ -384,11 +323,21 @@ function ForgotPasswordInner() {
                 </>
               )}
             </button>
+            <div className="flex justify-center mt-2">
+              <button
+                type="button"
+                className="text-emerald-400 hover:underline text-sm"
+                onClick={handleResendOtp}
+                disabled={resendingOtp}
+              >
+                {resendingOtp ? t.sendOtp : t.resendOtp}
+              </button>
+            </div>
           </form>
         )}
 
-        {/* المرحلة 4: نجاح العملية */}
-        {step === 4 && (
+        {/* الخطوة 3: نجاح العملية */}
+        {step === 3 && (
           <div className="flex flex-col items-center justify-center gap-4">
             <div className="bg-green-900/80 text-green-200 p-4 rounded text-center text-lg font-bold mb-2">
               {successMsg || t.success}
