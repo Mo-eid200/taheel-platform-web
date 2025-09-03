@@ -736,7 +736,7 @@ function HomePageInner() {
         </div>
         {/* زر واتساب عائم - ثابت */}
         <a
-          href="https://wa.me/971554463108"
+          href="https://wa.me/+971554463108"
           target="_blank"
           rel="noopener noreferrer"
           className="fixed bottom-4 right-4 z-50 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full shadow-lg p-4 text-xl transition"
