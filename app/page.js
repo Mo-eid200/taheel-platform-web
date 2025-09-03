@@ -703,7 +703,7 @@ function HomePageInner() {
             </div>
             <div className="flex items-center gap-2 text-xs sm:text-sm">
               <span>📞</span>
-              <a href="tel:+971555555555" className="underline hover:text-emerald-400">+971 55 555 5555</a>
+              <a href="tel:+971554463108" className="underline hover:text-emerald-400">+971 55 446 3108</a>
             </div>
             <div className="flex items-center gap-2 text-xs sm:text-sm">
               <span>✉️</span>
@@ -711,7 +711,7 @@ function HomePageInner() {
             </div>
             {/* أيقونات السوشيال تحت بيانات التواصل */}
             <div className="flex gap-2 sm:gap-3 mt-2">
-              <a href="https://wa.me/971555555555" target="_blank" rel="noopener noreferrer" className="bg-emerald-500 hover:bg-emerald-600 text-white rounded-full p-2 sm:p-3 shadow transition focus:outline-none">
+              <a href="https://wa.me/971554463108" target="_blank" rel="noopener noreferrer" className="bg-emerald-500 hover:bg-emerald-600 text-white rounded-full p-2 sm:p-3 shadow transition focus:outline-none">
                 <FaWhatsapp size={18} className="sm:text-[22px]" />
               </a>
               <a href="#" target="_blank" rel="noopener noreferrer" className="bg-blue-500 hover:bg-blue-600 text-white rounded-full p-2 sm:p-3 shadow transition focus:outline-none">
@@ -736,7 +736,7 @@ function HomePageInner() {
         </div>
         {/* زر واتساب عائم - ثابت */}
         <a
-          href="https://wa.me/971555555555"
+          href="https://wa.me/971554463108"
           target="_blank"
           rel="noopener noreferrer"
           className="fixed bottom-4 right-4 z-50 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full shadow-lg p-4 text-xl transition"
