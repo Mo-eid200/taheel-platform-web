@@ -1,11 +1,13 @@
-import { Resend } from "resend";
-import fs from "fs";
-import path from "path";
-
-const resend = new Resend(process.env.RESEND_API_KEY);
-
-const templatePath = path.join(process.cwd(), "lib", "email-templates", "order-confirmation-bilingual.html");
-const templateHTML = fs.readFileSync(templatePath, "utf-8");
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    }
+  });
+}
 
 export async function POST(req) {
   try {
@@ -23,8 +25,21 @@ export async function POST(req) {
       html,
       text: `رقم الطلب: ${orderNumber}\nاسم الخدمة: ${serviceName}\nالمبلغ المدفوع: ${price} درهم\nOrder No.: ${orderNumber}\nService: ${serviceName}\nPaid: ${price} AED`,
     });
-    return Response.json({ success: true });
+    return new Response(JSON.stringify({ success: true }), {
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      }
+    });
   } catch (error) {
-    return Response.json({ success: false, error: error.message }, { status: 500 });
+    return new Response(JSON.stringify({ success: false, error: error.message }), {
+      status: 500,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      }
+    });
   }
 }
