@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "4c9129cc-fc25-4f85-9780-fdc1c9644704"
+      }
+    },
+    "android": {
+      "package": "com.mohamed_eid_00.taheelplatform"
+    }
+  }
+}
