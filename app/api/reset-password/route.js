@@ -1,71 +1,101 @@
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs"; // لاستخدام crypto في Node runtime
+
 import { NextResponse } from "next/server";
+import crypto from "node:crypto";
 import { getOtp, deleteOtp } from "@/lib/otpDb";
-import { updateUserPassword } from "@/lib/usersDb"; // يجب أن تكتب هذه الوظيفة
+import { updateUserPassword } from "@/lib/usersDb";
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Max-Age": "86400",
+  "Content-Type": "application/json; charset=utf-8",
+};
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
+
+function safeEqual(a, b) {
+  const ab = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+}
 
 export async function POST(req) {
   try {
-    const { email, code, password } = await req.json();
-    const cleanEmail = email?.trim().toLowerCase();
+    const body = await req.json().catch(() => ({}));
+    const email = (body.email || "").trim().toLowerCase();
+    const code = String(body.code || "").trim();
+    const password = String(body.password || "");
 
-    console.log("---- بدء تغيير كلمة المرور ----");
-    console.log("البيانات المستلمة:", { email, cleanEmail, code, password });
-
-    if (!cleanEmail || !code || !password) {
-      console.log("خطأ: هناك حقل ناقص");
-      return NextResponse.json({ success: false, message: "كل الحقول مطلوبة" }, { status: 400 });
+    if (!email || !code || !password) {
+      return NextResponse.json(
+        { success: false, message: "كل الحقول مطلوبة" },
+        { status: 400, headers: CORS_HEADERS }
+      );
     }
-
-    // تحقق من الرمز
-    const otpObj = await getOtp(cleanEmail);
-    console.log("الكود من قاعدة البيانات:", otpObj);
-
-    if (!otpObj) {
-      console.log("خطأ: لم يتم العثور على كود لهذا البريد");
-      return NextResponse.json({ success: false, message: "رمز غير صالح أو منتهي" }, { status: 400 });
-    }
-    if (otpObj.code !== code) {
-      console.log("خطأ: الكود المدخل غير مطابق للكود في القاعدة", { codeProvided: code, codeInDb: otpObj.code });
-      return NextResponse.json({ success: false, message: "رمز غير صالح أو منتهي" }, { status: 400 });
-    }
-    if (Date.now() > otpObj.expires) {
-      console.log("خطأ: الكود منتهي الصلاحية");
-      return NextResponse.json({ success: false, message: "رمز غير صالح أو منتهي" }, { status: 400 });
-    }
-
-    // تحقق من قوة كلمة المرور
     if (password.length < 6) {
-      console.log("خطأ: كلمة المرور أقل من 6 حروف");
-      return NextResponse.json({ success: false, message: "كلمة المرور ضعيفة" }, { status: 400 });
+      return NextResponse.json(
+        { success: false, message: "كلمة المرور ضعيفة" },
+        { status: 400, headers: CORS_HEADERS }
+      );
     }
 
-    // محاولة تغيير كلمة المرور
-    let updated;
+    const otpObj = await getOtp(email);
+    if (!otpObj) {
+      return NextResponse.json(
+        { success: false, message: "رمز غير صالح أو منتهي" },
+        { status: 400, headers: CORS_HEADERS }
+      );
+    }
+
+    const codeInDb = String(otpObj.code || "").trim();
+    const expires = Number(otpObj.expires || 0);
+    if (Date.now() > expires) {
+      return NextResponse.json(
+        { success: false, message: "رمز غير صالح أو منتهي" },
+        { status: 400, headers: CORS_HEADERS }
+      );
+    }
+    if (!safeEqual(code, codeInDb)) {
+      return NextResponse.json(
+        { success: false, message: "رمز غير صالح أو منتهي" },
+        { status: 400, headers: CORS_HEADERS }
+      );
+    }
+
+    let updated = false;
     try {
-      updated = await updateUserPassword(cleanEmail, password);
-      console.log("نتيجة محاولة تغيير كلمة المرور:", updated);
-    } catch (err) {
-      console.log("استثناء أثناء محاولة تغيير كلمة المرور:", err);
-      return NextResponse.json({ success: false, message: "خطأ داخلي أثناء تغيير كلمة المرور" }, { status: 500 });
+      updated = await updateUserPassword(email, password);
+    } catch (e) {
+      console.error("updateUserPassword error:", e);
+      return NextResponse.json(
+        { success: false, message: "خطأ داخلي أثناء تغيير كلمة المرور" },
+        { status: 500, headers: CORS_HEADERS }
+      );
     }
-
     if (!updated) {
-      console.log("خطأ: لم يتم تغيير كلمة المرور (الدالة رجعت false)");
-      return NextResponse.json({ success: false, message: "تعذر تغيير كلمة المرور" }, { status: 500 });
+      return NextResponse.json(
+        { success: false, message: "تعذر تغيير كلمة المرور" },
+        { status: 500, headers: CORS_HEADERS }
+      );
     }
 
-    // حذف الكود بعد النجاح
-    try {
-      await deleteOtp(cleanEmail);
-      console.log("تم حذف كود التحقق من القاعدة");
-    } catch (err) {
-      console.log("استثناء أثناء حذف الكود:", err);
-    }
+    try { await deleteOtp(email); } catch (e) { console.warn("deleteOtp warn:", e); }
 
-    console.log("تم تغيير كلمة المرور بنجاح للبريد:", cleanEmail);
-    return NextResponse.json({ success: true, message: "تم تغيير كلمة المرور بنجاح" });
+    return NextResponse.json(
+      { success: true, message: "تم تغيير كلمة المرور بنجاح" },
+      { headers: CORS_HEADERS }
+    );
   } catch (err) {
-    console.log("استثناء عام في دالة تغيير كلمة المرور:", err);
-    return NextResponse.json({ success: false, message: "خطأ داخلي غير متوقع" }, { status: 500 });
+    console.error("reset-password unexpected error:", err);
+    return NextResponse.json(
+      { success: false, message: "خطأ داخلي غير متوقع" },
+      { status: 500, headers: CORS_HEADERS }
+    );
   }
 }
