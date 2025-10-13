@@ -10,65 +10,91 @@ import {
   limit,
   onSnapshot,
   doc,
-  setDoc
+  setDoc,
 } from "firebase/firestore";
 
 export default function NotificationWidget({ userId, lang = "ar", darkMode = false }) {
-  const [notifications, setNotifications] = useState([]);     // إشعارات المستخدم + العامة
-  const [reads, setReads] = useState({});                     // قاموس { notifId: true }
+  const [notifications, setNotifications] = useState([]); // إشعارات المستخدم + العامة
+  const [reads, setReads] = useState({});                 // قاموس { notifId: true }
   const [showMenu, setShowMenu] = useState(false);
   const [activeNotif, setActiveNotif] = useState(null);
   const menuRef = useRef(null);
 
-  // ========== جلب الإشعارات (المستخدم + العامة) لحظيًا ==========
+  // ========== مصادر منفصلة (بدون in) ثم دمج ==========
   useEffect(() => {
     if (!userId) return;
 
-    // نجيب: targetId == userId أو targetId == "all" + ترتيب أحدث أولاً
-    const qUserOrAll = query(
+    // 1) إشعارات المستخدم
+    const qUser = query(
       collection(db, "notifications"),
-      where("targetId", "in", [userId, "all"]), // يتطلب index؛ شغّله لو Firebase طلب
+      where("targetId", "==", userId),
       orderBy("timestamp", "desc"),
       limit(100)
     );
 
-    const unsubNotifs = onSnapshot(qUserOrAll, (snap) => {
-      const list = [];
-      const now = Date.now();
-      snap.forEach((d) => {
-        const data = d.data();
-        const ts = typeof data.timestamp?.toDate === "function"
+    // 2) الإشعارات العامة
+    const qAll = query(
+      collection(db, "notifications"),
+      where("targetId", "==", "all"),
+      orderBy("timestamp", "desc"),
+      limit(100)
+    );
+
+    let cacheUser = [];
+    let cacheAll = [];
+
+    const toItem = (d) => {
+      const data = d.data();
+      const ts =
+        typeof data.timestamp?.toDate === "function"
           ? data.timestamp.toDate()
-          : (data.timestamp ? new Date(data.timestamp) : null);
+          : data.timestamp
+          ? new Date(data.timestamp)
+          : null;
 
+      return {
+        ...data,
+        notificationId: d.id,
+        _date: ts || null,
+      };
+    };
+
+    const applyMerge = () => {
+      const now = Date.now();
+      const merged = [...cacheUser, ...cacheAll]
         // آخر 15 يوم فقط
-        if (ts && (now - ts.getTime()) / (1000 * 60 * 60 * 24) > 15) return;
+        .filter((n) => {
+          if (!n._date) return true;
+          return (now - n._date.getTime()) / (1000 * 60 * 60 * 24) <= 15;
+        })
+        // ترتيب تنازلي بالوقت
+        .sort((a, b) => (b._date?.getTime?.() || 0) - (a._date?.getTime?.() || 0));
+      setNotifications(merged);
+    };
 
-        list.push({
-          ...data,
-          notificationId: d.id,
-          _date: ts ? ts : null
-        });
-      });
-      // fallback لو مفيش timestamp
-      list.sort((a, b) => (b._date?.getTime?.() || 0) - (a._date?.getTime?.() || 0));
-      setNotifications(list);
+    const unsubUser = onSnapshot(qUser, (snap) => {
+      cacheUser = snap.docs.map(toItem);
+      applyMerge();
     });
 
-    // ========== جلب حالات القراءة للمستخدم ==========
-    // نخزّن حالة القراءة في users/{uid}/reads/{notifId}: { isRead: true, readAt: serverTimestamp() }
+    const unsubAll = onSnapshot(qAll, (snap) => {
+      cacheAll = snap.docs.map(toItem);
+      applyMerge();
+    });
+
+    // حالات القراءة للمستخدم
     const readsRef = collection(db, `users/${userId}/reads`);
     const unsubReads = onSnapshot(readsRef, (snap) => {
       const map = {};
       snap.forEach((d) => {
-        const r = d.data();
-        if (r?.isRead) map[d.id] = true;
+        if (d.data()?.isRead) map[d.id] = true;
       });
       setReads(map);
     });
 
     return () => {
-      unsubNotifs();
+      unsubUser();
+      unsubAll();
       unsubReads();
     };
   }, [userId]);
@@ -85,27 +111,30 @@ export default function NotificationWidget({ userId, lang = "ar", darkMode = fal
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showMenu]);
 
-  // ========== تمييز كمقروء (بدون تعديل وثيقة الإشعار الأصلية) ==========
+  // ========== تمييز كمقروء (لكل مستخدم) ==========
   async function markNotifAsRead(notifId) {
     if (!userId || !notifId) return;
     try {
       await setDoc(
         doc(db, `users/${userId}/reads/${notifId}`),
-        { isRead: true, readAt: new Date() }, // ممكن تبدّلها بـ serverTimestamp() لو حابب
+        { isRead: true, readAt: new Date() }, // أو serverTimestamp() لو تحب
         { merge: true }
       );
-    } catch (_) {}
+    } catch {}
   }
 
-  const unreadCount = useMemo(() => notifications.filter(n => !reads[n.notificationId]).length, [notifications, reads]);
+  const unreadCount = useMemo(
+    () => notifications.filter((n) => !reads[n.notificationId]).length,
+    [notifications, reads]
+  );
 
   // حركة الجرس
   const bellVariants = {
     initial: { rotate: 0 },
     ringing: {
       rotate: [0, -30, 30, -25, 25, -15, 15, -7, 7, 0],
-      transition: { duration: 0.9, ease: "easeInOut" }
-    }
+      transition: { duration: 0.9, ease: "easeInOut" },
+    },
   };
 
   const palette = {
@@ -124,7 +153,7 @@ export default function NotificationWidget({ userId, lang = "ar", darkMode = fal
         className="relative flex items-center justify-center bg-transparent border-none p-0 m-0 focus:outline-none cursor-pointer"
         tabIndex={0}
         title={lang === "ar" ? "الإشعارات" : "Notifications"}
-        onClick={() => setShowMenu(v => !v)}
+        onClick={() => setShowMenu((v) => !v)}
         whileHover={{ scale: 1.18, filter: "brightness(1.12)" }}
         whileTap={{ scale: 0.97 }}
         transition={{ type: "spring", stiffness: 250, damping: 18 }}
@@ -167,7 +196,9 @@ export default function NotificationWidget({ userId, lang = "ar", darkMode = fal
                   return (
                     <li
                       key={n.notificationId}
-                      className={`text-xs border-b pb-2 cursor-pointer transition-all rounded-md px-1 ${isRead ? "opacity-80" : "opacity-100"} ${palette.hoverRow}`}
+                      className={`text-xs border-b pb-2 cursor-pointer transition-all rounded-md px-1 ${
+                        isRead ? "opacity-80" : "opacity-100"
+                      } ${palette.hoverRow}`}
                       onClick={async () => {
                         if (!isRead) await markNotifAsRead(n.notificationId);
                         setActiveNotif({ ...n, isRead: true });
@@ -184,7 +215,9 @@ export default function NotificationWidget({ userId, lang = "ar", darkMode = fal
                       </div>
                       <div className={`${palette.body} mt-0.5`}>{n.body}</div>
                       <div className={`${palette.meta} text-[10px] mt-1`}>
-                        {n._date ? n._date.toLocaleString(lang === "ar" ? "ar-AE" : "en-US", { timeZone: "Asia/Dubai" }) : ""}
+                        {n._date
+                          ? n._date.toLocaleString(lang === "ar" ? "ar-AE" : "en-US", { timeZone: "Asia/Dubai" })
+                          : ""}
                       </div>
                     </li>
                   );
