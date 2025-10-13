@@ -262,53 +262,60 @@ function ClientProfilePageInner({ userId }) {
     return () => unsubscribe();
   }, [resolvedUserId]);
 
-  // ========= جلب الخدمات والطلبات والإشعارات =========
-  useEffect(() => {
-    async function fetchData() {
-      if (!resolvedUserId) return;
-      setLoading(true);
+// ========= جلب الخدمات والطلبات والإشعارات =========
+useEffect(() => {
+  async function fetchData() {
+    if (!resolvedUserId) return;
+    setLoading(true);
 
-      const types = ["resident", "company", "nonresident", "other"];
-      const servicesByType = { resident: [], nonresident: [], company: [], other: [] };
+    const types = ["resident", "company", "nonresident", "other"];
+    const servicesByType = { resident: [], nonresident: [], company: [], other: [] };
 
-      for (const type of types) {
-        const docRef = doc(firestore, "servicesByClientType", type);
-        const snap = await getDoc(docRef);
-        const data = snap.exists() ? snap.data() : {};
-        const arr = Object.entries(data)
-          .filter(([key]) => key.startsWith("service"))
-          .map(([key, val]) => ({ ...val, id: key }));
-        servicesByType[type] = arr.filter((srv) => srv.active !== false);
-      }
-      setServices(servicesByType);
-
-      // orders/notifications مبنية على customerId = doc.id
-      const ordersSnap = await getDocs(
-        query(collection(firestore, "requests"), where("customerId", "==", resolvedUserId), orderBy("createdAt", "desc"))
-      );
-      setOrders(ordersSnap.docs.map((d) => d.data()));
-
-      const notifsSnap = await getDocs(
-        query(collection(firestore, "notifications"), where("targetId", "==", resolvedUserId))
-      );
-      let clientNotifs = notifsSnap.docs.map((d) => d.data());
-      clientNotifs.sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""));
-      setNotifications(clientNotifs);
-
-      setLoading(false);
+    for (const type of types) {
+      const docRef = doc(firestore, "servicesByClientType", type);
+      const snap = await getDoc(docRef);
+      const data = snap.exists() ? snap.data() : {};
+      const arr = Object.entries(data)
+        .filter(([key]) => key.startsWith("service"))
+        .map(([key, val]) => ({ ...val, id: key }));
+      servicesByType[type] = arr.filter((srv) => srv.active !== false);
     }
-    fetchData();
-  }, [resolvedUserId, reloadClient]);
+    setServices(servicesByType);
 
-  useEffect(() => {
-    function handleClickOutside(event) {
-      if (coinsRef.current && !coinsRef.current.contains(event.target)) setShowCoinsMenu(false);
-      if (walletRef.current && !walletRef.current.contains(event.target)) setShowWalletMenu(false);
-      if (messagesRef.current && !messagesRef.current.contains(event.target)) setShowMessagesMenu(false);
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+    // orders/notifications مبنية على customerId = doc.id
+    const ordersSnap = await getDocs(
+      query(collection(firestore, "requests"), where("customerId", "==", resolvedUserId), orderBy("createdAt", "desc"))
+    );
+    setOrders(ordersSnap.docs.map((d) => d.data()));
+
+    const notifsSnap = await getDocs(
+      query(collection(firestore, "notifications"), where("targetId", "==", resolvedUserId))
+    );
+    let clientNotifs = notifsSnap.docs.map((d) => {
+      const data = d.data();
+      return { ...data, _date: toDateSafe(data.timestamp) };
+    });
+    clientNotifs.sort(
+      (a, b) => (b._date?.getTime?.() || 0) - (a._date?.getTime?.() || 0) // أحدث أولاً
+    );
+    setNotifications(clientNotifs);
+
+    setLoading(false);
+  }
+
+  // run and catch to ensure loading is cleared on error
+  fetchData().catch(() => setLoading(false));
+}, [resolvedUserId, reloadClient]);
+
+useEffect(() => {
+  function handleClickOutside(event) {
+    if (coinsRef.current && !coinsRef.current.contains(event.target)) setShowCoinsMenu(false);
+    if (walletRef.current && !walletRef.current.contains(event.target)) setShowWalletMenu(false);
+    if (messagesRef.current && !messagesRef.current.contains(event.target)) setShowMessagesMenu(false);
+  }
+  document.addEventListener("mousedown", handleClickOutside);
+  return () => document.removeEventListener("mousedown", handleClickOutside);
+}, []);
 
   useEffect(() => {
     if (typeof window !== "undefined") localStorage.setItem("lang", lang);
@@ -389,6 +396,16 @@ function ClientProfilePageInner({ userId }) {
       return newLang;
     });
   }
+
+  function toDateSafe(ts) {
+  if (ts && typeof ts.toDate === "function") return ts.toDate(); // Firestore Timestamp
+  if (ts != null) {
+    const d = new Date(ts); // ISO string أو milliseconds
+    if (!isNaN(d.getTime())) return d;
+  }
+  return null;
+}
+
 
   function toggleDarkMode() {
     setDarkMode((dm) => {
