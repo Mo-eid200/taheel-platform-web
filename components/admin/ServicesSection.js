@@ -340,7 +340,24 @@ export default function ServicesSection({ lang = "ar" }) {
               <option value="active">{lang === "ar" ? "مفعّلة فقط" : "Active only"}</option>
               <option value="inactive">{lang === "ar" ? "غير مفعّلة" : "Inactive only"}</option>
             </select>
+            {/* زر "الكل" مع الفئات */}
             <div className="flex gap-1">
+              <button
+                onClick={() => {
+                  setFilter("all");
+                  setShowActive("all");
+                  setSearchQuery("");
+                  setClientType("resident"); // الافتراضي للكل
+                }}
+                className={`px-3 py-2 rounded-full border-2 font-bold tracking-tight text-xs shadow-sm transition cursor-pointer
+                  ${filter === "all"
+                    ? "bg-gradient-to-r from-blue-700 to-cyan-600 text-white border-blue-700"
+                    : "bg-white/90 text-blue-800 border-blue-200 hover:bg-blue-100"
+                  }`}
+                style={{ cursor: "pointer" }}
+              >
+                {lang === "ar" ? "الكل" : "All"}
+              </button>
               {categories.filter((c) => c.key !== "all").map((cat) => (
                 <button
                   key={cat.key}
@@ -350,11 +367,12 @@ export default function ServicesSection({ lang = "ar" }) {
                     setSearchQuery("");
                     setClientType(cat.key);
                   }}
-                  className={`px-3 py-2 rounded-full border-2 font-bold tracking-tight text-xs shadow-sm transition ${
-                    filter === cat.key
+                  className={`px-3 py-2 rounded-full border-2 font-bold tracking-tight text-xs shadow-sm transition cursor-pointer
+                    ${filter === cat.key
                       ? "bg-gradient-to-r from-blue-700 to-cyan-600 text-white border-blue-700"
                       : "bg-white/90 text-blue-800 border-blue-200 hover:bg-blue-100"
-                  }`}
+                    }`}
+                  style={{ cursor: "pointer" }}
                 >
                   {lang === "ar" ? cat.label_ar : cat.label_en}
                 </button>
@@ -373,6 +391,7 @@ export default function ServicesSection({ lang = "ar" }) {
                 }
               }}
               className="px-3 py-2 w-56 rounded-xl bg-gradient-to-r from-blue-700 via-blue-600 to-cyan-500 hover:from-blue-900 hover:to-blue-600 text-white font-bold shadow-lg mt-2 md:mt-0 transition cursor-pointer text-sm"
+              style={{ cursor: "pointer" }}
             >
               {lang === "ar"
                 ? showAdd
@@ -400,6 +419,7 @@ export default function ServicesSection({ lang = "ar" }) {
                     className="ml-1 text-red-500 font-bold hover:text-red-700"
                     title={lang === "ar" ? "حذف" : "Remove"}
                     type="button"
+                    style={{ cursor: "pointer" }}
                   >×</button>
                 </span>
               ))}
@@ -420,6 +440,7 @@ export default function ServicesSection({ lang = "ar" }) {
                 <button
                   type="submit"
                   className="px-2 py-1 bg-gradient-to-r from-emerald-600 to-emerald-400 hover:from-emerald-700 hover:to-emerald-500 text-white rounded-full font-bold text-xs"
+                  style={{ cursor: "pointer" }}
                 >+</button>
               </form>
             </div>
@@ -437,6 +458,7 @@ export default function ServicesSection({ lang = "ar" }) {
                     className="ml-1 text-red-500 font-bold hover:text-red-700"
                     title={lang === "ar" ? "حذف" : "Remove"}
                     type="button"
+                    style={{ cursor: "pointer" }}
                   >×</button>
                 </span>
               ))}
@@ -457,6 +479,7 @@ export default function ServicesSection({ lang = "ar" }) {
                 <button
                   type="submit"
                   className="px-2 py-1 bg-gradient-to-r from-emerald-600 to-emerald-400 hover:from-emerald-700 hover:to-emerald-500 text-white rounded-full font-bold text-xs"
+                  style={{ cursor: "pointer" }}
                 >+</button>
               </form>
             </div>
@@ -690,6 +713,7 @@ export default function ServicesSection({ lang = "ar" }) {
                   type="button"
                   onClick={resetForm}
                   className="px-3 py-2 w-32 rounded-xl bg-gray-400 hover:bg-gray-600 text-white font-bold shadow transition cursor-pointer text-xs"
+                  style={{ cursor: "pointer" }}
                 >
                   {lang === "ar" ? "إلغاء التعديل" : "Cancel Edit"}
                 </button>
@@ -697,6 +721,7 @@ export default function ServicesSection({ lang = "ar" }) {
               <button
                 disabled={loading}
                 className="px-3 py-2 w-32 rounded-xl bg-gradient-to-r from-blue-800 via-blue-600 to-cyan-500 hover:from-blue-900 hover:to-blue-600 text-white font-bold shadow transition cursor-pointer text-xs"
+                style={{ cursor: "pointer" }}
               >
                 {lang === "ar"
                   ? editMode
@@ -716,7 +741,8 @@ export default function ServicesSection({ lang = "ar" }) {
             <div key={service.id} className={`${COLORS.card} p-5 shadow-xl flex flex-col gap-3`}>
               <div className="flex items-center gap-2">
                 <span className="px-2 py-1 rounded-full bg-blue-100 text-blue-800 font-bold text-xs">
-                  {categories.find((c) => c.key === service.category)?.[lang === "ar" ? "label_ar" : "label_en"] || service.category}</span>
+                  {categories.find((c) => c.key === service.category)?.[lang === "ar" ? "label_ar" : "label_en"] || service.category}
+                </span>
                 <span className="font-bold text-xl text-blue-800">{service.name}</span>
                 <span className={`ml-auto px-2 py-1 rounded-full font-bold text-xs ${service.active ? COLORS.green : COLORS.red}`}>
                   {service.active
@@ -729,9 +755,6 @@ export default function ServicesSection({ lang = "ar" }) {
                 </span>
               </div>
               <div className="flex gap-2 items-center mb-2">
-                <span className="px-2 py-1 rounded-lg bg-blue-100 text-blue-800 text-xs font-bold">
-                  {CATEGORY_LABEL(service.category, lang)}
-                </span>
                 {service.subcategory && (
                   <span className="px-2 py-1 rounded-lg bg-cyan-100 text-cyan-800 text-xs">{service.subcategory}</span>
                 )}
@@ -767,6 +790,7 @@ export default function ServicesSection({ lang = "ar" }) {
                 <button
                   onClick={() => toggleServiceActive(service.id, !service.active)}
                   className={`${service.active ? "bg-green-600" : "bg-red-500"} text-white px-3 py-1 rounded-full font-bold text-xs shadow transition`}
+                  style={{ cursor: "pointer" }}
                 >
                   {service.active
                     ? lang === "ar"
@@ -805,12 +829,14 @@ export default function ServicesSection({ lang = "ar" }) {
                     );
                   }}
                   className="bg-blue-700 hover:bg-blue-900 text-white px-3 py-1 rounded-full font-bold text-xs shadow transition"
+                  style={{ cursor: "pointer" }}
                 >
                   {lang === "ar" ? "تعديل" : "Edit"}
                 </button>
                 <button
                   onClick={() => handleDeleteService(service.id)}
                   className="bg-red-600 hover:bg-red-800 text-white px-3 py-1 rounded-full font-bold text-xs shadow"
+                  style={{ cursor: "pointer" }}
                 >
                   {lang === "ar" ? "حذف" : "Delete"}
                 </button>
