@@ -715,7 +715,8 @@ export default function ServicesSection({ lang = "ar" }) {
           {filteredServices.map((service) => (
             <div key={service.id} className={`${COLORS.card} p-5 shadow-xl flex flex-col gap-3`}>
               <div className="flex items-center gap-2">
-                <span className={`${COLORS.badge} px-3 py-1 rounded-full font-extrabold text-xs`}>{service.serviceId}</span>
+                <span className="px-2 py-1 rounded-full bg-blue-100 text-blue-800 font-bold text-xs">
+                  {categories.find((c) => c.key === service.category)?.[lang === "ar" ? "label_ar" : "label_en"] || service.category}</span>
                 <span className="font-bold text-xl text-blue-800">{service.name}</span>
                 <span className={`ml-auto px-2 py-1 rounded-full font-bold text-xs ${service.active ? COLORS.green : COLORS.red}`}>
                   {service.active
