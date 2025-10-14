@@ -25,8 +25,6 @@ const COLORS = {
   gray: "bg-gray-200 text-gray-700",
   chip: "bg-blue-100 text-blue-800",
   input: "bg-white/95 border border-blue-200 rounded-md",
-  tableHead: "bg-blue-50 text-blue-900",
-  tableRow: "hover:bg-blue-50 transition",
   shadow: "shadow",
 };
 
@@ -57,6 +55,11 @@ function calcAll(price, printingFee) {
   const clientPrice = +(p + print + tax).toFixed(2);
   return { tax, clientPrice, print };
 }
+
+const CATEGORY_LABEL = (cat, lang) => {
+  const obj = categories.find((c) => c.key === cat);
+  return obj ? (lang === "ar" ? obj.label_ar : obj.label_en) : cat;
+};
 
 export default function ServicesSection({ lang = "ar" }) {
   const [clientType, setClientType] = useState("resident");
@@ -89,7 +92,6 @@ export default function ServicesSection({ lang = "ar" }) {
   // بحث سريع ومتغيرات التفعيل
   const [searchQuery, setSearchQuery] = useState("");
   const [showActive, setShowActive] = useState("all"); // all | active | inactive
-  const [providerFilter, setProviderFilter] = useState("all");
 
   // جلب البيانات
   useEffect(() => {
@@ -130,7 +132,7 @@ export default function ServicesSection({ lang = "ar" }) {
     }
   }, [newService.price]);
 
-  const { tax, clientPrice, print } = calcAll(newService.price, newService.printingFee);
+  const { tax, clientPrice } = calcAll(newService.price, newService.printingFee);
 
   // إضافة أو تعديل خدمة
   async function saveService(serviceFieldName, serviceData) {
@@ -294,20 +296,9 @@ export default function ServicesSection({ lang = "ar" }) {
     setEditingId(null);
   }
 
-  // قائمة مزودي الخدمة للفلتر (داخل الفئة الحالية فقط)
-  const uniqueProviders = Array.from(
-    new Set(
-      services.filter((s) => filter === "all" ? true : s.category === filter)
-        .flatMap((s) => Array.isArray(s.providers) ? s.providers : [])
-    )
-  ).filter(Boolean);
-
-  // منطق الفلترة: الفئة أولًا ثم مزود الخدمة ثم التفعيل ثم البحث
+  // منطق الفلترة: الفئة أولًا ثم التفعيل ثم البحث
   const filteredServices = services
     .filter((s) => (filter === "all" ? true : s.category === filter))
-    .filter((s) => (providerFilter === "all"
-      ? true
-      : Array.isArray(s.providers) && s.providers.includes(providerFilter)))
     .filter((s) => (showActive === "all"
       ? true
       : showActive === "active"
@@ -325,7 +316,7 @@ export default function ServicesSection({ lang = "ar" }) {
   return (
     <div className={`${COLORS.bg} py-6 px-2 min-h-screen`}>
       <div className="max-w-7xl mx-auto">
-        {/* رأس: بحث + عداد + فلاتر تفعيل + جهة الخدمة */}
+        {/* رأس: بحث + عداد + فلاتر تفعيل + الفئة */}
         <div className="flex flex-col md:flex-row md:justify-between items-center mb-7 gap-4">
           <span className="text-2xl font-extrabold text-blue-800 tracking-tight drop-shadow">
             {lang === "ar" ? "إدارة الخدمات" : "Services Management"}
@@ -340,17 +331,6 @@ export default function ServicesSection({ lang = "ar" }) {
               style={{ fontWeight: 500 }}
             />
             <select
-              value={providerFilter}
-              onChange={e => setProviderFilter(e.target.value)}
-              className={`p-2 ${COLORS.input} text-sm text-blue-900`}
-              style={{ minWidth: '130px' }}
-            >
-              <option value="all">{lang === "ar" ? "كل الجهات" : "All providers"}</option>
-              {uniqueProviders.map((prov) => (
-                <option key={prov} value={prov}>{prov}</option>
-              ))}
-            </select>
-            <select
               value={showActive}
               onChange={e => setShowActive(e.target.value)}
               className={`p-2 ${COLORS.input} text-sm text-blue-900`}
@@ -360,6 +340,26 @@ export default function ServicesSection({ lang = "ar" }) {
               <option value="active">{lang === "ar" ? "مفعّلة فقط" : "Active only"}</option>
               <option value="inactive">{lang === "ar" ? "غير مفعّلة" : "Inactive only"}</option>
             </select>
+            <div className="flex gap-1">
+              {categories.filter((c) => c.key !== "all").map((cat) => (
+                <button
+                  key={cat.key}
+                  onClick={() => {
+                    setFilter(cat.key);
+                    setShowActive("all");
+                    setSearchQuery("");
+                    setClientType(cat.key);
+                  }}
+                  className={`px-3 py-2 rounded-full border-2 font-bold tracking-tight text-xs shadow-sm transition ${
+                    filter === cat.key
+                      ? "bg-gradient-to-r from-blue-700 to-cyan-600 text-white border-blue-700"
+                      : "bg-white/90 text-blue-800 border-blue-200 hover:bg-blue-100"
+                  }`}
+                >
+                  {lang === "ar" ? cat.label_ar : cat.label_en}
+                </button>
+              ))}
+            </div>
             <span className="font-bold text-blue-700 text-base px-3 py-1 rounded-full bg-blue-100 border border-blue-300">
               {lang === "ar"
                 ? `عدد الخدمات: ${filteredServices.length}`
@@ -383,29 +383,6 @@ export default function ServicesSection({ lang = "ar" }) {
                 : "Add Service"}
             </button>
           </div>
-        </div>
-
-        {/* فلاتر الفئة (category) */}
-        <div className="flex gap-2 mb-7 flex-wrap">
-          {categories.map((cat) => (
-            <button
-              key={cat.key}
-              onClick={() => {
-                setFilter(cat.key);
-                setProviderFilter("all");
-                setShowActive("all");
-                setSearchQuery("");
-                setClientType(cat.key === "all" ? "resident" : cat.key);
-              }}
-              className={`px-3 py-2 w-32 rounded-full border-2 font-bold tracking-tight text-xs shadow-sm transition ${
-                filter === cat.key
-                  ? "bg-gradient-to-r from-blue-700 to-cyan-600 text-white border-blue-700"
-                  : "bg-white/90 text-blue-800 border-blue-200 hover:bg-blue-100"
-              }`}
-            >
-              {lang === "ar" ? cat.label_ar : cat.label_en}
-            </button>
-          ))}
         </div>
 
         {/* إدارة التصنيفات وجهات الخدمة (نفس المنطق السابق) */}
@@ -486,65 +463,7 @@ export default function ServicesSection({ lang = "ar" }) {
           </div>
         </div>
 
-          {/* جهات الخدمة */}
-          <div>
-            <span className="font-bold text-blue-800 text-sm">
-              {lang === "ar" ? "جهات الخدمة:" : "Providers:"}
-            </span>
-            <div className="flex flex-wrap gap-2 mt-1">
-              {providers.map((prov) => (
-                <span key={prov} className={`${COLORS.chip} px-2 py-1 rounded-full flex items-center gap-1 font-semibold text-xs border border-blue-200`}>
-                  {prov}
-                  <button
-                    onClick={() => handleRemoveProvider(prov)}
-                    className="ml-1 text-red-500 font-bold hover:text-red-700"
-                    title={lang === "ar" ? "حذف" : "Remove"}
-                    type="button"
-                  >×</button>
-                </span>
-              ))}
-              <form
-                onSubmit={e => {
-                  e.preventDefault();
-                  handleAddProvider(newProviderInput);
-                  setNewProviderInput("");
-                }}
-                className="flex gap-1"
-              >
-                <input
-                  value={newProviderInput}
-                  onChange={e => setNewProviderInput(e.target.value)}
-                  placeholder={lang === "ar" ? "جديد..." : "New..."}
-                  className="p-1 w-32 rounded-full border border-blue-300 text-blue-800 text-xs bg-white/95"
-                />
-                <button
-                  type="submit"
-                  className="px-2 py-1 bg-gradient-to-r from-emerald-600 to-emerald-400 hover:from-emerald-700 hover:to-emerald-500 text-white rounded-full font-bold text-xs"
-                >+</button>
-              </form>
-            </div>
-          </div>
-        </div>
-        <div>
-
-        {/* فلاتر الفئات */}
-        <div className="flex gap-2 mb-9 flex-wrap">
-          {categories.map((cat) => (
-            <button
-              key={cat.key}
-              onClick={() => setFilter(cat.key)}
-              className={`px-3 py-2 w-32 rounded-full border-2 font-bold tracking-tight text-xs ${
-                filter === cat.key
-                  ? "bg-gradient-to-r from-blue-700 to-cyan-600 text-white border-blue-700"
-                  : "bg-white/90 text-blue-700 border-blue-200 hover:bg-blue-100"
-              } shadow-sm transition`}
-            >
-              {lang === "ar" ? cat.label_ar : cat.label_en}
-            </button>
-          ))}
-        </div>
-
-        {/* نموذج إضافة أو تعديل خدمة */}
+        {/* نموذج إضافة أو تعديل خدمة (كما هو) */}
         {showAdd && (
           <form
             onSubmit={editMode ? handleEditService : handleAddService}
@@ -791,7 +710,7 @@ export default function ServicesSection({ lang = "ar" }) {
           </form>
         )}
 
-        {/* عرض الخدمات كبطاقات عصرية (بدل الجدول) */}
+        {/* عرض الخدمات كبطاقات عصرية */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-7 mb-7">
           {filteredServices.map((service) => (
             <div key={service.id} className={`${COLORS.card} p-5 shadow-xl flex flex-col gap-3`}>
@@ -808,10 +727,9 @@ export default function ServicesSection({ lang = "ar" }) {
                     : "Inactive"}
                 </span>
               </div>
-              <div className="text-blue-900 text-sm">{service.description}</div>
-              <div className="flex flex-wrap gap-2 items-center">
+              <div className="flex gap-2 items-center mb-2">
                 <span className="px-2 py-1 rounded-lg bg-blue-100 text-blue-800 text-xs font-bold">
-                  {categories.find((c) => c.key === service.category)?.[lang === "ar" ? "label_ar" : "label_en"] || service.category}
+                  {CATEGORY_LABEL(service.category, lang)}
                 </span>
                 {service.subcategory && (
                   <span className="px-2 py-1 rounded-lg bg-cyan-100 text-cyan-800 text-xs">{service.subcategory}</span>
@@ -822,6 +740,7 @@ export default function ServicesSection({ lang = "ar" }) {
                   </span>
                 )}
               </div>
+              <div className="text-blue-900 text-sm">{service.description}</div>
               <div className="flex flex-wrap gap-2 items-center">
                 <span className="text-md text-blue-900 font-bold">
                   {lang === "ar" ? "السعر:" : "Price:"} {service.price} د.إ
