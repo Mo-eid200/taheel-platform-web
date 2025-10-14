@@ -12,6 +12,24 @@ import {
 } from "firebase/firestore";
 import { firestore as db } from "@/lib/firebase.client";
 
+// COLORS & THEME
+const COLORS = {
+  bg: "bg-gradient-to-br from-[#f6fafd] to-[#e6f0fa]",
+  card: "bg-white/60 border border-gray-200 shadow-lg rounded-xl",
+  border: "border-gray-300",
+  accent: "text-blue-700",
+  accentBg: "bg-blue-600 hover:bg-blue-700",
+  badge: "bg-blue-500 text-white",
+  green: "bg-green-500 text-white",
+  red: "bg-red-600 text-white",
+  gray: "bg-gray-200 text-gray-700",
+  chip: "bg-blue-100 text-blue-700",
+  input: "bg-white/90 border border-gray-300 rounded-md",
+  tableHead: "bg-blue-50 text-blue-900",
+  tableRow: "hover:bg-blue-50 transition",
+  shadow: "shadow",
+};
+
 const categories = [
   { key: "all", label_ar: "الكل", label_en: "All" },
   { key: "resident", label_ar: "مقيمين", label_en: "Residents" },
@@ -63,9 +81,15 @@ export default function ServicesSection({ lang = "ar" }) {
     duration: "",
     requireUpload: false,
     repeatable: false,
+    active: true,
   });
   const [editingId, setEditingId] = useState(null);
   const [editMode, setEditMode] = useState(false);
+
+  // بحث سريع ومتغيرات التفعيل
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showActive, setShowActive] = useState("all"); // all | active | inactive
+  const [providerFilter, setProviderFilter] = useState("all");
 
   // جلب البيانات
   useEffect(() => {
@@ -83,6 +107,7 @@ export default function ServicesSection({ lang = "ar" }) {
           id: key,
           tax: val.tax !== undefined ? val.tax : calcAll(val.price, val.printingFee).tax,
           clientPrice: val.clientPrice !== undefined ? val.clientPrice : calcAll(val.price, val.printingFee).clientPrice,
+          active: val.active !== undefined ? val.active : true,
         }));
       setServices(arr.sort((a, b) => a.name.localeCompare(b.name, lang === "ar" ? "ar" : "en")));
     }
@@ -146,7 +171,7 @@ export default function ServicesSection({ lang = "ar" }) {
       repeatable: !!newService.repeatable,
       serviceId: generateServiceId(clientType),
       createdAt: serverTimestamp(),
-      active: true,
+      active: newService.active !== false,
     };
     await saveService(serviceFieldName, serviceData);
     resetForm();
@@ -188,10 +213,19 @@ export default function ServicesSection({ lang = "ar" }) {
       requireUpload: !!newService.requireUpload,
       repeatable: !!newService.repeatable,
       serviceId: newService.serviceId || generateServiceId(clientType),
-      active: true,
+      active: newService.active !== false,
     };
     await saveService(editingId, serviceData);
     resetForm();
+    setLoading(false);
+  }
+
+  // تفعيل/تعطيل الخدمة
+  async function toggleServiceActive(serviceId, newState) {
+    setLoading(true);
+    await updateDoc(doc(db, "servicesByClientType", clientType), {
+      [`${serviceId}.active`]: newState,
+    });
     setLoading(false);
   }
 
@@ -251,6 +285,7 @@ export default function ServicesSection({ lang = "ar" }) {
       duration: "",
       requireUpload: false,
       repeatable: false,
+      active: true,
     });
     setDocumentsFields([""]);
     setDocumentsCount(1);
@@ -259,517 +294,563 @@ export default function ServicesSection({ lang = "ar" }) {
     setEditingId(null);
   }
 
-  const filteredServices =
-    filter === "all"
-      ? services
-      : services.filter((s) => s.category === filter);
+  // قائمة مزودي الخدمة للفلتر
+  const uniqueProviders = Array.from(
+    new Set(services.flatMap((s) => Array.isArray(s.providers) ? s.providers : []))
+  ).filter(Boolean);
+
+  // فلترة الخدمات
+  const filteredServices = services.filter((s) => {
+    const categoryCheck = filter === "all" ? true : s.category === filter;
+    const stateCheck =
+      showActive === "all"
+        ? true
+        : showActive === "active"
+        ? s.active
+        : !s.active;
+    const providerCheck =
+      providerFilter === "all"
+        ? true
+        : Array.isArray(s.providers) && s.providers.includes(providerFilter);
+    const searchCheck =
+      !searchQuery ||
+      (s.name && s.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (Array.isArray(s.providers) &&
+        s.providers.some((p) =>
+          p.toLowerCase().includes(searchQuery.toLowerCase())
+        ));
+    return categoryCheck && stateCheck && providerCheck && searchCheck;
+  });
 
   const [newSubcatInput, setNewSubcatInput] = useState("");
   const [newProviderInput, setNewProviderInput] = useState("");
 
   return (
-    <div className="bg-gradient-to-br from-white to-cyan-50 rounded-2xl shadow p-4 sm:p-8 max-w-5xl mx-auto">
-      <div className="flex flex-col md:flex-row md:justify-between items-center mb-6 gap-3">
-        <span className="text-xl font-bold text-cyan-900">
-          {lang === "ar" ? "إدارة الخدمات" : "Services Management"}
-        </span>
-        <div className="flex gap-2">
-          <select
-            value={clientType}
-            onChange={(e) => {
-              setClientType(e.target.value);
-              setFilter("all");
-              setNewService((ns) => ({
-                ...ns,
-                category: e.target.value,
-              }));
-            }}
-            className="p-2 w-56 rounded border text-cyan-800 font-bold bg-cyan-50 text-sm"
-          >
-            {categories.filter((c) => c.key !== "all").map((cat) => (
-              <option value={cat.key} key={cat.key}>
-                {lang === "ar" ? cat.label_ar : cat.label_en}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={() => {
-              setShowAdd((v) => !v);
-              if (showAdd) {
-                resetForm();
-              }
-            }}
-            className="px-3 py-2 w-56 rounded bg-cyan-700 hover:bg-cyan-900 text-white font-bold shadow mt-2 md:mt-0 transition cursor-pointer text-sm"
-          >
-            {lang === "ar"
-              ? showAdd
-                ? "إغلاق"
-                : "إضافة خدمة جديدة"
-              : showAdd
-              ? "Close"
-              : "Add Service"}
-          </button>
-        </div>
-      </div>
-
-      {/* إدارة التصنيفات الفرعية وجهات الخدمة */}
-      <div className="flex gap-4 mb-6 flex-wrap">
-        {/* التصنيفات الفرعية */}
-        <div>
-          <span className="font-bold text-cyan-800 text-sm">
-            {lang === "ar" ? "التصنيفات الفرعية:" : "Subcategories:"}
+    <div className={`${COLORS.bg} py-6 px-2 min-h-screen`}>
+      <div className="max-w-7xl mx-auto">
+        {/* رأس: بحث + عداد + فلاتر تفعيل + جهة الخدمة */}
+        <div className="flex flex-col md:flex-row md:justify-between items-center mb-7 gap-4">
+          <span className="text-2xl font-extrabold text-blue-800 tracking-tight drop-shadow">
+            {lang === "ar" ? "إدارة الخدمات" : "Services Management"}
           </span>
-          <div className="flex flex-wrap gap-2 mt-1">
-            {subcategories.map((cat) => (
-              <span key={cat} className="bg-cyan-100 px-2 py-1 rounded flex items-center gap-1 text-cyan-900 font-semibold text-xs">
-                {cat}
-                <button
-                  onClick={() => handleRemoveSubcategory(cat)}
-                  className="ml-1 text-red-500 font-bold hover:text-red-700"
-                  title={lang === "ar" ? "حذف" : "Remove"}
-                  type="button"
-                >×</button>
-              </span>
-            ))}
-            <form
-              onSubmit={e => {
-                e.preventDefault();
-                handleAddSubcategory(newSubcatInput);
-                setNewSubcatInput("");
-              }}
-              className="flex gap-1"
-            >
-              <input
-                value={newSubcatInput}
-                onChange={e => setNewSubcatInput(e.target.value)}
-                placeholder={lang === "ar" ? "جديد..." : "New..."}
-                className="p-1 w-32 rounded border text-cyan-900 text-xs"
-              />
-              <button
-                type="submit"
-                className="px-2 py-1 bg-emerald-600 hover:bg-emerald-800 text-white rounded font-bold text-xs"
-              >+</button>
-            </form>
-          </div>
-        </div>
-        {/* جهات الخدمة */}
-        <div>
-          <span className="font-bold text-cyan-800 text-sm">
-            {lang === "ar" ? "جهات الخدمة:" : "Providers:"}
-          </span>
-          <div className="flex flex-wrap gap-2 mt-1">
-            {providers.map((prov) => (
-              <span key={prov} className="bg-cyan-100 px-2 py-1 rounded flex items-center gap-1 text-cyan-900 font-semibold text-xs">
-                {prov}
-                <button
-                  onClick={() => handleRemoveProvider(prov)}
-                  className="ml-1 text-red-500 font-bold hover:text-red-700"
-                  title={lang === "ar" ? "حذف" : "Remove"}
-                  type="button"
-                >×</button>
-              </span>
-            ))}
-            <form
-              onSubmit={e => {
-                e.preventDefault();
-                handleAddProvider(newProviderInput);
-                setNewProviderInput("");
-              }}
-              className="flex gap-1"
-            >
-              <input
-                value={newProviderInput}
-                onChange={e => setNewProviderInput(e.target.value)}
-                placeholder={lang === "ar" ? "جديد..." : "New..."}
-                className="p-1 w-32 rounded border text-cyan-900 text-xs"
-              />
-              <button
-                type="submit"
-                className="px-2 py-1 bg-emerald-600 hover:bg-emerald-800 text-white rounded font-bold text-xs"
-              >+</button>
-            </form>
-          </div>
-        </div>
-      </div>
-
-      {/* فلاتر الفئات */}
-      <div className="flex gap-2 mb-6 flex-wrap">
-        {categories.map((cat) => (
-          <button
-            key={cat.key}
-            onClick={() => setFilter(cat.key)}
-            className={`px-3 py-1 w-32 rounded-lg border font-semibold transition cursor-pointer text-xs ${
-              filter === cat.key
-                ? "bg-cyan-700 text-white border-cyan-700"
-                : "bg-white text-cyan-700 border-cyan-300 hover:bg-cyan-50"
-            }`}
-          >
-            {lang === "ar" ? cat.label_ar : cat.label_en}
-          </button>
-        ))}
-      </div>
-
-      {/* نموذج إضافة أو تعديل خدمة */}
-      {showAdd && (
-        <form
-          onSubmit={editMode ? handleEditService : handleAddService}
-          className="bg-cyan-50 rounded-lg p-4 mb-6 shadow flex flex-col gap-2 border border-cyan-200"
-        >
-          <div className="flex flex-wrap gap-2 mb-2 justify-center">
+          <div className="flex gap-2 flex-wrap items-center">
             <input
-              required
-              className="p-2 w-56 rounded border text-gray-900 font-semibold text-sm"
-              placeholder={lang === "ar" ? "اسم الخدمة" : "Service name"}
-              value={newService.name}
-              onChange={(e) =>
-                setNewService({ ...newService, name: e.target.value })
-              }
-            />
-            <input
-              required
-              className="p-2 w-56 rounded border text-gray-900 text-sm"
-              placeholder={lang === "ar" ? "وصف الخدمة" : "Service Description"}
-              value={newService.description}
-              onChange={(e) =>
-                setNewService({ ...newService, description: e.target.value })
-              }
+              type="text"
+              placeholder={lang === "ar" ? "بحث بالاسم أو الجهة..." : "Search by name or provider..."}
+              className={`p-2 w-64 ${COLORS.input} text-sm outline-blue-400`}
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
             />
             <select
-              className="p-2 w-56 rounded border text-gray-900 font-semibold text-sm"
-              value={newService.subcategory}
-              onChange={e =>
-                setNewService({ ...newService, subcategory: e.target.value })
-              }
+              value={showActive}
+              onChange={e => setShowActive(e.target.value)}
+              className={`p-2 ${COLORS.input} text-sm`}
+              style={{minWidth:'105px'}}
             >
-              <option value="">
-                {lang === "ar"
-                  ? "تصنيف فرعي (اختياري)"
-                  : "Subcategory (optional)"}
-              </option>
-              {subcategories.map(cat => (
-                <option value={cat} key={cat}>
-                  {cat}
-                </option>
-              ))}
+              <option value="all">{lang === "ar" ? "كل الحالات" : "All status"}</option>
+              <option value="active">{lang === "ar" ? "مفعّلة فقط" : "Active only"}</option>
+              <option value="inactive">{lang === "ar" ? "غير مفعّلة" : "Inactive only"}</option>
             </select>
             <select
-              multiple
-              className="p-2 w-56 rounded border text-gray-900 text-sm"
-              value={newService.providers}
-              onChange={e => {
-                const selected = Array.from(e.target.selectedOptions).map(opt => opt.value);
-                setNewService({ ...newService, providers: selected });
-              }}
+              value={providerFilter}
+              onChange={e => setProviderFilter(e.target.value)}
+              className={`p-2 ${COLORS.input} text-sm`}
+              style={{minWidth:'130px'}}
             >
-              {providers.map(prov => (
-                <option value={prov} key={prov}>
-                  {prov}
-                </option>
+              <option value="all">{lang === "ar" ? "كل الجهات" : "All providers"}</option>
+              {uniqueProviders.map((prov) => (
+                <option key={prov} value={prov}>{prov}</option>
               ))}
             </select>
-            <input
-              required
-              type="number"
-              min="0"
-              className="p-2 w-56 rounded border text-gray-900 text-sm"
-              placeholder={
-                lang === "ar"
-                  ? "سعر الخدمة (بدون رسوم الطباعة)"
-                  : "Service Price (excl. printing)"
-              }
-              value={newService.price}
-              onChange={(e) =>
-                setNewService({ ...newService, price: e.target.value })
-              }
-            />
-            <input
-              type="number"
-              min="0"
-              className="p-2 w-56 rounded border text-gray-900 text-sm"
-              placeholder={
-                lang === "ar" ? "رسوم الطباعة" : "Printing Fee"
-              }
-              value={newService.printingFee}
-              onChange={(e) =>
-                setNewService({ ...newService, printingFee: e.target.value })
-              }
-            />
-            <input
-              required
-              type="number"
-              min="0"
-              readOnly
-              className="p-2 w-56 rounded border text-gray-900 bg-gray-100 text-sm"
-              placeholder={lang === "ar" ? "عدد الكوينات" : "Coins"}
-              value={newService.coins}
-            />
-            <input
-              className="p-2 w-56 rounded border text-gray-900 text-sm"
-              placeholder={lang === "ar" ? "وقت الإنجاز" : "Estimated Duration"}
-              value={newService.duration}
-              onChange={(e) =>
-                setNewService({ ...newService, duration: e.target.value })
-              }
-            />
-          </div>
-          <div className="flex flex-col md:flex-row gap-2">
-            <div className="flex-1 flex flex-col gap-1 bg-gray-50 p-2 rounded border border-gray-200 text-gray-900 text-xs">
-              <span className="font-bold text-cyan-800">
-                {lang === "ar" ? "التكلفة النهائية للعميل:" : "Client Final Price:"}
-              </span>
-              <span>
-                {lang === "ar"
-                  ? `سعر الخدمة: ${newService.price || 0} د.إ`
-                  : `Service: ${newService.price || 0} AED`}
-              </span>
-              <span>
-                {lang === "ar"
-                  ? `رسوم الطباعة: ${newService.printingFee || 0} د.إ`
-                  : `Printing: ${newService.printingFee || 0} AED`}
-              </span>
-              <span>
-                {lang === "ar"
-                  ? `ضريبة الطباعة 5%: ${tax} د.إ`
-                  : `Printing Tax 5%: ${tax} AED`}
-              </span>
-              <span className="font-extrabold text-emerald-700 mt-1">
-                {lang === "ar"
-                  ? `الإجمالى للعميل: ${clientPrice} د.إ`
-                  : `Total for client: ${clientPrice} AED`}
-              </span>
-            </div>
-          </div>
-          <label className="flex items-center gap-2 mt-2 select-none cursor-pointer text-cyan-800 font-semibold text-xs">
-            <input
-              type="checkbox"
-              checked={!!newService.requireUpload}
-              onChange={(e) => {
-                setNewService({
-                  ...newService,
-                  requireUpload: e.target.checked,
-                });
-                if (!e.target.checked) {
-                  setDocumentsCount(1);
-                  setDocumentsFields([""]);
+            <span className="font-bold text-blue-700 text-base px-3 py-1 rounded-full bg-blue-100 border border-blue-300">
+              {lang === "ar"
+                ? `عدد الخدمات: ${filteredServices.length}`
+                : `Services: ${filteredServices.length}`}
+            </span>
+            <button
+              onClick={() => {
+                setShowAdd((v) => !v);
+                if (showAdd) {
+                  resetForm();
                 }
               }}
-              className="accent-cyan-700 w-5 h-5 cursor-pointer"
-            />
-            {lang === "ar"
-              ? "تفعيل رفع مستند (يجب على العميل رفع مستند)"
-              : "Require document upload (Client must upload documents)"}
-          </label>
-          {newService.requireUpload && (
-            <div className="flex flex-col gap-2 mb-2">
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-cyan-700">
-                  {lang === "ar"
-                    ? "عدد المستندات المطلوبة:"
-                    : "Number of required documents:"}
-                </span>
-                <input
-                  type="number"
-                  min={1}
-                  max={10}
-                  className="p-1 w-16 rounded border text-cyan-900 font-bold text-xs"
-                  value={documentsCount}
-                  onChange={(e) =>
-                    setDocumentsCount(Number(e.target.value))
-                  }
-                />
-              </div>
-              {Array.from({ length: documentsCount }).map((_, i) => (
-                <input
-                  key={i}
-                  className="p-2 w-56 rounded border text-gray-900 text-xs"
-                  placeholder={
-                    lang === "ar"
-                      ? `اسم المستند #${i + 1}`
-                      : `Document name #${i + 1}`
-                  }
-                  value={documentsFields[i] || ""}
-                  onChange={(e) => {
-                    const docs = [...documentsFields];
-                    docs[i] = e.target.value;
-                    setDocumentsFields(docs);
-                    setNewService((ns) => ({
-                      ...ns,
-                      requiredDocuments: docs,
-                    }));
-                  }}
-                />
-              ))}
-            </div>
-          )}
-          <label className="flex items-center gap-2 mt-1 select-none cursor-pointer text-cyan-800 font-semibold text-xs">
-            <input
-              type="checkbox"
-              checked={!!newService.repeatable}
-              onChange={(e) =>
-                setNewService({ ...newService, repeatable: e.target.checked })
-              }
-              className="accent-cyan-700 w-5 h-5 cursor-pointer"
-            />
-            {lang === "ar"
-              ? "خدمة متعددة (يمكن للعميل تحديد عدد مرات التنفيذ)"
-              : "Repeatable service (Client can specify quantity)"}
-          </label>
-          <div className="flex gap-2 self-end">
-            {editMode && (
-              <button
-                type="button"
-                onClick={resetForm}
-                className="px-3 py-2 w-32 rounded bg-gray-400 hover:bg-gray-600 text-white font-bold shadow mt-2 transition cursor-pointer text-xs"
-              >
-                {lang === "ar" ? "إلغاء التعديل" : "Cancel Edit"}
-              </button>
-            )}
-            <button
-              disabled={loading}
-              className="px-3 py-2 w-32 rounded bg-cyan-800 hover:bg-cyan-900 text-white font-bold shadow mt-2 transition cursor-pointer text-xs"
+              className="px-3 py-2 w-56 rounded-xl bg-gradient-to-r from-blue-700 via-blue-600 to-cyan-500 hover:from-blue-900 hover:to-blue-600 text-white font-bold shadow-lg mt-2 md:mt-0 transition cursor-pointer text-sm"
             >
               {lang === "ar"
-                ? editMode
-                  ? "تعديل الخدمة"
-                  : "إضافة الخدمة"
-                : editMode
-                ? "Edit Service"
+                ? showAdd
+                  ? "إغلاق"
+                  : "إضافة خدمة جديدة"
+                : showAdd
+                ? "Close"
                 : "Add Service"}
             </button>
           </div>
-        </form>
-      )}
+        </div>
 
-      {/* جدول الخدمات */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-center border rounded-lg bg-white text-xs sm:text-sm">
-          <thead className="bg-cyan-100 text-cyan-900">
-            <tr>
-              <th className="py-2 px-1">ID</th>
-              <th className="py-2 px-1">{lang === "ar" ? "الاسم" : "Name"}</th>
-              <th className="py-2 px-1">{lang === "ar" ? "الوصف" : "Description"}</th>
-              <th className="py-2 px-1">{lang === "ar" ? "التصنيف" : "Category"}</th>
-              <th className="py-2 px-1">{lang === "ar" ? "فرعي" : "Subcategory"}</th>
-              <th className="py-2 px-1">{lang === "ar" ? "جهة" : "Provider"}</th>
-              <th className="py-2 px-1">{lang === "ar" ? "السعر" : "Price"}</th>
-              <th className="py-2 px-1">{lang === "ar" ? "طباعة" : "Printing"}</th>
-              <th className="py-2 px-1">{lang === "ar" ? "ضريبة" : "Tax"}</th>
-              <th className="py-2 px-1 font-bold text-emerald-700">{lang === "ar" ? "للعميل" : "Client"}</th>
-              <th className="py-2 px-1">{lang === "ar" ? "كوينات" : "Coins"}</th>
-              <th className="py-2 px-1">{lang === "ar" ? "مدة" : "Duration"}</th>
-              <th className="py-2 px-1">{lang === "ar" ? "مستندات" : "Documents"}</th>
-              <th className="py-2 px-1">{lang === "ar" ? "رفع؟" : "Upload?"}</th>
-              <th className="py-2 px-1">{lang === "ar" ? "متعددة؟" : "Repeatable?"}</th>
-              <th className="py-2 px-1">{lang === "ar" ? "تحكم" : "Actions"}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredServices.map((service) => (
-              <tr
-                key={service.id}
-                className="border-b hover:bg-cyan-50 transition text-xs"
+        {/* إدارة التصنيفات الفرعية وجهات الخدمة */}
+        <div className="flex gap-7 mb-8 flex-wrap">
+          {/* التصنيفات الفرعية */}
+          <div>
+            <span className="font-bold text-blue-800 text-sm">
+              {lang === "ar" ? "التصنيفات الفرعية:" : "Subcategories:"}
+            </span>
+            <div className="flex flex-wrap gap-2 mt-1">
+              {subcategories.map((cat) => (
+                <span key={cat} className={`${COLORS.chip} px-2 py-1 rounded-full flex items-center gap-1 font-semibold text-xs border border-blue-200`}>
+                  {cat}
+                  <button
+                    onClick={() => handleRemoveSubcategory(cat)}
+                    className="ml-1 text-red-500 font-bold hover:text-red-700"
+                    title={lang === "ar" ? "حذف" : "Remove"}
+                    type="button"
+                  >×</button>
+                </span>
+              ))}
+              <form
+                onSubmit={e => {
+                  e.preventDefault();
+                  handleAddSubcategory(newSubcatInput);
+                  setNewSubcatInput("");
+                }}
+                className="flex gap-1"
               >
-                <td className="py-2 px-1 font-mono text-cyan-800">{service.serviceId}</td>
-                <td className="py-2 px-1 font-bold text-cyan-900">{service.name}</td>
-                <td className="py-2 px-1 text-cyan-700 whitespace-pre-line">{service.description}</td>
-                <td className="py-2 px-1">
-                  {
-                    categories.find((c) => c.key === service.category)?.[lang === "ar" ? "label_ar" : "label_en"] ||
-                    service.category
-                  }
-                </td>
-                <td className="py-2 px-1 text-cyan-700">{service.subcategory}</td>
-                <td className="py-2 px-1 text-cyan-700">
-                  {Array.isArray(service.providers) && service.providers.length > 0
-                    ? service.providers.join(", ")
-                    : "-"}
-                </td>
-                <td className="py-2 px-1 text-cyan-900">{service.price} د.إ</td>
-                <td className="py-2 px-1 text-cyan-900">{service.printingFee || 0} د.إ</td>
-                <td className="py-2 px-1 text-cyan-800 bg-gray-100 font-bold">{service.tax}</td>
-                <td className="py-2 px-1 text-emerald-800 bg-gray-100 font-bold">{service.clientPrice}</td>
-                <td className="py-2 px-1 text-cyan-900">{service.coins}</td>
-                <td className="py-2 px-1 text-cyan-700">{service.duration}</td>
-                <td className="py-2 px-1 text-cyan-800">
-                  {Array.isArray(service.requiredDocuments) && service.requiredDocuments.length > 0
-                    ? service.requiredDocuments.map((d, i) => <div key={i}>{d}</div>)
-                    : "-"}
-                </td>
-                <td className="py-2 px-1">
-                  {service.requireUpload ? (
-                    <span title={lang === "ar" ? "يتطلب رفع مستند" : "Requires document upload"}
-                      className="inline-block w-5 h-5 bg-cyan-700 rounded text-white font-bold text-center leading-5">✓</span>
-                  ) : (
-                    <span title={lang === "ar" ? "لا يتطلب" : "Not required"}
-                      className="inline-block w-5 h-5 bg-gray-200 rounded text-gray-500 font-bold text-center leading-5">×</span>
-                  )}
-                </td>
-                <td className="py-2 px-1">
-                  {service.repeatable ? (
-                    <span title={lang === "ar" ? "خدمة متعددة" : "Repeatable"}
-                      className="inline-block w-5 h-5 bg-emerald-700 rounded text-white font-bold text-center leading-5">✓</span>
-                  ) : (
-                    <span title={lang === "ar" ? "خدمة مرة واحدة" : "One time"}
-                      className="inline-block w-5 h-5 bg-gray-200 rounded text-gray-500 font-bold text-center leading-5">×</span>
-                  )}
-                </td>
-                <td className="py-2 px-1">
+                <input
+                  value={newSubcatInput}
+                  onChange={e => setNewSubcatInput(e.target.value)}
+                  placeholder={lang === "ar" ? "جديد..." : "New..."}
+                  className="p-1 w-32 rounded-full border border-blue-300 text-blue-800 text-xs bg-white/95"
+                />
+                <button
+                  type="submit"
+                  className="px-2 py-1 bg-gradient-to-r from-emerald-600 to-emerald-400 hover:from-emerald-700 hover:to-emerald-500 text-white rounded-full font-bold text-xs"
+                >+</button>
+              </form>
+            </div>
+          </div>
+          {/* جهات الخدمة */}
+          <div>
+            <span className="font-bold text-blue-800 text-sm">
+              {lang === "ar" ? "جهات الخدمة:" : "Providers:"}
+            </span>
+            <div className="flex flex-wrap gap-2 mt-1">
+              {providers.map((prov) => (
+                <span key={prov} className={`${COLORS.chip} px-2 py-1 rounded-full flex items-center gap-1 font-semibold text-xs border border-blue-200`}>
+                  {prov}
                   <button
-                    onClick={() => {
-                      setEditMode(true);
-                      setShowAdd(true);
-                      setEditingId(service.id);
-                      setNewService({
-                        ...service,
-                        price: service.price ?? "",
-                        printingFee: service.printingFee ?? "",
-                        coins: service.coins ?? "",
-                        requireUpload: !!service.requireUpload,
-                        repeatable: !!service.repeatable,
-                        requiredDocuments: Array.isArray(service.requiredDocuments)
-                          ? service.requiredDocuments
-                          : [""],
-                      });
-                      setDocumentsFields(
-                        Array.isArray(service.requiredDocuments)
-                          ? service.requiredDocuments
-                          : [""]
-                      );
-                      setDocumentsCount(
-                        Array.isArray(service.requiredDocuments)
-                          ? service.requiredDocuments.length
-                          : 1
-                      );
-                    }}
-                    className="px-2 py-1 w-20 bg-cyan-600 hover:bg-cyan-800 text-white rounded mx-1 transition cursor-pointer text-xs"
-                  >
-                    {lang === "ar" ? "تعديل" : "Edit"}
-                  </button>
-                  <button
-                    onClick={() => handleDeleteService(service.id)}
-                    className="px-2 py-1 w-20 bg-red-600 hover:bg-red-800 text-white rounded mx-1 transition cursor-pointer text-xs"
-                  >
-                    {lang === "ar" ? "حذف" : "Delete"}
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {filteredServices.length === 0 && (
-              <tr>
-                <td colSpan={16} className="py-6 text-gray-400 text-xs">
+                    onClick={() => handleRemoveProvider(prov)}
+                    className="ml-1 text-red-500 font-bold hover:text-red-700"
+                    title={lang === "ar" ? "حذف" : "Remove"}
+                    type="button"
+                  >×</button>
+                </span>
+              ))}
+              <form
+                onSubmit={e => {
+                  e.preventDefault();
+                  handleAddProvider(newProviderInput);
+                  setNewProviderInput("");
+                }}
+                className="flex gap-1"
+              >
+                <input
+                  value={newProviderInput}
+                  onChange={e => setNewProviderInput(e.target.value)}
+                  placeholder={lang === "ar" ? "جديد..." : "New..."}
+                  className="p-1 w-32 rounded-full border border-blue-300 text-blue-800 text-xs bg-white/95"
+                />
+                <button
+                  type="submit"
+                  className="px-2 py-1 bg-gradient-to-r from-emerald-600 to-emerald-400 hover:from-emerald-700 hover:to-emerald-500 text-white rounded-full font-bold text-xs"
+                >+</button>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        {/* فلاتر الفئات */}
+        <div className="flex gap-2 mb-9 flex-wrap">
+          {categories.map((cat) => (
+            <button
+              key={cat.key}
+              onClick={() => setFilter(cat.key)}
+              className={`px-3 py-2 w-32 rounded-full border-2 font-bold tracking-tight text-xs ${
+                filter === cat.key
+                  ? "bg-gradient-to-r from-blue-700 to-cyan-600 text-white border-blue-700"
+                  : "bg-white/90 text-blue-700 border-blue-200 hover:bg-blue-100"
+              } shadow-sm transition`}
+            >
+              {lang === "ar" ? cat.label_ar : cat.label_en}
+            </button>
+          ))}
+        </div>
+
+        {/* نموذج إضافة أو تعديل خدمة */}
+        {showAdd && (
+          <form
+            onSubmit={editMode ? handleEditService : handleAddService}
+            className="bg-white/95 rounded-2xl p-6 mb-8 shadow-xl border border-blue-100 flex flex-col gap-3"
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2 items-center">
+              <input
+                required
+                className={`p-3 w-full rounded-xl border-2 ${COLORS.border} text-gray-900 font-semibold text-sm bg-white/90`}
+                placeholder={lang === "ar" ? "اسم الخدمة" : "Service name"}
+                value={newService.name}
+                onChange={(e) =>
+                  setNewService({ ...newService, name: e.target.value })
+                }
+              />
+              <input
+                required
+                className={`p-3 w-full rounded-xl border-2 ${COLORS.border} text-gray-900 text-sm bg-white/90`}
+                placeholder={lang === "ar" ? "وصف الخدمة" : "Service Description"}
+                value={newService.description}
+                onChange={(e) =>
+                  setNewService({ ...newService, description: e.target.value })
+                }
+              />
+              <select
+                className={`p-3 w-full rounded-xl border-2 ${COLORS.border} text-gray-900 font-semibold text-sm bg-white/90`}
+                value={newService.subcategory}
+                onChange={e =>
+                  setNewService({ ...newService, subcategory: e.target.value })
+                }
+              >
+                <option value="">
                   {lang === "ar"
-                    ? "لا توجد خدمات"
-                    : "No services found"}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-      <div className="mt-2 text-xs text-cyan-700 opacity-70">
-        {lang === "ar"
-          ? "ملاحظة: يمكنك إضافة حقول جديدة تحت كل فئة أو خدمة فرعية مستقبلًا بسهولة عبر الكود."
-          : "Note: You can add new fields or sub-services under each category in the future easily via code."}
+                    ? "تصنيف فرعي (اختياري)"
+                    : "Subcategory (optional)"}
+                </option>
+                {subcategories.map(cat => (
+                  <option value={cat} key={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+              <select
+                multiple
+                className={`p-3 w-full rounded-xl border-2 ${COLORS.border} text-gray-900 text-sm bg-white/90`}
+                value={newService.providers}
+                onChange={e => {
+                  const selected = Array.from(e.target.selectedOptions).map(opt => opt.value);
+                  setNewService({ ...newService, providers: selected });
+                }}
+              >
+                {providers.map(prov => (
+                  <option value={prov} key={prov}>
+                    {prov}
+                  </option>
+                ))}
+              </select>
+              <input
+                required
+                type="number"
+                min="0"
+                className={`p-3 w-full rounded-xl border-2 ${COLORS.border} text-gray-900 text-sm bg-white/90`}
+                placeholder={
+                  lang === "ar"
+                    ? "سعر الخدمة (بدون رسوم الطباعة)"
+                    : "Service Price (excl. printing)"
+                }
+                value={newService.price}
+                onChange={(e) =>
+                  setNewService({ ...newService, price: e.target.value })
+                }
+              />
+              <input
+                type="number"
+                min="0"
+                className={`p-3 w-full rounded-xl border-2 ${COLORS.border} text-gray-900 text-sm bg-white/90`}
+                placeholder={
+                  lang === "ar" ? "رسوم الطباعة" : "Printing Fee"
+                }
+                value={newService.printingFee}
+                onChange={(e) =>
+                  setNewService({ ...newService, printingFee: e.target.value })
+                }
+              />
+              <input
+                required
+                type="number"
+                min="0"
+                readOnly
+                className={`p-3 w-full rounded-xl border-2 ${COLORS.border} text-gray-900 bg-gray-100 text-sm`}
+                placeholder={lang === "ar" ? "عدد الكوينات" : "Coins"}
+                value={newService.coins}
+              />
+              <input
+                className={`p-3 w-full rounded-xl border-2 ${COLORS.border} text-gray-900 text-sm bg-white/90`}
+                placeholder={lang === "ar" ? "وقت الإنجاز" : "Estimated Duration"}
+                value={newService.duration}
+                onChange={(e) =>
+                  setNewService({ ...newService, duration: e.target.value })
+                }
+              />
+            </div>
+            <div className="flex flex-col md:flex-row gap-2">
+              <div className="flex-1 flex flex-col gap-1 bg-blue-50/60 p-3 rounded-xl border border-blue-100 text-gray-900 text-xs">
+                <span className="font-bold text-blue-700">
+                  {lang === "ar" ? "التكلفة النهائية للعميل:" : "Client Final Price:"}
+                </span>
+                <span>
+                  {lang === "ar"
+                    ? `سعر الخدمة: ${newService.price || 0} د.إ`
+                    : `Service: ${newService.price || 0} AED`}
+                </span>
+                <span>
+                  {lang === "ar"
+                    ? `رسوم الطباعة: ${newService.printingFee || 0} د.إ`
+                    : `Printing: ${newService.printingFee || 0} AED`}
+                </span>
+                <span>
+                  {lang === "ar"
+                    ? `ضريبة الطباعة 5%: ${tax} د.إ`
+                    : `Printing Tax 5%: ${tax} AED`}
+                </span>
+                <span className="font-extrabold text-emerald-700 mt-1">
+                  {lang === "ar"
+                    ? `الإجمالى للعميل: ${clientPrice} د.إ`
+                    : `Total for client: ${clientPrice} AED`}
+                </span>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3 items-center mt-3">
+              <label className="flex items-center gap-2 select-none cursor-pointer text-blue-800 font-semibold text-xs">
+                <input
+                  type="checkbox"
+                  checked={!!newService.requireUpload}
+                  onChange={(e) => {
+                    setNewService({
+                      ...newService,
+                      requireUpload: e.target.checked,
+                    });
+                    if (!e.target.checked) {
+                      setDocumentsCount(1);
+                      setDocumentsFields([""]);
+                    }
+                  }}
+                  className="accent-blue-700 w-5 h-5 cursor-pointer"
+                />
+                {lang === "ar"
+                  ? "تفعيل رفع مستند (يجب على العميل رفع مستند)"
+                  : "Require document upload (Client must upload documents)"}
+              </label>
+              {newService.requireUpload && (
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-blue-700">
+                      {lang === "ar"
+                        ? "عدد المستندات المطلوبة:"
+                        : "Number of required documents:"}
+                    </span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={10}
+                      className="p-1 w-16 rounded border border-blue-300 text-blue-900 font-bold text-xs"
+                      value={documentsCount}
+                      onChange={(e) =>
+                        setDocumentsCount(Number(e.target.value))
+                      }
+                    />
+                  </div>
+                  {Array.from({ length: documentsCount }).map((_, i) => (
+                    <input
+                      key={i}
+                      className="p-2 w-56 rounded border border-blue-300 text-blue-900 text-xs"
+                      placeholder={
+                        lang === "ar"
+                          ? `اسم المستند #${i + 1}`
+                          : `Document name #${i + 1}`
+                      }
+                      value={documentsFields[i] || ""}
+                      onChange={(e) => {
+                        const docs = [...documentsFields];
+                        docs[i] = e.target.value;
+                        setDocumentsFields(docs);
+                        setNewService((ns) => ({
+                          ...ns,
+                          requiredDocuments: docs,
+                        }));
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+              <label className="flex items-center gap-2 select-none cursor-pointer text-blue-800 font-semibold text-xs">
+                <input
+                  type="checkbox"
+                  checked={!!newService.repeatable}
+                  onChange={(e) =>
+                    setNewService({ ...newService, repeatable: e.target.checked })
+                  }
+                  className="accent-blue-700 w-5 h-5 cursor-pointer"
+                />
+                {lang === "ar"
+                  ? "خدمة متعددة (يمكن للعميل تحديد عدد مرات التنفيذ)"
+                  : "Repeatable service (Client can specify quantity)"}
+              </label>
+              {/* Switch تفعيل الخدمة */}
+              <label className="flex items-center gap-2 select-none cursor-pointer text-blue-800 font-semibold text-xs">
+                <input
+                  type="checkbox"
+                  checked={newService.active !== false}
+                  onChange={(e) =>
+                    setNewService({ ...newService, active: e.target.checked })
+                  }
+                  className="accent-blue-700 w-5 h-5 cursor-pointer"
+                />
+                {lang === "ar"
+                  ? "تفعيل ظهور الخدمة"
+                  : "Show service as active"}
+              </label>
+            </div>
+            <div className="flex gap-2 self-end mt-3">
+              {editMode && (
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="px-3 py-2 w-32 rounded-xl bg-gray-400 hover:bg-gray-600 text-white font-bold shadow transition cursor-pointer text-xs"
+                >
+                  {lang === "ar" ? "إلغاء التعديل" : "Cancel Edit"}
+                </button>
+              )}
+              <button
+                disabled={loading}
+                className="px-3 py-2 w-32 rounded-xl bg-gradient-to-r from-blue-800 via-blue-600 to-cyan-500 hover:from-blue-900 hover:to-blue-600 text-white font-bold shadow transition cursor-pointer text-xs"
+              >
+                {lang === "ar"
+                  ? editMode
+                    ? "تعديل الخدمة"
+                    : "إضافة الخدمة"
+                  : editMode
+                  ? "Edit Service"
+                  : "Add Service"}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* عرض الخدمات كبطاقات عصرية (بدل الجدول) */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-7 mb-7">
+          {filteredServices.map((service) => (
+            <div key={service.id} className={`${COLORS.card} p-5 shadow-xl flex flex-col gap-3`}>
+              <div className="flex items-center gap-2">
+                <span className={`${COLORS.badge} px-3 py-1 rounded-full font-extrabold text-xs`}>{service.serviceId}</span>
+                <span className="font-bold text-xl text-blue-800">{service.name}</span>
+                <span className={`ml-auto px-2 py-1 rounded-full font-bold text-xs ${service.active ? COLORS.green : COLORS.red}`}>
+                  {service.active
+                    ? lang === "ar"
+                      ? "مفعّلة"
+                      : "Active"
+                    : lang === "ar"
+                    ? "غير مفعّلة"
+                    : "Inactive"}
+                </span>
+              </div>
+              <div className="text-blue-900 text-sm">{service.description}</div>
+              <div className="flex flex-wrap gap-2 items-center">
+                <span className="px-2 py-1 rounded-lg bg-blue-100 text-blue-800 text-xs font-bold">
+                  {categories.find((c) => c.key === service.category)?.[lang === "ar" ? "label_ar" : "label_en"] || service.category}
+                </span>
+                {service.subcategory && (
+                  <span className="px-2 py-1 rounded-lg bg-cyan-100 text-cyan-800 text-xs">{service.subcategory}</span>
+                )}
+                {Array.isArray(service.providers) && service.providers.length > 0 && (
+                  <span className="px-2 py-1 rounded-lg bg-emerald-100 text-emerald-800 text-xs">
+                    {service.providers.join(", ")}
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2 items-center">
+                <span className="text-md text-blue-900 font-bold">
+                  {lang === "ar" ? "السعر:" : "Price:"} {service.price} د.إ
+                </span>
+                <span className="text-md text-blue-900 font-bold">
+                  {lang === "ar" ? "طباعة:" : "Print:"} {service.printingFee || 0} د.إ
+                </span>
+                <span className="text-md text-blue-900 font-bold">
+                  {lang === "ar" ? "ضريبة:" : "Tax:"} {service.tax}
+                </span>
+                <span className="text-md text-emerald-700 font-extrabold">
+                  {lang === "ar" ? "للعميل:" : "Client:"} {service.clientPrice}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2 items-center text-xs">
+                <span className="">{lang === "ar" ? "مستندات:" : "Docs:"} {Array.isArray(service.requiredDocuments) && service.requiredDocuments.length > 0 ? service.requiredDocuments.join(", ") : "-"}</span>
+                <span className="">{lang === "ar" ? "رفع:" : "Upload:"} {service.requireUpload ? "✓" : "×"}</span>
+                <span className="">{lang === "ar" ? "متعددة:" : "Repeatable:"} {service.repeatable ? "✓" : "×"}</span>
+                <span className="">{lang === "ar" ? "مدة:" : "Duration:"} {service.duration || "-"}</span>
+                <span className="">{lang === "ar" ? "كوينات:" : "Coins:"} {service.coins}</span>
+              </div>
+              <div className="flex gap-2 items-center mt-2">
+                <button
+                  onClick={() => toggleServiceActive(service.id, !service.active)}
+                  className={`${service.active ? "bg-green-600" : "bg-red-500"} text-white px-3 py-1 rounded-full font-bold text-xs shadow transition`}
+                >
+                  {service.active
+                    ? lang === "ar"
+                      ? "إلغاء التفعيل"
+                      : "Deactivate"
+                    : lang === "ar"
+                    ? "تفعيل"
+                    : "Activate"}
+                </button>
+                <button
+                  onClick={() => {
+                    setEditMode(true);
+                    setShowAdd(true);
+                    setEditingId(service.id);
+                    setNewService({
+                      ...service,
+                      price: service.price ?? "",
+                      printingFee: service.printingFee ?? "",
+                      coins: service.coins ?? "",
+                      requireUpload: !!service.requireUpload,
+                      repeatable: !!service.repeatable,
+                      active: service.active !== false,
+                      requiredDocuments: Array.isArray(service.requiredDocuments)
+                        ? service.requiredDocuments
+                        : [""],
+                    });
+                    setDocumentsFields(
+                      Array.isArray(service.requiredDocuments)
+                        ? service.requiredDocuments
+                        : [""]
+                    );
+                    setDocumentsCount(
+                      Array.isArray(service.requiredDocuments)
+                        ? service.requiredDocuments.length
+                        : 1
+                    );
+                  }}
+                  className="bg-blue-700 hover:bg-blue-900 text-white px-3 py-1 rounded-full font-bold text-xs shadow transition"
+                >
+                  {lang === "ar" ? "تعديل" : "Edit"}
+                </button>
+                <button
+                  onClick={() => handleDeleteService(service.id)}
+                  className="bg-red-600 hover:bg-red-800 text-white px-3 py-1 rounded-full font-bold text-xs shadow"
+                >
+                  {lang === "ar" ? "حذف" : "Delete"}
+                </button>
+              </div>
+            </div>
+          ))}
+          {filteredServices.length === 0 && (
+            <div className="col-span-full w-full py-12 text-center text-gray-400 text-md font-bold">
+              {lang === "ar"
+                ? "لا توجد خدمات"
+                : "No services found"}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 text-xs text-blue-700 opacity-80 text-center">
+          {lang === "ar"
+            ? "ملاحظة: يمكنك إضافة حقول جديدة تحت كل فئة أو خدمة فرعية مستقبلًا بسهولة عبر الكود."
+            : "Note: You can add new fields or sub-services under each category in the future easily via code."}
+        </div>
       </div>
     </div>
   );
