@@ -14,17 +14,17 @@ import { firestore as db } from "@/lib/firebase.client";
 
 // COLORS & THEME
 const COLORS = {
-  bg: "bg-gradient-to-br from-[#f6fafd] to-[#e6f0fa]",
-  card: "bg-white/60 border border-gray-200 shadow-lg rounded-xl",
-  border: "border-gray-300",
-  accent: "text-blue-700",
-  accentBg: "bg-blue-600 hover:bg-blue-700",
-  badge: "bg-blue-500 text-white",
-  green: "bg-green-500 text-white",
+  bg: "bg-gradient-to-br from-[#e8f5fc] to-[#ffffff]",
+  card: "bg-white/90 border border-blue-100 shadow-lg rounded-xl",
+  border: "border-blue-200",
+  accent: "text-blue-800",
+  accentBg: "bg-blue-700 hover:bg-blue-800",
+  badge: "bg-blue-600 text-white",
+  green: "bg-green-600 text-white",
   red: "bg-red-600 text-white",
   gray: "bg-gray-200 text-gray-700",
-  chip: "bg-blue-100 text-blue-700",
-  input: "bg-white/90 border border-gray-300 rounded-md",
+  chip: "bg-blue-100 text-blue-800",
+  input: "bg-white/95 border border-blue-200 rounded-md",
   tableHead: "bg-blue-50 text-blue-900",
   tableRow: "hover:bg-blue-50 transition",
   shadow: "shadow",
@@ -61,7 +61,7 @@ function calcAll(price, printingFee) {
 export default function ServicesSection({ lang = "ar" }) {
   const [clientType, setClientType] = useState("resident");
   const [services, setServices] = useState([]);
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState("resident");
   const [showAdd, setShowAdd] = useState(false);
   const [loading, setLoading] = useState(false);
   const [documentsCount, setDocumentsCount] = useState(1);
@@ -294,33 +294,30 @@ export default function ServicesSection({ lang = "ar" }) {
     setEditingId(null);
   }
 
-  // قائمة مزودي الخدمة للفلتر
+  // قائمة مزودي الخدمة للفلتر (داخل الفئة الحالية فقط)
   const uniqueProviders = Array.from(
-    new Set(services.flatMap((s) => Array.isArray(s.providers) ? s.providers : []))
+    new Set(
+      services.filter((s) => filter === "all" ? true : s.category === filter)
+        .flatMap((s) => Array.isArray(s.providers) ? s.providers : [])
+    )
   ).filter(Boolean);
 
-  // فلترة الخدمات
-  const filteredServices = services.filter((s) => {
-    const categoryCheck = filter === "all" ? true : s.category === filter;
-    const stateCheck =
-      showActive === "all"
-        ? true
-        : showActive === "active"
+  // منطق الفلترة: الفئة أولًا ثم مزود الخدمة ثم التفعيل ثم البحث
+  const filteredServices = services
+    .filter((s) => (filter === "all" ? true : s.category === filter))
+    .filter((s) => (providerFilter === "all"
+      ? true
+      : Array.isArray(s.providers) && s.providers.includes(providerFilter)))
+    .filter((s) => (showActive === "all"
+      ? true
+      : showActive === "active"
         ? s.active
-        : !s.active;
-    const providerCheck =
-      providerFilter === "all"
-        ? true
-        : Array.isArray(s.providers) && s.providers.includes(providerFilter);
-    const searchCheck =
-      !searchQuery ||
-      (s.name && s.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (Array.isArray(s.providers) &&
-        s.providers.some((p) =>
-          p.toLowerCase().includes(searchQuery.toLowerCase())
-        ));
-    return categoryCheck && stateCheck && providerCheck && searchCheck;
-  });
+        : !s.active))
+    .filter((s) => !searchQuery
+      ? true
+      : (s.name && s.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (Array.isArray(s.providers) && s.providers.some((p) => p.toLowerCase().includes(searchQuery.toLowerCase())))
+    );
 
   const [newSubcatInput, setNewSubcatInput] = useState("");
   const [newProviderInput, setNewProviderInput] = useState("");
@@ -337,30 +334,31 @@ export default function ServicesSection({ lang = "ar" }) {
             <input
               type="text"
               placeholder={lang === "ar" ? "بحث بالاسم أو الجهة..." : "Search by name or provider..."}
-              className={`p-2 w-64 ${COLORS.input} text-sm outline-blue-400`}
+              className={`p-2 w-64 ${COLORS.input} text-sm outline-blue-400 text-blue-900`}
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
+              style={{ fontWeight: 500 }}
             />
-            <select
-              value={showActive}
-              onChange={e => setShowActive(e.target.value)}
-              className={`p-2 ${COLORS.input} text-sm`}
-              style={{minWidth:'105px'}}
-            >
-              <option value="all">{lang === "ar" ? "كل الحالات" : "All status"}</option>
-              <option value="active">{lang === "ar" ? "مفعّلة فقط" : "Active only"}</option>
-              <option value="inactive">{lang === "ar" ? "غير مفعّلة" : "Inactive only"}</option>
-            </select>
             <select
               value={providerFilter}
               onChange={e => setProviderFilter(e.target.value)}
-              className={`p-2 ${COLORS.input} text-sm`}
-              style={{minWidth:'130px'}}
+              className={`p-2 ${COLORS.input} text-sm text-blue-900`}
+              style={{ minWidth: '130px' }}
             >
               <option value="all">{lang === "ar" ? "كل الجهات" : "All providers"}</option>
               {uniqueProviders.map((prov) => (
                 <option key={prov} value={prov}>{prov}</option>
               ))}
+            </select>
+            <select
+              value={showActive}
+              onChange={e => setShowActive(e.target.value)}
+              className={`p-2 ${COLORS.input} text-sm text-blue-900`}
+              style={{ minWidth: '105px' }}
+            >
+              <option value="all">{lang === "ar" ? "كل الحالات" : "All status"}</option>
+              <option value="active">{lang === "ar" ? "مفعّلة فقط" : "Active only"}</option>
+              <option value="inactive">{lang === "ar" ? "غير مفعّلة" : "Inactive only"}</option>
             </select>
             <span className="font-bold text-blue-700 text-base px-3 py-1 rounded-full bg-blue-100 border border-blue-300">
               {lang === "ar"
@@ -387,9 +385,31 @@ export default function ServicesSection({ lang = "ar" }) {
           </div>
         </div>
 
-        {/* إدارة التصنيفات الفرعية وجهات الخدمة */}
+        {/* فلاتر الفئة (category) */}
+        <div className="flex gap-2 mb-7 flex-wrap">
+          {categories.map((cat) => (
+            <button
+              key={cat.key}
+              onClick={() => {
+                setFilter(cat.key);
+                setProviderFilter("all");
+                setShowActive("all");
+                setSearchQuery("");
+                setClientType(cat.key === "all" ? "resident" : cat.key);
+              }}
+              className={`px-3 py-2 w-32 rounded-full border-2 font-bold tracking-tight text-xs shadow-sm transition ${
+                filter === cat.key
+                  ? "bg-gradient-to-r from-blue-700 to-cyan-600 text-white border-blue-700"
+                  : "bg-white/90 text-blue-800 border-blue-200 hover:bg-blue-100"
+              }`}
+            >
+              {lang === "ar" ? cat.label_ar : cat.label_en}
+            </button>
+          ))}
+        </div>
+
+        {/* إدارة التصنيفات وجهات الخدمة (نفس المنطق السابق) */}
         <div className="flex gap-7 mb-8 flex-wrap">
-          {/* التصنيفات الفرعية */}
           <div>
             <span className="font-bold text-blue-800 text-sm">
               {lang === "ar" ? "التصنيفات الفرعية:" : "Subcategories:"}
@@ -427,6 +447,45 @@ export default function ServicesSection({ lang = "ar" }) {
               </form>
             </div>
           </div>
+          <div>
+            <span className="font-bold text-blue-800 text-sm">
+              {lang === "ar" ? "جهات الخدمة:" : "Providers:"}
+            </span>
+            <div className="flex flex-wrap gap-2 mt-1">
+              {providers.map((prov) => (
+                <span key={prov} className={`${COLORS.chip} px-2 py-1 rounded-full flex items-center gap-1 font-semibold text-xs border border-blue-200`}>
+                  {prov}
+                  <button
+                    onClick={() => handleRemoveProvider(prov)}
+                    className="ml-1 text-red-500 font-bold hover:text-red-700"
+                    title={lang === "ar" ? "حذف" : "Remove"}
+                    type="button"
+                  >×</button>
+                </span>
+              ))}
+              <form
+                onSubmit={e => {
+                  e.preventDefault();
+                  handleAddProvider(newProviderInput);
+                  setNewProviderInput("");
+                }}
+                className="flex gap-1"
+              >
+                <input
+                  value={newProviderInput}
+                  onChange={e => setNewProviderInput(e.target.value)}
+                  placeholder={lang === "ar" ? "جديد..." : "New..."}
+                  className="p-1 w-32 rounded-full border border-blue-300 text-blue-800 text-xs bg-white/95"
+                />
+                <button
+                  type="submit"
+                  className="px-2 py-1 bg-gradient-to-r from-emerald-600 to-emerald-400 hover:from-emerald-700 hover:to-emerald-500 text-white rounded-full font-bold text-xs"
+                >+</button>
+              </form>
+            </div>
+          </div>
+        </div>
+
           {/* جهات الخدمة */}
           <div>
             <span className="font-bold text-blue-800 text-sm">
@@ -466,6 +525,7 @@ export default function ServicesSection({ lang = "ar" }) {
             </div>
           </div>
         </div>
+        <div>
 
         {/* فلاتر الفئات */}
         <div className="flex gap-2 mb-9 flex-wrap">
@@ -777,11 +837,11 @@ export default function ServicesSection({ lang = "ar" }) {
                 </span>
               </div>
               <div className="flex flex-wrap gap-2 items-center text-xs">
-                <span className="">{lang === "ar" ? "مستندات:" : "Docs:"} {Array.isArray(service.requiredDocuments) && service.requiredDocuments.length > 0 ? service.requiredDocuments.join(", ") : "-"}</span>
-                <span className="">{lang === "ar" ? "رفع:" : "Upload:"} {service.requireUpload ? "✓" : "×"}</span>
-                <span className="">{lang === "ar" ? "متعددة:" : "Repeatable:"} {service.repeatable ? "✓" : "×"}</span>
-                <span className="">{lang === "ar" ? "مدة:" : "Duration:"} {service.duration || "-"}</span>
-                <span className="">{lang === "ar" ? "كوينات:" : "Coins:"} {service.coins}</span>
+                <span className="text-blue-900">{lang === "ar" ? "مستندات:" : "Docs:"} {Array.isArray(service.requiredDocuments) && service.requiredDocuments.length > 0 ? service.requiredDocuments.join(", ") : "-"}</span>
+                <span className="text-blue-900">{lang === "ar" ? "رفع:" : "Upload:"} {service.requireUpload ? "✓" : "×"}</span>
+                <span className="text-blue-900">{lang === "ar" ? "متعددة:" : "Repeatable:"} {service.repeatable ? "✓" : "×"}</span>
+                <span className="text-blue-900">{lang === "ar" ? "مدة:" : "Duration:"} {service.duration || "-"}</span>
+                <span className="text-blue-900">{lang === "ar" ? "كوينات:" : "Coins:"} {service.coins}</span>
               </div>
               <div className="flex gap-2 items-center mt-2">
                 <button
