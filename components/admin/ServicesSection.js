@@ -94,10 +94,32 @@ export default function ServicesSection({ lang = "ar" }) {
   const [showActive, setShowActive] = useState("all"); // all | active | inactive
 
   // جلب البيانات
-  useEffect(() => {
-    async function fetchData() {
-      if (!clientType) return;
-      const docRef = doc(db, "servicesByClientType", clientType);
+useEffect(() => {
+  async function fetchData() {
+    if (filter === "all") {
+      // جلب كل الفئات دفعة واحدة
+      const allTypes = ["resident", "nonresident", "company", "other"];
+      let allArr = [];
+      for (const type of allTypes) {
+        const docRef = doc(db, "servicesByClientType", type);
+        const snap = await getDoc(docRef);
+        const data = snap.exists() ? snap.data() : {};
+        const arr = Object.entries(data)
+          .filter(([key, val]) => key.startsWith("service") && typeof val === "object")
+          .map(([key, val]) => ({
+            ...val,
+            id: key,
+            category: type, // مهم عشان يظهر اسم الفئة صح
+            tax: val.tax !== undefined ? val.tax : calcAll(val.price, val.printingFee).tax,
+            clientPrice: val.clientPrice !== undefined ? val.clientPrice : calcAll(val.price, val.printingFee).clientPrice,
+            active: val.active !== undefined ? val.active : true,
+          }));
+        allArr = allArr.concat(arr);
+      }
+      setServices(allArr.sort((a, b) => a.name.localeCompare(b.name, lang === "ar" ? "ar" : "en")));
+    } else {
+      // نفس الكود القديم
+      const docRef = doc(db, "servicesByClientType", filter);
       const snap = await getDoc(docRef);
       const data = snap.exists() ? snap.data() : {};
       setSubcategories(Array.isArray(data.subcategories) ? data.subcategories : []);
@@ -107,14 +129,16 @@ export default function ServicesSection({ lang = "ar" }) {
         .map(([key, val]) => ({
           ...val,
           id: key,
+          category: filter,
           tax: val.tax !== undefined ? val.tax : calcAll(val.price, val.printingFee).tax,
           clientPrice: val.clientPrice !== undefined ? val.clientPrice : calcAll(val.price, val.printingFee).clientPrice,
           active: val.active !== undefined ? val.active : true,
         }));
       setServices(arr.sort((a, b) => a.name.localeCompare(b.name, lang === "ar" ? "ar" : "en")));
     }
-    fetchData();
-  }, [loading, lang, clientType]);
+  }
+  fetchData();
+}, [loading, lang, filter]);
 
   useEffect(() => {
     if (documentsCount < 1) setDocumentsCount(1);
