@@ -1,28 +1,18 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { Suspense } from "react";
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   FaWallet, FaCoins, FaBell, FaWhatsapp, FaTrash,
-  FaCommentDots, FaUserCheck, FaUserSlash, FaBuilding, FaUserPlus
+  FaCommentDots, FaUserCheck, FaUserSlash, FaBuilding, FaUserPlus, FaSearch
 } from "react-icons/fa";
 import { MdEmail, MdPhone, MdClose, MdEdit } from "react-icons/md";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import {
-  collection,
-  doc,
-  getDocs,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  onSnapshot,
-  query,
-  where
+  collection, doc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, where
 } from "firebase/firestore";
 import { firestore, auth } from "@/lib/firebase.client";
 import ChatWidgetFull from "@/components/ClientChat/ChatWidgetFull";
-import { GlobalLoader } from '@/components/GlobalLoader'
 
 const typeTabs = [
   { key: "all", label: "الكل", icon: <FaUserPlus /> },
@@ -50,12 +40,26 @@ function clientTypeIcon(type) {
   }
 }
 
+function StatusChip({ status }) {
+  const map = {
+    active: { label: "نشط", color: "bg-emerald-200 text-emerald-800" },
+    banned: { label: "محظور", color: "bg-red-200 text-red-700" },
+    inactive: { label: "غير نشط", color: "bg-gray-200 text-gray-600" },
+    suspended: { label: "معلق", color: "bg-yellow-100 text-yellow-700" }
+  };
+  const obj = map[status] || map.inactive;
+  return (
+    <span className={`px-3 py-1 rounded-full font-bold shadow text-xs ${obj.color} border border-gray-200`}>
+      {obj.label}
+    </span>
+  );
+}
+
 async function generateUniqueClientNumber(type) {
   let prefix = "";
   if (type === "resident") prefix = "RES";
   else if (type === "nonResident") prefix = "NON";
   else prefix = "COM";
-
   const clientsSnap = await getDocs(
     query(collection(firestore, "users"), where("type", "==", type))
   );
@@ -67,11 +71,8 @@ async function generateUniqueClientNumber(type) {
       if (match) numbers.push(parseInt(match[1] + match[2], 10));
     }
   });
-
   let next = 1;
-  if (numbers.length) {
-    next = Math.max(...numbers) + 1;
-  }
+  if (numbers.length) next = Math.max(...numbers) + 1;
   const serial3 = String(Math.floor(next / 10000)).padStart(3, "0");
   const serial4 = String(next % 10000).padStart(4, "0");
   return `${prefix}-${serial3}-${serial4}`;
@@ -216,225 +217,83 @@ function UsersManagementSection({ lang = "ar" }) {
     setShowChat(false);
   };
 
-  const renderClientCard = (client) => {
-    const statusMap = {
-      active: { label: "نشط", color: "bg-emerald-100 text-emerald-700" },
-      banned: { label: "محظور", color: "bg-red-100 text-red-700" },
-      inactive: { label: "غير نشط", color: "bg-gray-100 text-gray-600" },
-      suspended: { label: "معلق", color: "bg-yellow-100 text-yellow-700" }
-    };
-    const statusObj = statusMap[client.status] || statusMap.inactive;
-
-    return (
-      <div className="max-w-xl w-full bg-white rounded-3xl shadow-2xl border border-emerald-100 p-0 overflow-hidden animate-fade-in">
-        <div className="relative bg-gradient-to-r from-emerald-200 to-emerald-50 py-8 flex flex-col items-center">
-          <div className="relative group">
-            <img
-              src={client.profilePic || "/default-avatar.png"}
-              alt={client.name}
-              className="w-32 h-32 rounded-full border-4 border-white shadow-xl object-cover transition-transform group-hover:scale-105"
-              style={{ background: "#fff" }}
-            />
-            <span
-              className={
-                "absolute bottom-2 right-2 text-xs px-3 py-1 rounded-full font-bold shadow " +
-                statusObj.color
-              }
-            >
-              {statusObj.label}
-            </span>
-            <button
-              className="absolute top-2 left-2 bg-white/90 rounded-full p-1 shadow border border-emerald-100 hover:bg-emerald-50 transition"
-              title="تعديل البيانات"
-              onClick={() => handleEditOpen(client)}
-            >
-              <MdEdit className="text-emerald-600" size={22} />
-            </button>
-          </div>
-          <div
-            className="text-2xl font-extrabold text-emerald-900 mt-4 cursor-pointer hover:underline"
-            onClick={() => handleEditOpen(client)}
-            style={{ cursor: "pointer" }}
-          >
-            {client.name}
-          </div>
-          <div className="text-gray-400 font-mono mt-1">
-            <span className="text-emerald-800 font-bold">رقم العميل:</span>{" "}
-            <span className="font-extrabold">{client.clientNumber}</span>
-          </div>
-          <div className="flex gap-3 mt-2 flex-wrap justify-center">
-            <span className="flex items-center gap-1 text-indigo-700 font-semibold border px-2 py-1 rounded-lg bg-indigo-50">
-              {clientTypeIcon(client.type)}
-              {typeLabel[client.type]}
-            </span>
-            <span className="flex items-center gap-1 text-gray-500 font-mono border px-2 py-1 rounded-lg bg-gray-50">
-              <MdEmail className="text-emerald-400" /> {client.email}
-            </span>
-            <span className="flex items-center gap-1 text-gray-500 font-mono border px-2 py-1 rounded-lg bg-gray-50">
-              <MdPhone className="text-emerald-400" /> {client.phone}
-            </span>
-          </div>
-        </div>
-        <div className="flex justify-around items-center gap-6 py-6 border-b bg-white/70">
-          <div className="flex flex-col items-center">
-            <FaWallet className="text-emerald-500 text-2xl mb-1" />
-            <span className="text-xl font-bold text-emerald-900">{client.wallet}</span>
-            <span className="text-gray-400 text-xs">رصيد</span>
-          </div>
-          <div className="flex flex-col items-center">
-            <FaCoins className="text-yellow-500 text-2xl mb-1" />
-            <span className="text-xl font-bold text-yellow-700">{client.coins}</span>
-            <span className="text-gray-400 text-xs">كوينات</span>
-          </div>
-        </div>
-        <div className="p-6 pt-3">
-          <div className="font-bold mb-2 text-gray-700">المرفقات:</div>
-          {client.attachments && client.attachments.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {client.attachments.map((file, idx) => (
-                <a
-                  key={idx}
-                  href={file.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1 bg-gray-100 rounded hover:bg-emerald-50 border text-emerald-700 text-xs font-bold transition cursor-pointer"
-                >
-                  {file.name}
-                </a>
-              ))}
-            </div>
-          ) : (
-            <div className="text-xs text-gray-400">لا يوجد مرفقات</div>
-          )}
-        </div>
-        <div className="px-6 pb-2">
-          <div className="font-bold mb-1 text-gray-700 flex items-center gap-1">
-            <FaBell /> إرسال إشعار للعميل:
-          </div>
-          <div className="flex w-full gap-2">
-            <input
-              type="text"
-              className="flex-1 border rounded px-3 py-2 text-gray-800"
-              placeholder="اكتب نص الإشعار هنا..."
-              value={notifyText}
-              onChange={e => setNotifyText(e.target.value)}
-            />
-            <button
-              className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded font-bold shadow transition cursor-pointer"
-              onClick={() => handleNotify(client)}
-            >
-              إرسال
-            </button>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2 justify-center py-6 bg-gray-50 border-t">
-          <button
-            className="flex items-center gap-1 bg-yellow-500 hover:bg-yellow-600 text-white px-6 py-2 rounded-lg font-bold shadow transition cursor-pointer"
-            onClick={() => handleEditOpen(client)}
-          >
-            <MdEdit size={22} /> تعديل البيانات
-          </button>
-          <button
-            className="flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-bold shadow transition cursor-pointer"
-            onClick={() => handleWhatsApp(client)}
-          >
-            <FaWhatsapp /> واتساب
-          </button>
-          <button
-            className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold shadow transition cursor-pointer"
-            onClick={() => setShowChat(true)}
-          >
-            <FaCommentDots /> تواصل مع العميل
-          </button>
-          <button
-            className={`flex items-center gap-1 ${
-              client.status === "active"
-                ? "bg-red-600 hover:bg-red-700"
-                : "bg-emerald-500 hover:bg-emerald-600"
-            } text-white px-4 py-2 rounded-lg font-bold shadow transition cursor-pointer`}
-            onClick={() => handleToggleStatus(client)}
-          >
-            {client.status === "active" ? <FaUserSlash /> : <FaUserCheck />}
-            {client.status === "active" ? "تعطيل" : "تفعيل"}
-          </button>
-          <button
-            className="flex items-center gap-1 bg-red-700 hover:bg-red-800 text-white px-4 py-2 rounded-lg font-bold shadow transition cursor-pointer"
-            onClick={() => handleDelete(client)}
-          >
-            <FaTrash /> حذف
-          </button>
-        </div>
-        {showChat && (
-          <div className="mt-4">
-            <ChatWidgetFull
-              userId={"employeeId"}
-              userName={"موظف"}
-              roomId={client.uid}
-            />
-          </div>
-        )}
-      </div>
-    );
-  };
+  // ====== UI Layout ======
 
   return (
-    <div className="p-6">
-      <div className="flex gap-2 mb-5">
+    <div className="p-0 bg-gradient-to-br from-[#f6fbf8] to-[#f5faff] min-h-screen">
+      {/* Sticky/Floating Add Button */}
+      <button
+        className="fixed bottom-7 right-7 z-50 bg-gradient-to-tr from-emerald-600 to-emerald-400 text-white rounded-full p-4 shadow-2xl flex items-center gap-2 hover:scale-110 transition transform font-bold text-lg"
+        onClick={() => setAddNew(true)}
+        title="إضافة عميل"
+        style={{boxShadow: "0 8px 24px 0 #2dd4bf44"}}
+      >
+        <FaUserPlus /> <span className="hidden sm:inline">{lang === "ar" ? "إضافة عميل" : "Add Client"}</span>
+      </button>
+
+      {/* Header */}
+      <div className="py-10 px-4 sm:px-10 flex flex-col md:flex-row md:justify-between items-center gap-6 mb-7 bg-gradient-to-r from-emerald-100 to-white border-b border-emerald-50">
+        <div>
+          <div className="flex items-center gap-4 mb-3">
+            <FaUserPlus className="text-emerald-500 text-3xl" />
+            <h1 className="text-3xl font-extrabold text-emerald-900 tracking-tight">
+              {lang === "ar" ? "إدارة العملاء" : "Clients Management"}
+            </h1>
+          </div>
+          <div className="flex gap-4 text-base font-bold">
+            <div className="flex flex-col items-center bg-white/90 rounded-lg px-6 py-2 shadow border border-emerald-50 min-w-24">
+              <span className="text-gray-500 text-xs">{lang === "ar" ? "الكل" : "Total"}</span>
+              <span className="text-emerald-800 text-xl">{list.length}</span>
+            </div>
+            <div className="flex flex-col items-center bg-white/90 rounded-lg px-6 py-2 shadow border border-emerald-50 min-w-24">
+              <span className="text-gray-500 text-xs">{lang === "ar" ? "نشط" : "Active"}</span>
+              <span className="text-emerald-600 text-xl">
+                {list.filter((c) => c.status === "active").length}
+              </span>
+            </div>
+            <div className="flex flex-col items-center bg-white/90 rounded-lg px-6 py-2 shadow border border-emerald-50 min-w-24">
+              <span className="text-gray-500 text-xs">{lang === "ar" ? "محظور" : "Banned"}</span>
+              <span className="text-red-500 text-xl">
+                {list.filter((c) => c.status === "banned").length}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
+          <div className="relative w-full sm:w-64">
+            <FaSearch className="absolute left-3 top-3 text-emerald-400" />
+            <input
+              className="border rounded-full pl-10 pr-3 py-2 text-gray-700 bg-white/90 w-full shadow-sm focus:border-emerald-400"
+              placeholder="بحث بالاسم أو البريد أو الهاتف أو الرقم..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          {/* زر الإضافة أصبح عائم */}
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-2 px-4 sm:px-10 mb-7">
         {typeTabs.map((t) => (
           <button
             key={t.key}
-            className={`flex items-center gap-1 px-4 py-2 font-bold rounded-t-lg border-b-2 cursor-pointer transition ${
-              tab === t.key
+            className={`flex items-center gap-2 px-5 py-2 font-bold rounded-full border-2 cursor-pointer transition text-base shadow-sm 
+              ${tab === t.key
                 ? "border-emerald-600 text-emerald-700 bg-white shadow"
-                : "border-gray-200 text-gray-500 bg-gray-50 hover:bg-emerald-50"
-            }`}
+                : "border-gray-100 text-gray-500 bg-gray-50 hover:bg-emerald-50"
+              }`}
             onClick={() => setTab(t.key)}
+            style={{ minWidth: 120, justifyContent: "center" }}
           >
             {t.icon}
             {t.label}
           </button>
         ))}
       </div>
-      <div className="flex flex-col md:flex-row items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-emerald-800 mb-2">
-            {lang === "ar" ? "إدارة العملاء" : "Clients Management"}
-          </h1>
-          <div className="flex gap-3 text-sm">
-            <div>
-              {lang === "ar" ? "الكل" : "Total"}:{" "}
-              <span className="font-bold">{list.length}</span>
-            </div>
-            <div>
-              {lang === "ar" ? "نشط" : "Active"}:{" "}
-              <span className="font-bold">
-                {list.filter((c) => c.status === "active").length}
-              </span>
-            </div>
-            <div>
-              {lang === "ar" ? "محظور" : "Banned"}:{" "}
-              <span className="font-bold text-red-500">
-                {list.filter((c) => c.status === "banned").length}
-              </span>
-            </div>
-          </div>
-        </div>
-        <div className="mt-4 md:mt-0 flex items-center gap-2">
-          <input
-            className="border rounded px-3 py-2"
-            placeholder="بحث بأي معلومة..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <button
-          className="bg-gradient-to-r from-emerald-600 to-emerald-400 text-white rounded px-4 py-2 ml-4 hover:from-emerald-700 hover:to-emerald-600 cursor-pointer shadow font-bold flex items-center gap-2"
-          onClick={() => setAddNew(true)}
-        >
-          <FaUserPlus /> إضافة عميل
-        </button>
-      </div>
-      <div className="overflow-x-auto rounded-xl shadow bg-white/90">
+
+      {/* Table */}
+      <div className="overflow-x-auto rounded-xl shadow bg-white/95 mb-2 mx-2 sm:mx-10">
         <table className="min-w-full">
           <thead>
             <tr className="bg-emerald-50 text-emerald-800 text-sm">
@@ -442,6 +301,7 @@ function UsersManagementSection({ lang = "ar" }) {
               <th className="py-2 px-4">الاسم</th>
               <th className="py-2 px-4">النوع</th>
               <th className="py-2 px-4">رقم العميل</th>
+              <th className="py-2 px-4">الحالة</th>
               <th className="py-2 px-4">البريد</th>
               <th className="py-2 px-4">الهاتف</th>
               <th className="py-2 px-4">الرصيد</th>
@@ -456,31 +316,30 @@ function UsersManagementSection({ lang = "ar" }) {
                   <img
                     src={client.profilePic || "/default-avatar.png"}
                     alt={client.name}
-                    className="w-10 h-10 rounded-full object-cover inline-block border-2 border-emerald-100 cursor-pointer"
+                    className="w-11 h-11 rounded-full object-cover inline-block border-2 border-emerald-100 cursor-pointer shadow"
                     onClick={() => handleOpenCard(client)}
-                    style={{ cursor: "pointer" }}
                   />
                 </td>
                 <td
                   className="py-2 px-4 font-semibold text-emerald-900 cursor-pointer hover:underline"
                   onClick={() => handleOpenCard(client)}
-                  style={{ cursor: "pointer" }}
                 >
                   {client.name}
                 </td>
                 <td
                   className="py-2 px-4 font-bold text-indigo-600 cursor-pointer hover:underline"
                   onClick={() => handleOpenCard(client)}
-                  style={{ cursor: "pointer" }}
                 >
                   {typeLabel[client.type]}
                 </td>
                 <td
                   className="py-2 px-4 font-mono font-bold text-emerald-800 cursor-pointer hover:underline"
                   onClick={() => handleOpenCard(client)}
-                  style={{ cursor: "pointer" }}
                 >
                   {client.clientNumber}
+                </td>
+                <td className="py-2 px-4">
+                  <StatusChip status={client.status}/>
                 </td>
                 <td className="py-2 px-4 text-gray-700">{client.email}</td>
                 <td className="py-2 px-4 text-gray-700">{client.phone}</td>
@@ -491,7 +350,7 @@ function UsersManagementSection({ lang = "ar" }) {
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={9} className="py-6 text-center text-gray-400">
+                <td colSpan={10} className="py-6 text-center text-gray-400">
                   لا يوجد عملاء بهذه البيانات.
                 </td>
               </tr>
@@ -499,7 +358,7 @@ function UsersManagementSection({ lang = "ar" }) {
           </tbody>
         </table>
       </div>
-
+      {/* بطاقة العميل & التعديل & الإضافة كما في كودك الحالي بدون تعديل كبير (أضف ظل وخلفية شفافة فقط) */}
       {selected && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="relative">
