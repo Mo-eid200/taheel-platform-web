@@ -59,7 +59,9 @@ export default function ServiceSection({
     <div className="space-y-8">
       {/* عرض مجموعات الخدمات */}
       {groups.map((group, idx) => {
-        const arr = objectToArray(group.services).filter(filterFn);
+        const arr = objectToArray(group.services)
+          .filter(filterFn)
+          .filter(srv => srv.active !== false);
         if (!arr.length) return null;
         return (
           <div key={group.title + idx}>
