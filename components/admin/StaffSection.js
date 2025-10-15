@@ -9,7 +9,7 @@ import {
 import { firestore, auth } from "@/lib/firebase.client";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import {
-  collection, doc, getDoc, setDoc, updateDoc, onSnapshot,
+  collection, doc, getDoc, setDoc, updateDoc, onSnapshot, query, where, getDocs
 } from "firebase/firestore";
 
 // --- Helpers ---
@@ -35,7 +35,6 @@ function generateEmployeeNumber(staffList) {
   const year = new Date().getFullYear();
   return `EMP-${year}-${String(nextNum).padStart(3, "0")}`;
 }
-// فرق الساعات
 function getHourDiff(start, end) {
   if (!start || !end) return 0;
   if (typeof start === "number" && typeof end === "number") {
@@ -345,7 +344,7 @@ function StaffCard({ staff, onClose, onImageChange, onAddNote }) {
   );
 }
 
-// نافذة إضافة موظف/مدير جديد
+// نافذة إضافة موظف/مدير جديد (عصري جدا)
 function StaffAddModal({ onClose, staffList }) {
   const [data, setData] = useState({
     type: "employee",
@@ -365,7 +364,8 @@ function StaffAddModal({ onClose, staffList }) {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [providersList, setProvidersList] = useState([]);
-  const [allSelected, setAllSelected] = useState(false);
+  const [selectedProviders, setSelectedProviders] = useState([]);
+  const [providerDropdown, setProviderDropdown] = useState(false);
 
   useEffect(() => {
     async function fetchAllProviders() {
@@ -395,25 +395,36 @@ function StaffAddModal({ onClose, staffList }) {
     reader.readAsDataURL(file);
   }
 
-  function handleSelectAllProviders() {
-    if (allSelected) {
-      setData(d => ({ ...d, providers: [] }));
-      setAllSelected(false);
-    } else {
-      setData(d => ({ ...d, providers: providersList }));
-      setAllSelected(true);
-    }
+  function toggleProviderDropdown() {
+    setProviderDropdown(v => !v);
   }
-
-  function handleProviderChange(provider) {
-    let arr = [...data.providers];
+  function handleProviderSelect(provider) {
+    let arr = [...selectedProviders];
     if (arr.includes(provider)) {
       arr = arr.filter(p => p !== provider);
     } else {
       arr.push(provider);
     }
+    setSelectedProviders(arr);
     setData(d => ({ ...d, providers: arr }));
-    setAllSelected(arr.length === providersList.length);
+  }
+  function selectAllProviders() {
+    setSelectedProviders(providersList);
+    setData(d => ({ ...d, providers: providersList }));
+    setProviderDropdown(false);
+  }
+  function clearProviders() {
+    setSelectedProviders([]);
+    setData(d => ({ ...d, providers: [] }));
+    setProviderDropdown(false);
+  }
+
+  async function isDuplicate() {
+    const q = query(collection(firestore, "users"), where("email", "==", data.email));
+    const q2 = query(collection(firestore, "users"), where("phone", "==", data.phone));
+    const snap = await getDocs(q);
+    const snap2 = await getDocs(q2);
+    return !snap.empty || !snap2.empty;
   }
 
   const handleSubmit = async (e) => {
@@ -422,6 +433,11 @@ function StaffAddModal({ onClose, staffList }) {
     setLoading(true);
     setSuccess("");
     try {
+      if (await isDuplicate()) {
+        setError("يوجد موظف بنفس البريد أو الهاتف!");
+        setLoading(false);
+        return;
+      }
       const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password);
       const { user } = userCredential;
       const employeeNumber = generateEmployeeNumber(staffList);
@@ -433,15 +449,10 @@ function StaffAddModal({ onClose, staffList }) {
         uid: user.uid,
         role: data.type
       };
-      await setDoc(doc(firestore, "users", employeeNumber), {
-        ...userData,
-        uid: user.uid,
-      });
+      await setDoc(doc(firestore, "users", employeeNumber), userData);
       setSuccess("تم إنشاء موظف جديد بنجاح!");
       setLoading(false);
-      setTimeout(() => {
-        onClose();
-      }, 1800);
+      setTimeout(() => onClose(), 1800);
     } catch (err) {
       setError(err.message || "حدث خطأ!");
       setLoading(false);
@@ -449,95 +460,71 @@ function StaffAddModal({ onClose, staffList }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <form onSubmit={handleSubmit} className="bg-white rounded-3xl shadow-2xl w-full max-w-lg p-8 border-2 border-emerald-200 relative animate-fade-in">
-        <button className="absolute top-3 left-3 text-gray-400 hover:text-gray-700 font-bold text-2xl cursor-pointer" onClick={onClose} type="button">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 overflow-auto">
+      <form onSubmit={handleSubmit} className="relative bg-gradient-to-br from-white via-emerald-50 to-white rounded-3xl shadow-2xl border-2 border-emerald-200 w-full max-w-2xl px-6 py-8 animate-fade-in">
+        <button type="button" onClick={onClose} className="absolute top-3 left-3 text-gray-400 hover:text-gray-700 font-bold text-2xl cursor-pointer">
           <FaTimes />
         </button>
-        <div className="text-xl font-bold text-emerald-700 mb-6 flex items-center gap-2">
-          <FaUserPlus /> إضافة موظف/مدير جديد
-        </div>
-        {error && <div className="bg-red-100 text-red-800 p-2 rounded mb-2">{error}</div>}
-        {success && <div className="bg-emerald-100 text-emerald-800 p-2 rounded mb-2">{success}</div>}
-        <div className="flex flex-col items-center mb-4">
-          <div className="relative group mb-2">
-            <Image src={img || "/avatar.svg"} alt="صورة الموظف" width={96} height={96} className="w-24 h-24 rounded-full border-4 border-emerald-200 shadow object-cover bg-white" />
-            <label title="إضافة صورة" className="absolute bottom-2 right-2 bg-white/80 rounded-full p-2 shadow cursor-pointer border border-emerald-200 hover:bg-emerald-50 transition">
-              <FaCamera className="text-emerald-700 text-lg" />
-              <input type="file" accept="image/*" className="hidden" onChange={handleImg}/>
+        <div className="flex flex-col md:flex-row items-center gap-8">
+          {/* صورة الموظف */}
+          <div className="flex flex-col items-center gap-2">
+            <Image src={img || "/avatar.svg"} alt="" width={110} height={110} className="w-28 h-28 rounded-full border-4 border-emerald-200 shadow object-cover bg-white" />
+            <label className="bg-emerald-600 text-white px-3 py-2 rounded-full cursor-pointer hover:bg-emerald-700 font-bold flex items-center gap-2 mt-2 shadow">
+              <FaCamera /> صورة الموظف
+              <input type="file" accept="image/*" className="hidden" onChange={handleImg} />
             </label>
           </div>
-        </div>
-        <div className="flex flex-col gap-3">
-          <input className="border rounded px-3 py-2 w-full text-emerald-900 bg-emerald-50 focus:bg-white focus:ring-2 focus:ring-emerald-200"
-            placeholder="اسم الموظف أو المدير" value={data.name}
-            onChange={e=>setData(d=>({...d, name: e.target.value}))} required />
-          <input className="border rounded px-3 py-2 w-full text-emerald-900 bg-emerald-50 focus:bg-white focus:ring-2 focus:ring-emerald-200"
-            placeholder="البريد الإلكتروني" type="email" value={data.email}
-            onChange={e=>setData(d=>({...d, email: e.target.value}))} required />
-          <div className="relative">
-            <input
-              className="border rounded px-3 py-2 w-full text-emerald-900 bg-emerald-50 focus:bg-white focus:ring-2 focus:ring-emerald-200"
-              placeholder="كلمة المرور (للدخول)"
-              type={showPass ? "text" : "password"}
-              value={data.password}
-              onChange={e => setData(d => ({ ...d, password: e.target.value }))}
-              required
-              autoComplete="new-password"
-            />
-            <button
-              type="button"
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-emerald-700 cursor-pointer"
-              onClick={() => setShowPass(v => !v)}
-              tabIndex={-1}
-            >
-              {showPass ? "إخفاء" : "إظهار"}
+          {/* نموذج البيانات */}
+          <div className="flex-1 w-full">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <input className="border rounded-lg px-3 py-2 text-emerald-900 bg-emerald-50 focus:bg-white focus:ring-2 focus:ring-emerald-200" placeholder="اسم الموظف أو المدير" value={data.name} onChange={e => setData(d => ({ ...d, name: e.target.value }))} required />
+              <input className="border rounded-lg px-3 py-2 text-emerald-900 bg-emerald-50 focus:bg-white focus:ring-2 focus:ring-emerald-200" placeholder="البريد الإلكتروني" type="email" value={data.email} onChange={e => setData(d => ({ ...d, email: e.target.value }))} required />
+              <div className="relative">
+                <input className="border rounded-lg px-3 py-2 text-emerald-900 bg-emerald-50 focus:bg-white focus:ring-2 focus:ring-emerald-200 w-full" placeholder="كلمة المرور (للدخول)" type={showPass ? "text" : "password"} value={data.password} onChange={e => setData(d => ({ ...d, password: e.target.value }))} required autoComplete="new-password" />
+                <button type="button" className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-emerald-700 cursor-pointer" onClick={() => setShowPass(v => !v)} tabIndex={-1}>
+                  {showPass ? "إخفاء" : "إظهار"}
+                </button>
+              </div>
+              <input className="border rounded-lg px-3 py-2 text-emerald-900 bg-emerald-50 focus:bg-white focus:ring-2 focus:ring-emerald-200" placeholder="رقم الهاتف" value={data.phone} onChange={e => setData(d => ({ ...d, phone: e.target.value }))} required />
+              <input className="border rounded-lg px-3 py-2 text-emerald-900 bg-emerald-50 focus:bg-white focus:ring-2 focus:ring-emerald-200" placeholder="رقم الإقامة" value={data.eidNumber} onChange={e => setData(d => ({ ...d, eidNumber: e.target.value }))} />
+              <input className="border rounded-lg px-3 py-2 text-emerald-900 bg-emerald-50 focus:bg-white focus:ring-2 focus:ring-emerald-200" placeholder="المسمى الوظيفي" value={data.jobTitle} onChange={e => setData(d => ({ ...d, jobTitle: e.target.value }))} />
+              <select className="border rounded-lg px-3 py-2 text-emerald-900 bg-emerald-50 focus:bg-white focus:ring-2 focus:ring-emerald-200" value={data.type} onChange={e => setData(d => ({ ...d, type: e.target.value }))}>
+                <option value="employee">موظف</option>
+                <option value="admin">مدير</option>
+              </select>
+              {/* MultiSelect الجهات */}
+              <div className="relative">
+                <button type="button" onClick={toggleProviderDropdown} className="border rounded-lg px-3 py-2 w-full text-emerald-900 bg-emerald-50 flex items-center flex-wrap gap-2 focus:bg-white focus:ring-2 focus:ring-emerald-200">
+                  {selectedProviders.length === 0 ? "اختيار الجهات..." :
+                    selectedProviders.length === providersList.length ? "كل الجهات مختارة" :
+                    selectedProviders.map((prov, i) => (
+                      <span key={prov + i} className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded text-xs font-bold">{prov}</span>
+                    ))
+                  }
+                </button>
+                {providerDropdown && (
+                  <div className="absolute z-20 mt-1 bg-white border border-emerald-200 rounded-lg shadow-lg max-h-44 overflow-auto w-full">
+                    <div className="flex flex-wrap gap-2 p-2">
+                      <button type="button" className="font-bold text-indigo-700 bg-indigo-100 px-2 py-1 rounded" onClick={selectAllProviders}>تحديد الكل</button>
+                      <button type="button" className="font-bold text-gray-600 bg-gray-100 px-2 py-1 rounded" onClick={clearProviders}>إلغاء الكل</button>
+                    </div>
+                    {providersList.map((prov, i) => (
+                      <label key={prov + i} className="block px-4 py-2 hover:bg-emerald-50 cursor-pointer text-emerald-800 text-sm transition">
+                        <input type="checkbox" checked={selectedProviders.includes(prov)} onChange={() => handleProviderSelect(prov)} className="mr-2 accent-emerald-500" />
+                        {prov}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            {error && <div className="bg-red-100 text-red-800 p-2 rounded mt-3 text-center">{error}</div>}
+            {success && <div className="bg-emerald-100 text-emerald-800 p-2 rounded mt-3 text-center">{success}</div>}
+            <button type="submit" disabled={loading} className="mt-6 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-700 hover:to-emerald-600 text-white rounded-full px-8 py-3 font-bold flex items-center gap-2 shadow transition cursor-pointer w-full">
+              {loading ? "جاري الإضافة..." : <><FaUserPlus /> إضافة</>}
             </button>
           </div>
-          <input className="border rounded px-3 py-2 w-full text-emerald-900 bg-emerald-50 focus:bg-white focus:ring-2 focus:ring-emerald-200"
-            placeholder="رقم الهاتف" value={data.phone}
-            onChange={e=>setData(d=>({...d, phone: e.target.value}))} required />
-          <input className="border rounded px-3 py-2 w-full text-emerald-900 bg-emerald-50 focus:bg-white focus:ring-2 focus:ring-emerald-200"
-            placeholder="رقم الإقامة" value={data.eidNumber}
-            onChange={e=>setData(d=>({...d, eidNumber: e.target.value}))} />
-          <input className="border rounded px-3 py-2 w-full text-emerald-900 bg-emerald-50 focus:bg-white focus:ring-2 focus:ring-emerald-200"
-            placeholder="المسمى الوظيفي" value={data.jobTitle}
-            onChange={e=>setData(d=>({...d, jobTitle: e.target.value}))} />
-          <select className="border rounded px-3 py-2 w-full text-emerald-900 bg-emerald-50 focus:bg-white focus:ring-2 focus:ring-emerald-200"
-            value={data.type} onChange={e=>setData(d=>({...d, type: e.target.value}))}>
-            <option value="employee">موظف</option>
-            <option value="admin">مدير</option>
-          </select>
         </div>
-        {/* اختيار الجهات */}
-        <div className="mt-4">
-          <div className="font-bold text-emerald-700 mb-2">جهات الخدمة المرتبطة:</div>
-          <div className="flex flex-wrap gap-2">
-            <label className="cursor-pointer font-semibold text-indigo-700 bg-indigo-100 px-3 py-1 rounded">
-              <input
-                type="checkbox"
-                checked={allSelected}
-                onChange={handleSelectAllProviders}
-                className="mr-1 accent-indigo-600"
-              />
-              كل الجهات
-            </label>
-            {providersList.map((prov) => (
-              <label key={prov} className="cursor-pointer font-semibold text-emerald-700 bg-emerald-100 px-3 py-1 rounded">
-                <input
-                  type="checkbox"
-                  checked={data.providers.includes(prov)}
-                  onChange={() => handleProviderChange(prov)}
-                  className="mr-1 accent-emerald-600"
-                />
-                {prov}
-              </label>
-            ))}
-          </div>
-        </div>
-        <button type="submit" disabled={loading} className="mt-6 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-700 hover:to-emerald-600 text-white rounded-full px-8 py-3 font-bold flex items-center gap-2 shadow transition cursor-pointer">
-          {loading ? "جاري الإضافة..." : <><FaUserPlus /> إضافة</>}
-        </button>
       </form>
     </div>
   );
