@@ -3,37 +3,30 @@ import { Suspense } from "react";
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import {
-  FaCheckCircle, FaRegCircle, FaSearch, FaEye, FaTimes, FaDownload, FaUserPlus, FaEdit, FaCamera, FaStickyNote
+  FaCheckCircle, FaRegCircle, FaSearch, FaEye, FaTimes, FaDownload,
+  FaUserPlus, FaEdit, FaCamera, FaStickyNote
 } from "react-icons/fa";
 import { firestore, auth } from "@/lib/firebase.client";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import {
-  collection,
-  doc,
-  getDoc,
-  setDoc,
-  updateDoc,
-  onSnapshot,
+  collection, doc, getDoc, setDoc, updateDoc, onSnapshot,
 } from "firebase/firestore";
 
-// --- دوال مساعدة ---
+// --- Helpers ---
 function getStatus(staff) {
   if (staff.status === "online") {
     return { label: "أونلاين", color: "text-green-600 bg-green-50", icon: <FaCheckCircle /> };
   }
   return { label: "أوفلاين", color: "text-gray-400 bg-gray-100", icon: <FaRegCircle /> };
 }
-
 function getStaffName(staff) {
   if (staff.name) return staff.name;
   if (staff.firstName || staff.lastName) return [staff.firstName, staff.lastName].filter(Boolean).join(" ");
   return "—";
 }
-
 function getProfilePic(staff) {
   return staff.profilePic || staff.photoUrl || "/avatar.svg";
 }
-
 function generateEmployeeNumber(staffList) {
   const nums = staffList
     .filter(s => s.employeeNumber && /^EMP-\d{4}-\d{3}$/.test(s.employeeNumber))
@@ -41,6 +34,35 @@ function generateEmployeeNumber(staffList) {
   const nextNum = (nums.length ? Math.max(...nums) + 1 : 1);
   const year = new Date().getFullYear();
   return `EMP-${year}-${String(nextNum).padStart(3, "0")}`;
+}
+// فرق الساعات
+function getHourDiff(start, end) {
+  if (!start || !end) return 0;
+  if (typeof start === "number" && typeof end === "number") {
+    return Math.round((end - start) / 1000 / 60 / 60);
+  }
+  const [h1, m1] = ("" + start).split(":").map(Number);
+  const [h2, m2] = ("" + end).split(":").map(Number);
+  return Math.max(0, (h2 + m2 / 60) - (h1 + m1 / 60));
+}
+function getTodayEntry(staff) {
+  const today = new Date().toISOString().slice(0, 10);
+  if (Array.isArray(staff.attendance)) {
+    const todayLog = staff.attendance.find(a => a.date === today);
+    if (todayLog) return todayLog.in || "-";
+  }
+  if (Array.isArray(staff.enterLog) && staff.enterLog.length) {
+    const log = staff.enterLog.find(l => l.date === today);
+    if (log) return log.in || "-";
+  }
+  if (Array.isArray(staff.loginHistory)) {
+    const log = staff.loginHistory.find(l => l.date === today);
+    if (log) {
+      const d = new Date(log.in);
+      return `${d.getHours().toString().padStart(2,"0")}:${d.getMinutes().toString().padStart(2,"0")}`;
+    }
+  }
+  return "-";
 }
 
 function StaffSection() {
@@ -51,7 +73,6 @@ function StaffSection() {
 
   useEffect(() => {
     const usersRef = collection(firestore, "users");
-    // جلب الموظفين والمدراء فقط
     const unsubscribe = onSnapshot(usersRef, (snapshot) => {
       const arr = [];
       snapshot.forEach(docSnap => {
@@ -71,26 +92,6 @@ function StaffSection() {
     (s.email || "").toLowerCase().includes(search.toLowerCase()) ||
     (s.employeeNumber || "").includes(search)
   );
-
-  function getTodayEntry(staff) {
-    const today = new Date().toISOString().slice(0, 10);
-    if (Array.isArray(staff.attendance)) {
-      const todayLog = staff.attendance.find(a => a.date === today);
-      if (todayLog) return `${todayLog.date} ${todayLog.in}`;
-    }
-    if (Array.isArray(staff.enterLog) && staff.enterLog.length) {
-      const log = staff.enterLog.find(l => l.date === today);
-      if (log) return `${log.date} ${log.in}`;
-    }
-    if (Array.isArray(staff.loginHistory)) {
-      const log = staff.loginHistory.find(l => l.date === today);
-      if (log) {
-        const d = new Date(log.in);
-        return `${log.date} ${d.getHours().toString().padStart(2,"0")}:${d.getMinutes().toString().padStart(2,"0")}`;
-      }
-    }
-    return "-";
-  }
 
   const handleAdd = () => setShowAdd(true);
 
@@ -119,7 +120,6 @@ function StaffSection() {
           </button>
         </div>
       </div>
-
       {/* جدول الموظفين */}
       <div className="overflow-x-auto rounded-xl shadow bg-white/95 border border-emerald-100">
         <table className="min-w-full text-center text-base">
@@ -144,6 +144,7 @@ function StaffSection() {
               </tr>
             ) : filteredStaff.map((s) => {
               const status = getStatus(s);
+              const todayIn = getTodayEntry(s);
               return (
                 <tr
                   key={s.key}
@@ -170,7 +171,13 @@ function StaffSection() {
                       {s.type === "admin" ? "مدير" : "موظف"}
                     </span>
                   </td>
-                  <td className="text-gray-700 cursor-pointer">{getTodayEntry(s)}</td>
+                  <td className="text-gray-700 cursor-pointer">
+                    <span className={`inline-block px-3 py-1 rounded-full font-bold text-xs
+                      ${todayIn !== "-" ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-400"}
+                    `}>
+                      {todayIn !== "-" ? `${todayIn}` : "لم يسجل دخول"}
+                    </span>
+                  </td>
                   <td className="text-gray-700 cursor-pointer">{s.phone || "-"}</td>
                   <td className="text-gray-700 cursor-pointer">{s.email || "-"}</td>
                 </tr>
@@ -338,7 +345,7 @@ function StaffCard({ staff, onClose, onImageChange, onAddNote }) {
   );
 }
 
-// نافذة إضافة موظف/مدير جديد (Firebase Auth + Firestore)
+// نافذة إضافة موظف/مدير جديد
 function StaffAddModal({ onClose, staffList }) {
   const [data, setData] = useState({
     type: "employee",
@@ -361,7 +368,6 @@ function StaffAddModal({ onClose, staffList }) {
   const [allSelected, setAllSelected] = useState(false);
 
   useEffect(() => {
-    // جلب جميع الجهات من كل الجذور (مقيمين/غير مقيمين/شركات/أخرى)
     async function fetchAllProviders() {
       const roots = ["resident", "nonresident", "company", "other"];
       let all = [];
@@ -373,7 +379,6 @@ function StaffAddModal({ onClose, staffList }) {
           if (Array.isArray(data.providers)) all = [...all, ...data.providers];
         }
       }
-      // إزالة التكرار
       setProvidersList([...new Set(all)]);
     }
     fetchAllProviders();
@@ -390,7 +395,6 @@ function StaffAddModal({ onClose, staffList }) {
     reader.readAsDataURL(file);
   }
 
-  // اختيار كل الجهات/إلغاء الكل
   function handleSelectAllProviders() {
     if (allSelected) {
       setData(d => ({ ...d, providers: [] }));
@@ -401,7 +405,6 @@ function StaffAddModal({ onClose, staffList }) {
     }
   }
 
-  // اختيار جهة واحدة
   function handleProviderChange(provider) {
     let arr = [...data.providers];
     if (arr.includes(provider)) {
@@ -419,10 +422,8 @@ function StaffAddModal({ onClose, staffList }) {
     setLoading(true);
     setSuccess("");
     try {
-      // 1. سجل الموظف في Firebase Auth
       const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password);
       const { user } = userCredential;
-      // 2. احفظ بياناته في Firestore تحت uid
       const employeeNumber = generateEmployeeNumber(staffList);
       const userData = {
         ...data,
@@ -432,14 +433,14 @@ function StaffAddModal({ onClose, staffList }) {
         uid: user.uid,
         role: data.type
       };
-    await setDoc(doc(firestore, "users", employeeNumber), {
-  ...userData,
-  uid: user.uid, // احتفظ بالـ UID للربط مع Authentication إذا احتجته
-});
-      setSuccess("تم إنشاء موظف جديد بنجاح!"); // ✅ أضف رسالة النجاح هنا
+      await setDoc(doc(firestore, "users", employeeNumber), {
+        ...userData,
+        uid: user.uid,
+      });
+      setSuccess("تم إنشاء موظف جديد بنجاح!");
       setLoading(false);
       setTimeout(() => {
-        onClose(); // ✅ يغلق المودال بعد 1.8 ثانية
+        onClose();
       }, 1800);
     } catch (err) {
       setError(err.message || "حدث خطأ!");
@@ -457,6 +458,7 @@ function StaffAddModal({ onClose, staffList }) {
           <FaUserPlus /> إضافة موظف/مدير جديد
         </div>
         {error && <div className="bg-red-100 text-red-800 p-2 rounded mb-2">{error}</div>}
+        {success && <div className="bg-emerald-100 text-emerald-800 p-2 rounded mb-2">{success}</div>}
         <div className="flex flex-col items-center mb-4">
           <div className="relative group mb-2">
             <Image src={img || "/avatar.svg"} alt="صورة الموظف" width={96} height={96} className="w-24 h-24 rounded-full border-4 border-emerald-200 shadow object-cover bg-white" />
@@ -541,16 +543,14 @@ function StaffAddModal({ onClose, staffList }) {
   );
 }
 
-// نافذة تعديل (بسيطة)
+// نافذة تعديل
 function EditStaffModal({ staff, onClose }) {
   const [data, setData] = useState({ ...staff });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     const userRef = doc(firestore, "users", staff.key);
-    await updateDoc(userRef, {
-      ...data
-    });
+    await updateDoc(userRef, { ...data });
     onClose();
   };
 
@@ -591,17 +591,6 @@ function EditStaffModal({ staff, onClose }) {
       </form>
     </div>
   );
-}
-
-// دالة لحساب الفرق بين وقتين (ساعة:دقيقة)
-function getHourDiff(start, end) {
-  if (!start || !end) return 0;
-  if (typeof start === "number" && typeof end === "number") {
-    return Math.round((end - start) / 1000 / 60 / 60);
-  }
-  const [h1, m1] = ("" + start).split(":").map(Number);
-  const [h2, m2] = ("" + end).split(":").map(Number);
-  return Math.max(0, (h2 + m2 / 60) - (h1 + m1 / 60));
 }
 
 export default function StaffSectionWrapper(props) {
