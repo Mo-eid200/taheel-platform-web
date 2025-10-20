@@ -9,10 +9,11 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  Timestamp,
 } from "firebase/firestore";
 import { firestore as db } from "@/lib/firebase.client";
 
-// Helpers (compact/unchanged logic)
+// Helpers
 function formatDate(ts, lang = "ar") {
   if (!ts) return "-";
   const d = typeof ts?.toDate === "function" ? ts.toDate() : new Date(ts);
@@ -52,7 +53,7 @@ function ClientActions({ client, lang }) {
           target="_blank"
           rel="noopener noreferrer"
           title="WhatsApp"
-          className="hover:bg-emerald-50 rounded-md p-1 transition text-emerald-700"
+          className="hover:bg-emerald-50 rounded-md p-1 transition text-emerald-700 cursor-pointer"
         >
           📱
         </a>
@@ -63,7 +64,7 @@ function ClientActions({ client, lang }) {
           target="_blank"
           rel="noopener noreferrer"
           title="Email"
-          className="hover:bg-sky-50 rounded-md p-1 transition text-sky-700"
+          className="hover:bg-sky-50 rounded-md p-1 transition text-sky-700 cursor-pointer"
         >
           ✉️
         </a>
@@ -72,7 +73,7 @@ function ClientActions({ client, lang }) {
   );
 }
 
-// Main (compact UI, header removed, spacing reduced)
+// Main compact control panel component
 export default function NotificationsSection({ lang = "ar" }) {
   const [notifications, setNotifications] = useState([]);
   const [clients, setClients] = useState([]);
@@ -80,14 +81,12 @@ export default function NotificationsSection({ lang = "ar" }) {
   const [target, setTarget] = useState("all");
   const [loading, setLoading] = useState(false);
 
-  // Filters
   const [notifTypeFilter, setNotifTypeFilter] = useState("all");
   const [notifSearch, setNotifSearch] = useState("");
   const [clientSearch, setClientSearch] = useState("");
 
-  // Scheduling & priority
   const [scheduleAt, setScheduleAt] = useState("");
-  const [priority, setPriority] = useState("high");
+  const [priority, setPriority] = useState("high"); // default high
 
   useEffect(() => {
     const qNotifs = query(collection(db, "notifications"), orderBy("timestamp", "desc"), limit(300));
@@ -120,20 +119,25 @@ export default function NotificationsSection({ lang = "ar" }) {
     }
     setLoading(true);
     try {
+      // pushAt: serverTimestamp() for immediate (automatic) unless user picks a schedule
+      const pushAtValue = scheduleAt ? Timestamp.fromDate(new Date(scheduleAt)) : serverTimestamp();
+
       const payload = {
         title: lang === "ar" ? "إشعار جديد" : "New Notification",
         body: message.trim(),
         targetId: target === "all" ? "all" : String(target),
-        timestamp: serverTimestamp(),
-        pushAt: scheduleAt ? new Date(scheduleAt) : serverTimestamp(),
+        timestamp: serverTimestamp(), // created time
+        pushAt: pushAtValue, // scheduled or immediate (serverTimestamp)
         type: target === "all" ? "general" : "custom",
         status: "queued",
         pushed: false,
         attempts: 0,
         lastError: null,
-        priority: priority || "high",
+        priority: priority || "high", // "high" or "normal"
         data: {},
       };
+
+      // attach tokens for single client to simplify sending function
       if (target !== "all") {
         const userRef = doc(db, "users", target);
         const userSnap = await getDoc(userRef);
@@ -145,11 +149,15 @@ export default function NotificationsSection({ lang = "ar" }) {
           if (tokens.length) payload.tokens = tokens;
         }
       }
+
       await addDoc(collection(db, "notifications"), payload);
+
+      // reset inputs
       setMessage("");
       setTarget("all");
       setScheduleAt("");
       setPriority("high");
+
       alert(lang === "ar" ? "تمت إضافة الإشعار إلى قائمة الانتظار." : "Notification queued.");
     } catch (e) {
       console.error(e);
@@ -184,25 +192,26 @@ export default function NotificationsSection({ lang = "ar" }) {
   }, [clients, clientSearch]);
 
   return (
-    <div className="max-w-5xl mx-auto py-6 px-3 md:px-6 text-sm">
-      {/* Compact form (no big title) */}
+    <div className="max-w-5xl mx-auto py-6 px-3 md:px-6 text-sm text-slate-900">
+      {/* Compact form - visually tuned */}
       <form
         onSubmit={(e) => {
           e.preventDefault();
           sendNotification();
         }}
-        className="w-full bg-white rounded-xl border border-slate-200 shadow-sm p-2 md:p-3 flex flex-col md:flex-row gap-2 md:items-center"
+        className="w-full bg-white rounded-xl border border-slate-200 shadow-sm p-3 md:p-4 flex flex-col md:flex-row gap-3 md:items-center"
       >
         <textarea
-          className="w-full md:w-96 min-h-[44px] p-2 rounded-md border border-slate-200 focus:ring-1 focus:ring-emerald-500 text-sm"
+          className="w-full md:w-96 min-h-[48px] p-2 rounded-md border border-slate-200 focus:ring-1 focus:ring-emerald-500 text-sm text-slate-900"
           placeholder={lang === "ar" ? "اكتب نص الإشعار..." : "Write notification message..."}
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           rows={2}
           aria-label={lang === "ar" ? "نص الإشعار" : "Notification message"}
         />
+
         <select
-          className="p-2 rounded-md border border-slate-200 bg-white text-sm min-w-[160px]"
+          className="p-2 rounded-md border border-slate-200 bg-white text-sm min-w-[180px] cursor-pointer"
           value={target}
           onChange={(e) => setTarget(e.target.value)}
           title={lang === "ar" ? "المستلم" : "Recipient"}
@@ -219,18 +228,23 @@ export default function NotificationsSection({ lang = "ar" }) {
           <select
             value={priority}
             onChange={(e) => setPriority(e.target.value)}
-            className="p-2 rounded-md border border-slate-200 bg-white text-sm"
+            className="p-2 rounded-md border border-slate-200 bg-white text-sm cursor-pointer"
             title={lang === "ar" ? "الأولوية" : "Priority"}
           >
             <option value="high">{lang === "ar" ? "عالية" : "High"}</option>
             <option value="normal">{lang === "ar" ? "عادية" : "Normal"}</option>
           </select>
 
+          {/* short explanation of priority */}
+          <div className="text-xs text-slate-500">
+            {priority === "high" ? (lang === "ar" ? "عالية — تصل فورًا وبأولوية." : "High — delivered immediately with priority.") : (lang === "ar" ? "عادية — تصل حسب الجدولة والاعتمادات." : "Normal — delivered normally (no priority).")}
+          </div>
+
           <input
             type="datetime-local"
             value={scheduleAt}
             onChange={(e) => setScheduleAt(e.target.value)}
-            className="p-2 rounded-md border border-slate-200 bg-white text-sm"
+            className="p-2 rounded-md border border-slate-200 bg-white text-sm cursor-pointer"
             title={lang === "ar" ? "موعد الإرسال" : "Schedule send time"}
           />
         </div>
@@ -238,19 +252,19 @@ export default function NotificationsSection({ lang = "ar" }) {
         <button
           type="submit"
           disabled={loading || !message.trim()}
-          className="px-3 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold text-sm shadow transition"
+          className="px-3 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold text-sm shadow transition cursor-pointer"
         >
           {loading ? (lang === "ar" ? "جارٍ الإرسال..." : "Sending...") : (lang === "ar" ? "إرسال إشعار" : "Send Notification")}
         </button>
       </form>
 
-      {/* Filters row (compact) */}
+      {/* Filters row */}
       <div className="flex flex-col md:flex-row gap-2 items-center mt-4 mb-3">
         <div className="flex gap-1">
           {["all", "general", "custom"].map((k) => (
             <button
               key={k}
-              className={`px-2 py-1 rounded-md text-sm font-medium ${notifTypeFilter === k ? "bg-emerald-700 text-white" : "bg-emerald-50 text-emerald-800 border border-emerald-200"}`}
+              className={`px-2 py-1 rounded-md text-sm font-medium ${notifTypeFilter === k ? "bg-emerald-700 text-white" : "bg-emerald-50 text-emerald-800 border border-emerald-200"} cursor-pointer`}
               onClick={() => setNotifTypeFilter(k)}
             >
               {k === "all" ? (lang === "ar" ? "الكل" : "All") : k === "general" ? (lang === "ar" ? "عام" : "General") : (lang === "ar" ? "مخصص" : "Custom")}
@@ -265,7 +279,7 @@ export default function NotificationsSection({ lang = "ar" }) {
         />
       </div>
 
-      {/* Notifications Table (compact sizes) */}
+      {/* Notifications Table */}
       <div className="rounded-xl bg-white shadow border border-slate-200 overflow-x-auto">
         <table className="w-full text-center border-separate border-spacing-0 text-sm">
           <thead className="bg-emerald-50 text-emerald-900">
@@ -317,7 +331,13 @@ export default function NotificationsSection({ lang = "ar" }) {
                     )}
                   </td>
                   <td className="py-2 px-2 text-slate-500 text-xs whitespace-nowrap">
+                    {/* show created timestamp and scheduled pushAt (if different) */}
                     {formatDate(n.timestamp, lang)}
+                    {n.pushAt && n.pushAt !== n.timestamp ? (
+                      <div className="text-[10px] text-slate-400">
+                        {lang === "ar" ? "مجدول لِـ " : "Scheduled for "} {formatDate(n.pushAt, lang)}
+                      </div>
+                    ) : null}
                     {n.sentAt ? <div className="text-[10px] text-slate-400">{lang === "ar" ? "أُرسل: " : "sentAt: "}{formatDate(n.sentAt, lang)}</div> : null}
                   </td>
                 </tr>
@@ -327,7 +347,7 @@ export default function NotificationsSection({ lang = "ar" }) {
         </table>
       </div>
 
-      {/* Clients (compact cards) */}
+      {/* Clients */}
       <div className="mt-6">
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-semibold text-emerald-800">{lang === "ar" ? "العملاء" : "Clients"}</span>
