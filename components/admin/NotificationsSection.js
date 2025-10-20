@@ -12,21 +12,19 @@ import {
 } from "firebase/firestore";
 import { firestore as db } from "@/lib/firebase.client";
 
-// =============== Helpers ===============
+// Helpers (compact/unchanged logic)
 function formatDate(ts, lang = "ar") {
   if (!ts) return "-";
   const d = typeof ts?.toDate === "function" ? ts.toDate() : new Date(ts);
   return d.toLocaleString(lang === "ar" ? "ar-AE" : "en-US", { timeZone: "Asia/Dubai" });
 }
-
 function toE164(raw) {
   if (!raw) return "";
   const digits = String(raw).replace(/\D/g, "");
   if (String(raw).startsWith("+")) return `+${digits}`;
   if (digits.startsWith("971")) return `+${digits}`;
-  return `+971${digits}`; // fallback لو مفيش كود دولة
+  return `+971${digits}`;
 }
-
 function Badge({ children, intent }) {
   const map = {
     success: "bg-emerald-100 text-emerald-700",
@@ -36,32 +34,27 @@ function Badge({ children, intent }) {
     default: "bg-slate-100 text-slate-700",
   };
   return (
-    <span className={`inline-block px-2 py-1 rounded-full text-xs font-bold ${map[intent || "default"]}`}>
+    <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${map[intent || "default"]}`}>
       {children}
     </span>
   );
 }
-
 function ClientActions({ client, lang }) {
   if (!client) return null;
   const phone = toE164(client.phone);
-  const msg = encodeURIComponent(
-    lang === "ar"
-      ? "مرحباً، لديك إشعار جديد من منصة تأهيل."
-      : "Hello, you have a new notification from Taheel."
-  );
+  const msg = encodeURIComponent(lang === "ar" ? "مرحباً، لديك إشعار جديد من منصة تأهيل." : "Hello, you have a new notification from Taheel.");
   const subject = encodeURIComponent(lang === "ar" ? "إشعار جديد" : "New Notification");
   return (
-    <span className="flex gap-2 ml-1">
+    <span className="flex gap-2 ml-1 text-sm">
       {phone ? (
         <a
           href={`https://wa.me/${phone.replace("+", "")}?text=${msg}`}
           target="_blank"
           rel="noopener noreferrer"
           title="WhatsApp"
-          className="hover:bg-emerald-50 rounded-full p-1 transition text-emerald-700"
+          className="hover:bg-emerald-50 rounded-md p-1 transition text-emerald-700"
         >
-          <span role="img" aria-label="WhatsApp" className="text-xl">📱</span>
+          📱
         </a>
       ) : null}
       {client.email ? (
@@ -70,16 +63,16 @@ function ClientActions({ client, lang }) {
           target="_blank"
           rel="noopener noreferrer"
           title="Email"
-          className="hover:bg-sky-50 rounded-full p-1 transition text-sky-700"
+          className="hover:bg-sky-50 rounded-md p-1 transition text-sky-700"
         >
-          <span role="img" aria-label="Email" className="text-xl">✉️</span>
+          ✉️
         </a>
       ) : null}
     </span>
   );
 }
 
-// =============== Main ===============
+// Main (compact UI, header removed, spacing reduced)
 export default function NotificationsSection({ lang = "ar" }) {
   const [notifications, setNotifications] = useState([]);
   const [clients, setClients] = useState([]);
@@ -88,15 +81,14 @@ export default function NotificationsSection({ lang = "ar" }) {
   const [loading, setLoading] = useState(false);
 
   // Filters
-  const [notifTypeFilter, setNotifTypeFilter] = useState("all"); // "all" | "general" | "custom"
+  const [notifTypeFilter, setNotifTypeFilter] = useState("all");
   const [notifSearch, setNotifSearch] = useState("");
   const [clientSearch, setClientSearch] = useState("");
 
   // Scheduling & priority
-  const [scheduleAt, setScheduleAt] = useState(""); // ISO datetime-local string
+  const [scheduleAt, setScheduleAt] = useState("");
   const [priority, setPriority] = useState("high");
 
-  // ===== Live Firestore Streams =====
   useEffect(() => {
     const qNotifs = query(collection(db, "notifications"), orderBy("timestamp", "desc"), limit(300));
     const unsubNotifs = onSnapshot(qNotifs, (snap) => {
@@ -104,13 +96,11 @@ export default function NotificationsSection({ lang = "ar" }) {
       snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
       setNotifications(list);
     });
-
     const unsubClients = onSnapshot(collection(db, "users"), (snap) => {
       const list = [];
       snap.forEach((d) => list.push({ userId: d.id, ...d.data() }));
       setClients(list);
     });
-
     return () => {
       unsubNotifs();
       unsubClients();
@@ -123,7 +113,6 @@ export default function NotificationsSection({ lang = "ar" }) {
     return m;
   }, [clients]);
 
-  // ===== Send Notification =====
   async function sendNotification() {
     if (!message.trim()) {
       alert(lang === "ar" ? "من فضلك اكتب نص الإشعار." : "Please write a message.");
@@ -131,41 +120,31 @@ export default function NotificationsSection({ lang = "ar" }) {
     }
     setLoading(true);
     try {
-      // Build payload
       const payload = {
         title: lang === "ar" ? "إشعار جديد" : "New Notification",
         body: message.trim(),
         targetId: target === "all" ? "all" : String(target),
         timestamp: serverTimestamp(),
-        // pushAt: either a specific date or serverTimestamp for immediate
         pushAt: scheduleAt ? new Date(scheduleAt) : serverTimestamp(),
         type: target === "all" ? "general" : "custom",
-        status: "queued", // queued | sending | sent | failed | no_tokens
+        status: "queued",
         pushed: false,
         attempts: 0,
         lastError: null,
         priority: priority || "high",
-        data: {}, // optional payload to app
+        data: {},
       };
-
-      // If target is a specific client, try to include the user's expo token(s)
       if (target !== "all") {
         const userRef = doc(db, "users", target);
         const userSnap = await getDoc(userRef);
         if (userSnap.exists()) {
           const userData = userSnap.data();
-          // If the user document has expoPushToken (string) or tokens (array) include them
           const tokens = [];
           if (userData?.expoPushToken) tokens.push(userData.expoPushToken);
-          if (Array.isArray(userData?.expoPushTokens)) {
-            userData.expoPushTokens.forEach((t) => tokens.push(t));
-          }
-          if (tokens.length) {
-            payload.tokens = tokens;
-          }
+          if (Array.isArray(userData?.expoPushTokens)) tokens.push(...userData.expoPushTokens);
+          if (tokens.length) payload.tokens = tokens;
         }
       }
-
       await addDoc(collection(db, "notifications"), payload);
       setMessage("");
       setTarget("all");
@@ -180,7 +159,6 @@ export default function NotificationsSection({ lang = "ar" }) {
     }
   }
 
-  // ===== Filtering =====
   const filteredNotifications = useMemo(() => {
     const search = notifSearch.trim().toLowerCase();
     return notifications.filter((n) => {
@@ -205,87 +183,74 @@ export default function NotificationsSection({ lang = "ar" }) {
     });
   }, [clients, clientSearch]);
 
-  // ===== UI =====
   return (
-    <div className="max-w-6xl mx-auto py-8 px-4 md:px-8">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8 gap-4">
-        <div className="space-y-1">
-          <h1 className="text-3xl font-extrabold tracking-tight text-emerald-800">
-            {lang === "ar" ? "لوحة الإشعارات" : "Notifications Dashboard"}
-          </h1>
-          <p className="text-sm text-slate-500">
-            {lang === "ar" ? "أرسل إشعارًا فورياً أو جدولته وراجع السجل لحظيًا." : "Send instant or scheduled notifications and review the live log."}
-          </p>
-        </div>
-
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            sendNotification();
-          }}
-          className="w-full md:w-auto bg-white rounded-2xl border border-slate-200 shadow-sm p-3 md:p-4 flex flex-col md:flex-row gap-2 md:items-center"
+    <div className="max-w-5xl mx-auto py-6 px-3 md:px-6 text-sm">
+      {/* Compact form (no big title) */}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          sendNotification();
+        }}
+        className="w-full bg-white rounded-xl border border-slate-200 shadow-sm p-2 md:p-3 flex flex-col md:flex-row gap-2 md:items-center"
+      >
+        <textarea
+          className="w-full md:w-96 min-h-[44px] p-2 rounded-md border border-slate-200 focus:ring-1 focus:ring-emerald-500 text-sm"
+          placeholder={lang === "ar" ? "اكتب نص الإشعار..." : "Write notification message..."}
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          rows={2}
+          aria-label={lang === "ar" ? "نص الإشعار" : "Notification message"}
+        />
+        <select
+          className="p-2 rounded-md border border-slate-200 bg-white text-sm min-w-[160px]"
+          value={target}
+          onChange={(e) => setTarget(e.target.value)}
+          title={lang === "ar" ? "المستلم" : "Recipient"}
         >
-          <textarea
-            className="w-full md:w-96 min-h-[48px] p-2 rounded-lg border border-slate-300 focus:outline-emerald-600/70 text-slate-900"
-            placeholder={lang === "ar" ? "اكتب نص الإشعار..." : "Write notification message..."}
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            rows={2}
-          />
+          <option value="all">{lang === "ar" ? "كل العملاء" : "All Clients"}</option>
+          {clients.map((cl) => (
+            <option value={cl.userId} key={cl.userId}>
+              {(cl.name || cl.userId) + (cl.phone ? ` (${cl.phone})` : "")}
+            </option>
+          ))}
+        </select>
+
+        <div className="flex gap-2 items-center">
           <select
-            className="p-2 rounded-lg border border-slate-300 bg-white text-slate-900 min-w-[200px]"
-            value={target}
-            onChange={(e) => setTarget(e.target.value)}
-            title={lang === "ar" ? "المستلم" : "Recipient"}
+            value={priority}
+            onChange={(e) => setPriority(e.target.value)}
+            className="p-2 rounded-md border border-slate-200 bg-white text-sm"
+            title={lang === "ar" ? "الأولوية" : "Priority"}
           >
-            <option value="all">{lang === "ar" ? "كل العملاء" : "All Clients"}</option>
-            {clients.map((cl) => (
-              <option value={cl.userId} key={cl.userId}>
-                {(cl.name || cl.userId) + (cl.phone ? ` (${cl.phone})` : "")}
-              </option>
-            ))}
+            <option value="high">{lang === "ar" ? "عالية" : "High"}</option>
+            <option value="normal">{lang === "ar" ? "عادية" : "Normal"}</option>
           </select>
 
-          <div className="flex gap-2 items-center">
-            <select
-              value={priority}
-              onChange={(e) => setPriority(e.target.value)}
-              className="p-2 rounded-lg border border-slate-300 bg-white text-slate-900"
-              title={lang === "ar" ? "الأولوية" : "Priority"}
-            >
-              <option value="high">{lang === "ar" ? "عالية" : "High"}</option>
-              <option value="normal">{lang === "ar" ? "عادية" : "Normal"}</option>
-            </select>
+          <input
+            type="datetime-local"
+            value={scheduleAt}
+            onChange={(e) => setScheduleAt(e.target.value)}
+            className="p-2 rounded-md border border-slate-200 bg-white text-sm"
+            title={lang === "ar" ? "موعد الإرسال" : "Schedule send time"}
+          />
+        </div>
 
-            <input
-              type="datetime-local"
-              value={scheduleAt}
-              onChange={(e) => setScheduleAt(e.target.value)}
-              className="p-2 rounded-lg border border-slate-300 bg-white text-slate-900"
-              title={lang === "ar" ? "موعد الإرسال" : "Schedule send time"}
-            />
-          </div>
+        <button
+          type="submit"
+          disabled={loading || !message.trim()}
+          className="px-3 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold text-sm shadow transition"
+        >
+          {loading ? (lang === "ar" ? "جارٍ الإرسال..." : "Sending...") : (lang === "ar" ? "إرسال إشعار" : "Send Notification")}
+        </button>
+      </form>
 
-          <button
-            type="submit"
-            disabled={loading || !message.trim()}
-            className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold shadow transition min-w-[140px]"
-          >
-            {loading ? (lang === "ar" ? "جارٍ الإرسال..." : "Sending...") : (lang === "ar" ? "إرسال إشعار" : "Send Notification")}
-          </button>
-        </form>
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-col md:flex-row gap-4 mb-7 md:items-center">
-        <div className="flex gap-2">
+      {/* Filters row (compact) */}
+      <div className="flex flex-col md:flex-row gap-2 items-center mt-4 mb-3">
+        <div className="flex gap-1">
           {["all", "general", "custom"].map((k) => (
             <button
               key={k}
-              className={`px-3 py-1.5 rounded-lg font-semibold transition ${
-                notifTypeFilter === k ? "bg-emerald-700 text-white" : "bg-emerald-50 text-emerald-800 border border-emerald-200"
-              }`}
+              className={`px-2 py-1 rounded-md text-sm font-medium ${notifTypeFilter === k ? "bg-emerald-700 text-white" : "bg-emerald-50 text-emerald-800 border border-emerald-200"}`}
               onClick={() => setNotifTypeFilter(k)}
             >
               {k === "all" ? (lang === "ar" ? "الكل" : "All") : k === "general" ? (lang === "ar" ? "عام" : "General") : (lang === "ar" ? "مخصص" : "Custom")}
@@ -293,42 +258,40 @@ export default function NotificationsSection({ lang = "ar" }) {
           ))}
         </div>
         <input
-          className="flex-1 p-2 rounded-lg border border-slate-300 min-w-[220px] max-w-sm"
+          className="flex-1 p-2 rounded-md border border-slate-200 text-sm"
           placeholder={lang === "ar" ? "بحث في الإشعارات أو العملاء..." : "Search notifications or clients..."}
           value={notifSearch}
           onChange={(e) => setNotifSearch(e.target.value)}
         />
       </div>
 
-      {/* Notifications Table */}
-      <div className="rounded-2xl bg-white shadow border border-slate-200 overflow-x-auto">
-        <table className="w-full text-center border-separate border-spacing-0">
-          <thead className="bg-emerald-50 text-emerald-900 sticky top-0 z-10">
+      {/* Notifications Table (compact sizes) */}
+      <div className="rounded-xl bg-white shadow border border-slate-200 overflow-x-auto">
+        <table className="w-full text-center border-separate border-spacing-0 text-sm">
+          <thead className="bg-emerald-50 text-emerald-900">
             <tr>
-              <th className="py-3 px-3 font-bold text-left">{lang === "ar" ? "النص" : "Message"}</th>
-              <th className="py-3 px-2 font-bold">{lang === "ar" ? "النوع" : "Type"}</th>
-              <th className="py-3 px-2 font-bold">{lang === "ar" ? "الحالة" : "Status"}</th>
-              <th className="py-3 px-2 font-bold">{lang === "ar" ? "إلى" : "To"}</th>
-              <th className="py-3 px-2 font-bold">{lang === "ar" ? "التاريخ" : "Date"}</th>
+              <th className="py-2 px-2 font-semibold text-left">{lang === "ar" ? "النص" : "Message"}</th>
+              <th className="py-2 px-2 font-semibold">{lang === "ar" ? "النوع" : "Type"}</th>
+              <th className="py-2 px-2 font-semibold">{lang === "ar" ? "الحالة" : "Status"}</th>
+              <th className="py-2 px-2 font-semibold">{lang === "ar" ? "إلى" : "To"}</th>
+              <th className="py-2 px-2 font-semibold">{lang === "ar" ? "التاريخ" : "Date"}</th>
             </tr>
           </thead>
           <tbody>
             {filteredNotifications.length === 0 ? (
               <tr>
-                <td colSpan={5} className="py-9 text-slate-400 text-lg">
-                  {lang === "ar" ? "لا يوجد إشعارات" : "No notifications"}
-                </td>
+                <td colSpan={5} className="py-6 text-slate-400">{lang === "ar" ? "لا يوجد إشعارات" : "No notifications"}</td>
               </tr>
             ) : (
               filteredNotifications.map((n) => (
-                <tr key={n.id} className="border-b hover:bg-emerald-50/40 transition">
-                  <td className="py-3 px-3 text-slate-900 text-left max-w-[520px] break-words">{n.body}</td>
-                  <td className="py-3 px-2">
+                <tr key={n.id} className="border-b last:border-b-0 hover:bg-emerald-50/30">
+                  <td className="py-2 px-2 text-left max-w-[480px] break-words text-sm">{n.body}</td>
+                  <td className="py-2 px-2">
                     <Badge intent={n.type === "general" ? "success" : "default"}>
                       {n.type === "general" ? (lang === "ar" ? "عام" : "General") : (lang === "ar" ? "مخصص" : "Custom")}
                     </Badge>
                   </td>
-                  <td className="py-3 px-2">
+                  <td className="py-2 px-2">
                     {n.status === "sent" && <Badge intent="success">{lang === "ar" ? "مرسَل" : "sent"}</Badge>}
                     {n.status === "queued" && <Badge intent="warn">{lang === "ar" ? "قيد الانتظار" : "queued"}</Badge>}
                     {n.status === "sending" && <Badge intent="muted">{lang === "ar" ? "جاري الإرسال" : "sending"}</Badge>}
@@ -336,15 +299,15 @@ export default function NotificationsSection({ lang = "ar" }) {
                     {n.status === "failed" && <Badge intent="error">{lang === "ar" ? "فشل" : "failed"}</Badge>}
                     {!n.status && <Badge>—</Badge>}
                   </td>
-                  <td className="py-3 px-2 text-slate-900">
+                  <td className="py-2 px-2 text-sm">
                     {n.targetId === "all" ? (
-                      <span className="font-semibold text-slate-700">{lang === "ar" ? "كل العملاء" : "All Clients"}</span>
+                      <span className="font-medium text-slate-700">{lang === "ar" ? "كل العملاء" : "All Clients"}</span>
                     ) : (
                       (() => {
                         const t = clientsMap.get(n.targetId || "");
                         return t ? (
-                          <span className="inline-flex items-center justify-center gap-1">
-                            <span className="font-semibold">{t.name || t.userId}</span>
+                          <span className="inline-flex items-center gap-2">
+                            <span className="font-medium">{t.name || t.userId}</span>
                             <ClientActions client={t} lang={lang} />
                           </span>
                         ) : (
@@ -353,11 +316,9 @@ export default function NotificationsSection({ lang = "ar" }) {
                       })()
                     )}
                   </td>
-                  <td className="py-3 px-2 text-slate-500 text-xs whitespace-nowrap">
+                  <td className="py-2 px-2 text-slate-500 text-xs whitespace-nowrap">
                     {formatDate(n.timestamp, lang)}
-                    <div className="text-[10px] text-slate-400">
-                      {n.sentAt ? ` • ${lang === "ar" ? "أُرسل:" : "sentAt:"} ${formatDate(n.sentAt, lang)}` : ""}
-                    </div>
+                    {n.sentAt ? <div className="text-[10px] text-slate-400">{lang === "ar" ? "أُرسل: " : "sentAt: "}{formatDate(n.sentAt, lang)}</div> : null}
                   </td>
                 </tr>
               ))
@@ -366,34 +327,28 @@ export default function NotificationsSection({ lang = "ar" }) {
         </table>
       </div>
 
-      {/* Clients */}
-      <div className="mt-8">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-lg font-semibold text-emerald-800">{lang === "ar" ? "العملاء" : "Clients"}</span>
+      {/* Clients (compact cards) */}
+      <div className="mt-6">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm font-semibold text-emerald-800">{lang === "ar" ? "العملاء" : "Clients"}</span>
           <input
-            className="p-2 rounded-lg border border-slate-300 min-w-[180px]"
+            className="p-2 rounded-md border border-slate-200 min-w-[140px] text-sm"
             placeholder={lang === "ar" ? "بحث بالاسم أو الهاتف أو الإيميل..." : "Search by name, phone or email..."}
             value={clientSearch}
             onChange={(e) => setClientSearch(e.target.value)}
             style={{ direction: lang === "ar" ? "rtl" : "ltr" }}
           />
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {filteredClients.length === 0 ? (
-            <div className="text-slate-400 text-center col-span-2 py-8">
-              {lang === "ar" ? "لا يوجد عملاء" : "No clients found"}
-            </div>
+            <div className="text-slate-400 text-center col-span-2 py-4">{lang === "ar" ? "لا يوجد عملاء" : "No clients found"}</div>
           ) : (
             filteredClients.map((client) => (
-              <div
-                key={client.userId}
-                className="flex items-center justify-between bg-emerald-50 p-4 rounded-xl border border-emerald-200 shadow-sm hover:shadow-md transition"
-              >
+              <div key={client.userId} className="flex items-center justify-between bg-emerald-50 p-3 rounded-lg border border-emerald-200 shadow-sm">
                 <div>
-                  <div className="font-bold text-slate-900">{client.name || client.userId}</div>
-                  <div className="text-sm text-slate-600">
-                    {client.phone}{client.email ? ` | ${client.email}` : ""}
-                  </div>
+                  <div className="font-medium text-slate-900 text-sm">{client.name || client.userId}</div>
+                  <div className="text-xs text-slate-600">{client.phone}{client.email ? ` | ${client.email}` : ""}</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <ClientActions client={client} lang={lang} />
