@@ -4,6 +4,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   addDoc,
   collection,
+  doc,
+  getDoc,
   limit,
   onSnapshot,
   orderBy,
@@ -14,7 +16,8 @@ import { firestore as db } from "@/lib/firebase.client";
 
 // =============== Helpers ===============
 function formatDate(ts, lang = "ar") {
-  const d = typeof ts?.toDate === "function" ? ts.toDate() : new Date(ts || Date.now());
+  if (!ts) return "-";
+  const d = typeof ts?.toDate === "function" ? ts.toDate() : new Date(ts);
   return d.toLocaleString(lang === "ar" ? "ar-AE" : "en-US", { timeZone: "Asia/Dubai" });
 }
 
@@ -91,6 +94,10 @@ export default function NotificationsSection({ lang = "ar" }) {
   const [notifSearch, setNotifSearch] = useState("");
   const [clientSearch, setClientSearch] = useState("");
 
+  // Scheduling & priority
+  const [scheduleAt, setScheduleAt] = useState(""); // ISO datetime-local string
+  const [priority, setPriority] = useState("high");
+
   // ===== Live Firestore Streams =====
   useEffect(() => {
     const qNotifs = query(collection(db, "notifications"), orderBy("timestamp", "desc"), limit(300));
@@ -120,22 +127,56 @@ export default function NotificationsSection({ lang = "ar" }) {
 
   // ===== Send Notification =====
   async function sendNotification() {
-    if (!message.trim()) return;
+    if (!message.trim()) {
+      alert(lang === "ar" ? "من فضلك اكتب نص الإشعار." : "Please write a message.");
+      return;
+    }
     setLoading(true);
     try {
-      await addDoc(collection(db, "notifications"), {
+      // Build payload
+      const payload = {
         title: lang === "ar" ? "إشعار جديد" : "New Notification",
         body: message.trim(),
         targetId: target === "all" ? "all" : String(target),
         timestamp: serverTimestamp(),
+        // pushAt: either a specific date or serverTimestamp for immediate
+        pushAt: scheduleAt ? new Date(scheduleAt) : serverTimestamp(),
         type: target === "all" ? "general" : "custom",
-        status: "queued", // هتبقي sent/error بعد ما نضيف الـ Cloud Function
-      });
+        status: "queued", // queued | sending | sent | failed | no_tokens
+        pushed: false,
+        attempts: 0,
+        lastError: null,
+        priority: priority || "high",
+        data: {}, // optional payload to app
+      };
+
+      // If target is a specific client, try to include the user's expo token(s)
+      if (target !== "all") {
+        const userRef = doc(db, "users", target);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          const userData = userSnap.data();
+          // If the user document has expoPushToken (string) or tokens (array) include them
+          const tokens = [];
+          if (userData?.expoPushToken) tokens.push(userData.expoPushToken);
+          if (Array.isArray(userData?.expoPushTokens)) {
+            userData.expoPushTokens.forEach((t) => tokens.push(t));
+          }
+          if (tokens.length) {
+            payload.tokens = tokens;
+          }
+        }
+      }
+
+      await addDoc(collection(db, "notifications"), payload);
       setMessage("");
       setTarget("all");
+      setScheduleAt("");
+      setPriority("high");
+      alert(lang === "ar" ? "تمت إضافة الإشعار إلى قائمة الانتظار." : "Notification queued.");
     } catch (e) {
       console.error(e);
-      alert(lang === "ar" ? "فشل إرسال الإشعار." : "Failed to send notification.");
+      alert(lang === "ar" ? "فشل إضافة الإشعار." : "Failed to queue notification.");
     } finally {
       setLoading(false);
     }
@@ -176,7 +217,7 @@ export default function NotificationsSection({ lang = "ar" }) {
             {lang === "ar" ? "لوحة الإشعارات" : "Notifications Dashboard"}
           </h1>
           <p className="text-sm text-slate-500">
-            {lang === "ar" ? "أرسل إشعارًا فورياً وراجع السجل لحظيًا." : "Send instant notifications and review the live log."}
+            {lang === "ar" ? "أرسل إشعارًا فورياً أو جدولته وراجع السجل لحظيًا." : "Send instant or scheduled notifications and review the live log."}
           </p>
         </div>
 
@@ -207,6 +248,27 @@ export default function NotificationsSection({ lang = "ar" }) {
               </option>
             ))}
           </select>
+
+          <div className="flex gap-2 items-center">
+            <select
+              value={priority}
+              onChange={(e) => setPriority(e.target.value)}
+              className="p-2 rounded-lg border border-slate-300 bg-white text-slate-900"
+              title={lang === "ar" ? "الأولوية" : "Priority"}
+            >
+              <option value="high">{lang === "ar" ? "عالية" : "High"}</option>
+              <option value="normal">{lang === "ar" ? "عادية" : "Normal"}</option>
+            </select>
+
+            <input
+              type="datetime-local"
+              value={scheduleAt}
+              onChange={(e) => setScheduleAt(e.target.value)}
+              className="p-2 rounded-lg border border-slate-300 bg-white text-slate-900"
+              title={lang === "ar" ? "موعد الإرسال" : "Schedule send time"}
+            />
+          </div>
+
           <button
             type="submit"
             disabled={loading || !message.trim()}
@@ -269,10 +331,11 @@ export default function NotificationsSection({ lang = "ar" }) {
                     </Badge>
                   </td>
                   <td className="py-3 px-2">
-                    {n.status === "sent" && <Badge intent="success">sent</Badge>}
-                    {n.status === "queued" && <Badge intent="warn">queued</Badge>}
-                    {n.status === "no_tokens" && <Badge intent="muted">no_tokens</Badge>}
-                    {n.status === "error" && <Badge intent="error">error</Badge>}
+                    {n.status === "sent" && <Badge intent="success">{lang === "ar" ? "مرسَل" : "sent"}</Badge>}
+                    {n.status === "queued" && <Badge intent="warn">{lang === "ar" ? "قيد الانتظار" : "queued"}</Badge>}
+                    {n.status === "sending" && <Badge intent="muted">{lang === "ar" ? "جاري الإرسال" : "sending"}</Badge>}
+                    {n.status === "no_tokens" && <Badge intent="muted">{lang === "ar" ? "لا يوجد توكنات" : "no_tokens"}</Badge>}
+                    {n.status === "failed" && <Badge intent="error">{lang === "ar" ? "فشل" : "failed"}</Badge>}
                     {!n.status && <Badge>—</Badge>}
                   </td>
                   <td className="py-3 px-2 text-slate-900">
@@ -292,7 +355,12 @@ export default function NotificationsSection({ lang = "ar" }) {
                       })()
                     )}
                   </td>
-                  <td className="py-3 px-2 text-slate-500 text-xs whitespace-nowrap">{formatDate(n.timestamp, lang)}</td>
+                  <td className="py-3 px-2 text-slate-500 text-xs whitespace-nowrap">
+                    {formatDate(n.timestamp, lang)}
+                    <div className="text-[10px] text-slate-400">
+                      {n.sentAt ? ` • ${lang === "ar" ? "أُرسل:" : "sentAt:"} ${formatDate(n.sentAt, lang)}` : ""}
+                    </div>
+                  </td>
                 </tr>
               ))
             )}
