@@ -1,3 +1,8 @@
+// routes/createPaymentIntent.js
+// Updated createPaymentIntent handler — creates PaymentIntent with detailed metadata
+// and always creates a 'request' document (requestType indicates wallet_recharge vs service).
+// Paste in your backend and mount route as you do (e.g., app.use('/api/pay', require('./routes/createPaymentIntent')))
+
 import Stripe from 'stripe';
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
@@ -13,8 +18,7 @@ if (!getApps().length) {
   firestore = getFirestore();
 }
 
-// Stripe secret key من متغيرات البيئة
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2022-11-15' });
 
 function generateOrderNumber() {
   const part1 = Math.floor(100 + Math.random() * 900);
@@ -35,10 +39,12 @@ export default async function handler(req, res) {
     providers = [],
     coinsUsed = 0,
     coinsGiven = 0,
-    assignedTo = "",       // معرف الموظف لو الطلب من الموظف
-    assignedToName = "",   // اسم الموظف
-    status = "pending",    // الحالة الابتدائية
-    employeeData = {},     // بيانات الموظف الإضافية إذا احتجت
+    printingFee = 0,
+    assignedTo = "",
+    assignedToName = "",
+    status = "pending",
+    employeeData = {},
+    lang = "ar",
   } = req.body;
 
   if (!amount || !serviceName || !customerId || !userEmail) {
@@ -48,55 +54,70 @@ export default async function handler(req, res) {
   try {
     const requestId = generateOrderNumber();
 
-    // Stripe PaymentIntent (لـ Stripe Elements)
-const paymentIntent = await stripe.paymentIntents.create({
-  amount: Math.round(amount * 100),
-  currency: 'aed',
-  receipt_email: userEmail,
-  metadata: { requestId, customerId, serviceId: serviceId || "", serviceName },
-  description: `دفع خدمة ${serviceName}`,
-});
+    // تعيين نوع الطلب لسهولة المعالجة في الـ webhook
+    const requestType = (serviceId === "wallet-recharge" || serviceName === "شحن المحفظة" || String(serviceName).toLowerCase().includes("wallet"))
+      ? "wallet_recharge"
+      : "service";
 
-// تحقق هل العملية شحن محفظة؟
-const isWalletRecharge = 
-  serviceId === "wallet-recharge" ||
-  serviceName === "شحن المحفظة" ||
-  serviceName.toLowerCase().includes("wallet");
+    // أنشئ PaymentIntent مع metadata كاملة (مهمة للـ webhook)
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(Number(amount) * 100), // amount بالـ AED -> fils
+      currency: 'aed',
+      receipt_email: userEmail,
+      metadata: {
+        requestId,
+        customerId,
+        serviceId: serviceId || "",
+        serviceName,
+        coinsUsed: String(coinsUsed || 0),
+        coinsGiven: String(coinsGiven || 0),
+        printingFee: String(printingFee || 0),
+        requestType,
+        assignedTo: assignedTo || "",
+        assignedToName: assignedToName || "",
+        lang: String(lang || "ar"),
+      },
+      description: `دفع خدمة ${serviceName}`,
+    });
 
-// سجل الطلب فقط لو ليست شحن محفظة
-if (!isWalletRecharge) {
-  await firestore.collection("requests").doc(requestId).set({
-    requestId,
-    paymentIntentId: paymentIntent.id,
-    clientSecret: paymentIntent.client_secret,
-    customerId,
-    serviceId: serviceId || "",
-    serviceName,
-    paidAmount: amount,
-    coinsUsed,
-    coinsGiven,
-    createdAt: new Date().toISOString(),
-    lastUpdated: new Date().toISOString(),
-    status,
-    userEmail,
-    attachments,
-    providers,
-    assignedTo,
-    assignedToName,
-    employeeData,
-    statusHistory: [
-      {
-        status,
-        timestamp: new Date().toISOString(),
-        updatedBy: assignedToName || userEmail || "system"
-      }
-    ]
-  });
-}
+    // أنشئ doc الطلب (بغض النظر إن كانت شحن محفظة أم خدمة) — status يبقى pending حتى يكتمل الدفع
+    const requestDoc = {
+      requestId,
+      paymentIntentId: paymentIntent.id,
+      clientSecret: paymentIntent.client_secret,
+      customerId,
+      serviceId: serviceId || "",
+      serviceName,
+      requestType,
+      paidAmount: Number(amount), // المبلغ الأساسي (قبل خصم/إضافة معالجة)
+      printingFee,
+      coinsUsed,
+      coinsGiven,
+      createdAt: new Date().toISOString(),
+      lastUpdated: new Date().toISOString(),
+      status,
+      userEmail,
+      attachments,
+      providers,
+      assignedTo,
+      assignedToName,
+      employeeData,
+      lang,
+      statusHistory: [
+        {
+          status,
+          timestamp: new Date().toISOString(),
+          updatedBy: assignedToName || userEmail || "system"
+        }
+      ]
+    };
 
-// أرجع clientSecret ورقم الطلب للواجهة
-res.status(200).json({ clientSecret: paymentIntent.client_secret, orderNumber: requestId });
+    await firestore.collection("requests").doc(requestId).set(requestDoc);
+
+    // أرجع clientSecret و رقم الطلب (واجهة العميل ستستخدم clientSecret لتأكيد البطاقة)
+    res.status(200).json({ clientSecret: paymentIntent.client_secret, orderNumber: requestId, paymentIntentId: paymentIntent.id });
   } catch (error) {
+    console.error("createPaymentIntent error:", error);
     res.status(500).json({ error: error.message || 'Internal server error' });
   }
 }
