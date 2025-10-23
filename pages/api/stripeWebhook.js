@@ -1,31 +1,42 @@
-// Next.js API route — Stripe webhook (disable bodyParser, use raw body for signature)
 import Stripe from 'stripe';
 import admin from 'firebase-admin';
-import { buffer } from 'micro';
 
-// init firebase admin once
+// IMPORTANT: Next.js API route must disable bodyParser to access raw body
+export const config = { api: { bodyParser: false } };
+
+// initialize firebase admin once
 if (!admin.apps.length) {
-  const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '{}');
-  if (serviceAccount && serviceAccount.private_key) {
-    serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
-    admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-  } else {
-    admin.initializeApp(); // if running inside GCP with default creds
+  try {
+    const serviceAccount = process.env.GOOGLE_SERVICE_ACCOUNT_KEY ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY) : null;
+    if (serviceAccount && serviceAccount.private_key) {
+      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+      admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+    } else {
+      // If running in Google environment, default credentials may be available
+      admin.initializeApp();
+    }
+  } catch (e) {
+    console.error('Failed to initialize Firebase Admin:', e);
+    // try init default
+    try { admin.initializeApp(); } catch (e2) {}
   }
 }
 const db = admin.firestore();
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2022-11-15' });
 
-export const config = {
-  api: {
-    bodyParser: false, // IMPORTANT: keep raw body for signature verification
-  },
-};
-
 function safeNum(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+// helper to read raw body (no external dependency)
+async function getRawBody(req) {
+  const chunks = [];
+  for await (const chunk of req) {
+    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+  }
+  return Buffer.concat(chunks);
 }
 
 export default async function handler(req, res) {
@@ -39,12 +50,12 @@ export default async function handler(req, res) {
 
   let event;
   try {
-    const buf = await buffer(req);
+    const buf = await getRawBody(req); // Buffer
     const sig = req.headers['stripe-signature'];
-    event = stripe.webhooks.constructEvent(buf.toString(), sig, webhookSecret);
+    event = stripe.webhooks.constructEvent(buf, sig, webhookSecret);
   } catch (err) {
-    console.error('Stripe signature verification failed:', err?.message);
-    return res.status(400).send(`Webhook Error: ${err?.message}`);
+    console.error('Stripe signature verification failed:', err && err.message);
+    return res.status(400).send(`Webhook Error: ${err && err.message}`);
   }
 
   try {
@@ -53,6 +64,7 @@ export default async function handler(req, res) {
       const piId = pi.id;
       const md = pi.metadata || {};
 
+      // metadata keys (should be set when creating PaymentIntent)
       const requestId = md.requestId || md.orderNumber || null;
       const customerIdMeta = md.customerId || md.userId || null;
       const requestType = md.requestType || (md.serviceName && String(md.serviceName).toLowerCase().includes('wallet') ? 'wallet_recharge' : 'service');
@@ -62,9 +74,11 @@ export default async function handler(req, res) {
       const serviceId = md.serviceId || '';
       const serviceName = md.serviceName || '';
 
+      // amount in smallest unit (fils)
       const amountSmallest = pi.amount_received ?? pi.amount ?? 0;
       const amountAED = Number((amountSmallest / 100).toFixed(2));
 
+      // idempotency check
       const processedRef = db.collection('stripePaymentsProcessed').doc(piId);
       const processedSnap = await processedRef.get();
       if (processedSnap.exists) {
@@ -113,12 +127,13 @@ export default async function handler(req, res) {
 
       const userRef = userSnap.ref;
 
+      // atomic updates
       await db.runTransaction(async (tx) => {
         const uDoc = await tx.get(userRef);
         if (!uDoc.exists) throw new Error('User disappeared during transaction');
 
         let reqIdToUse = requestId;
-        // wallet recharge: add to wallet & coins
+
         if (requestType === 'wallet_recharge') {
           const prevWallet = Number(uDoc.data().walletBalance ?? uDoc.data().wallet ?? 0);
           const newWallet = +(prevWallet + amountAED).toFixed(2);
@@ -128,11 +143,10 @@ export default async function handler(req, res) {
             lastWalletUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
           });
         } else {
-          // service payment: add cashback coins only
           if (coinsGiven > 0) tx.update(userRef, { coins: admin.firestore.FieldValue.increment(coinsGiven) });
         }
 
-        // update or create request doc
+        // update/create request
         if (requestSnap && requestSnap.exists) {
           reqIdToUse = String(requestSnap.id);
           const rdata = requestSnap.data() || {};
