@@ -1,4 +1,3 @@
-// routes/createPaymentIntent.js
 // Updated createPaymentIntent handler — creates PaymentIntent with detailed metadata
 // and always creates a 'request' document (requestType indicates wallet_recharge vs service).
 // Paste in your backend and mount route as you do (e.g., app.use('/api/pay', require('./routes/createPaymentIntent')))
