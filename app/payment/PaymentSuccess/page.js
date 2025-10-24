@@ -70,20 +70,25 @@ function PaymentSuccessInner({ langParam, search, router }) {
     return () => { mounted = false; };
   }, [order, pi, langParam]);
 
-  // countdown redirect
+  // countdown redirect (ALWAYS redirect to client profile)
   useEffect(() => {
     if (!payment) return;
     let mounted = true;
-    let t = setInterval(() => {
+    setCountdown(6);
+    const timer = setInterval(() => {
       setCountdown((c) => {
         if (!mounted) return 0;
         if (c <= 1) {
-          clearInterval(t);
+          clearInterval(timer);
           try {
-            const redirectBase = payment.redirectTo || clientDashboardPath;
-            const orderId = payment.requestId || payment.orderNumber || payment.id || null;
-            const target = orderId ? `${redirectBase}?order=${encodeURIComponent(orderId)}` : redirectBase;
-            router.push(target);
+            // Force redirect to client profile (include order query if available)
+            const orderId = payment.requestId || payment.orderNumber || payment.id || order || null;
+            const target = orderId ? `${clientDashboardPath}?order=${encodeURIComponent(orderId)}` : clientDashboardPath;
+            try {
+              router.push(target);
+            } catch (err) {
+              console.error("Router push failed:", err);
+            }
           } catch (err) {
             console.error("Redirect error:", err);
           }
@@ -92,8 +97,8 @@ function PaymentSuccessInner({ langParam, search, router }) {
         return c - 1;
       });
     }, 1000);
-    return () => { mounted = false; if (t) clearInterval(t); };
-  }, [payment, router]);
+    return () => { mounted = false; clearInterval(timer); };
+  }, [payment, router, order]);
 
   const t = (ar, en) => (langParam === "ar" ? ar : en);
 
@@ -132,6 +137,12 @@ function PaymentSuccessInner({ langParam, search, router }) {
   const processingFee = safeNumber(payment.processingFee ?? 0);
   let paidAtStr = "-";
   try { if (payment.paidAt) paidAtStr = new Date(payment.paidAt).toLocaleString(); } catch(e){ paidAtStr = String(payment.paidAt || "-"); }
+
+  // helper to build profile-target with order id if available
+  const buildProfileTarget = () => {
+    const orderId = payment.requestId || payment.orderNumber || payment.id || order || null;
+    return orderId ? `${clientDashboardPath}?order=${encodeURIComponent(orderId)}` : clientDashboardPath;
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-900 to-emerald-900 p-6">
@@ -177,13 +188,14 @@ function PaymentSuccessInner({ langParam, search, router }) {
 
           <div className="flex gap-2">
             <button onClick={() => {
-              const redirectBase = payment.redirectTo || clientDashboardPath;
-              const orderId = payment.requestId || payment.orderNumber || payment.id || null;
-              const target = orderId ? `${redirectBase}?order=${encodeURIComponent(orderId)}` : redirectBase;
-              router.push(target);
+              const target = buildProfileTarget();
+              try { router.push(target); } catch (e) { console.error("Go now push error:", e); }
             }} className="px-4 py-2 bg-emerald-500 rounded text-white font-semibold">{t("اذهب الآن","Go now")}</button>
 
-            <button onClick={() => router.push("/")} className="px-4 py-2 border rounded text-white border-white/20">{t("العودة للرئيسية","Back to home")}</button>
+            <button onClick={() => {
+              const target = buildProfileTarget();
+              try { router.push(target); } catch (e) { console.error("Back to profile push error:", e); }
+            }} className="px-4 py-2 border rounded text-white border-white/20">{t("الذهاب للبروفايل","Go to profile")}</button>
           </div>
         </div>
       </div>
