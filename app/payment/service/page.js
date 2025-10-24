@@ -5,7 +5,7 @@ import { loadStripe } from "@stripe/stripe-js";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import PaymentSuccessPage from "../PaymentSuccess/Page";
+import PaymentSuccessPage from "../PaymentSuccess/page";
 import { doc, setDoc } from "firebase/firestore";
 import { firestore } from "@/lib/firebase.client";
 
