@@ -6,7 +6,8 @@ import admin from "firebase-admin";
 /**
  * pages/api/confirmPayment.js
  * Confirm a Stripe PaymentIntent (idempotent) and create/update the corresponding
- * requests doc in Firestore with a unified schema (includes full service map).
+ * requests doc in Firestore with a unified schema that includes the full service map
+ * and all "required" fields (requiredDocuments, providers, attachments, assignedTo, clientSecret, paidAt, processingFee, ...).
  *
  * Requirements:
  *  - STRIPE_SECRET_KEY
@@ -14,8 +15,8 @@ import admin from "firebase-admin";
  *
  * Behaviour:
  *  - Reads paymentIntent from Stripe, verifies succeeded.
- *  - Reads metadata: requestId, serviceId, clientType, etc.
- *  - Attempts to find existing request doc (by requestId or paymentIntentId).
+ *  - Reads metadata: requestId, serviceId, clientType, assignedTo/assignedToName, etc.
+ *  - Attempts to find existing request doc (by requestId or by paymentIntentId).
  *  - Fetches service data from servicesByClientType/{clientType} (or searches fallback).
  *  - In a transaction: updates or creates requests doc, updates user wallet/coins if needed,
  *    creates a transaction record, notification and marks paymentIntent as processed.
@@ -46,9 +47,8 @@ function safeNum(v) {
 function nowISO() { return new Date().toISOString(); }
 
 // helper: fetch service data from servicesByClientType/{clientType}
-// structure: doc data = { serviceIdKey1: { ... }, serviceIdKey2: { ... }, ... }
+// structure: doc data = { serviceKey1: { ... }, serviceKey2: { ... }, ... }
 async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFallback = "") {
-  // try provided clientType first
   const clientTypesToTry = clientType ? [clientType] : ["company", "resident", "nonresident", "other"];
   for (const ct of clientTypesToTry) {
     try {
@@ -100,6 +100,11 @@ export default async function handler(req, res) {
     const serviceId = md.serviceId || "";
     const serviceNameFromMeta = md.serviceName || "";
     const clientTypeMeta = md.clientType || md.client_type || md.serviceClientType || ""; // best-effort
+    const assignedToMeta = md.assignedTo || md.assigned_to || "";
+    const assignedToNameMeta = md.assignedToName || md.assigned_to_name || md.assignedToName || "";
+    const attachmentsMeta = md.attachments ? JSON.parse(md.attachments) : null; // if attachments were stringified in metadata
+    const processingFeeMeta = safeNum(md.processingFee ?? md.processing_fee ?? md.processing_fee_value ?? 0);
+
     const amountSmallest = pi.amount_received ?? pi.amount ?? 0;
     const amountAED = Number((amountSmallest / 100).toFixed(2));
 
@@ -181,6 +186,17 @@ export default async function handler(req, res) {
           statusHistory: history,
         };
 
+        // keep attachments/clientSecret if already present in request doc, else fallback to metadata
+        if (rdata.attachments) updates.attachments = rdata.attachments;
+        else if (attachmentsMeta) updates.attachments = attachmentsMeta;
+
+        if (rdata.clientSecret) updates.clientSecret = rdata.clientSecret;
+        else if (md.clientSecret) updates.clientSecret = md.clientSecret;
+
+        // add paidAt and processingFee
+        updates.paidAt = nowISO();
+        updates.processingFee = updates.processingFee ?? processingFeeMeta ?? (rdata.processingFee ?? 0);
+
         // merge service data if available
         if (serviceDoc) {
           const svc = {
@@ -197,17 +213,25 @@ export default async function handler(req, res) {
             requiredDocuments: Array.isArray(serviceDoc.requiredDocuments) ? serviceDoc.requiredDocuments : [],
             active: typeof serviceDoc.active === "boolean" ? serviceDoc.active : true,
             duration: serviceDoc.duration || "",
+            profit: safeNum(serviceDoc.profit ?? 0),
+            repeatable: typeof serviceDoc.repeatable === "boolean" ? serviceDoc.repeatable : false,
+            requireUpload: typeof serviceDoc.requireUpload === "boolean" ? serviceDoc.requireUpload : false,
           };
           updates.service = svc;
           updates.serviceName = svc.name;
           updates.serviceId = svc.serviceId;
           updates.providers = svc.providers;
           updates.printingFee = updates.printingFee ?? svc.printingFee;
+          updates.requiredDocuments = svc.requiredDocuments;
         } else {
           // fallback to metadata / existing fields
           if (serviceNameFromMeta) updates.serviceName = serviceNameFromMeta;
           if (serviceId) updates.serviceId = serviceId;
         }
+
+        // copy assignedTo fields from request doc or metadata
+        updates.assignedTo = rdata.assignedTo || assignedToMeta || "";
+        updates.assignedToName = rdata.assignedToName || assignedToNameMeta || "";
 
         tx.update(requestRef, updates);
       } else {
@@ -216,25 +240,10 @@ export default async function handler(req, res) {
           reqIdToUse = `REQ-${Math.floor(100 + Math.random()*900)}-${Math.floor(1000 + Math.random()*9000)}`;
         }
 
-        const reqObj = {
-          requestId: reqIdToUse,
-          paymentIntentId,
-          customerId: userRef.id,
-          serviceId: serviceDoc?.serviceId || serviceId || "",
-          serviceName: serviceDoc?.name || serviceNameFromMeta || "",
-          requestType,
-          paidAmount: amountAED,
-          printingFee: serviceDoc?.printingFee ?? printingFeeFromMeta ?? 0,
-          coinsGiven,
-          coinsUsed,
-          createdAt: nowISO(),
-          lastUpdated: nowISO(),
-          status: "paid",
-          userEmail: uDoc.data().email || "",
-          statusHistory: [{ status: "paid", timestamp: nowISO(), updatedBy: "server-confirmPayment" }],
-          metadata: md || {},
-          // embed service map if available
-          ...(serviceDoc ? { service: {
+        // build service map if available
+        let serviceMap = null;
+        if (serviceDoc) {
+          serviceMap = {
             name: serviceDoc.name || serviceNameFromMeta || "",
             serviceId: serviceDoc.serviceId || serviceId || "",
             providers: Array.isArray(serviceDoc.providers) ? serviceDoc.providers : (serviceDoc.providers ? [serviceDoc.providers] : []),
@@ -248,7 +257,41 @@ export default async function handler(req, res) {
             requiredDocuments: Array.isArray(serviceDoc.requiredDocuments) ? serviceDoc.requiredDocuments : [],
             active: typeof serviceDoc.active === "boolean" ? serviceDoc.active : true,
             duration: serviceDoc.duration || "",
-          } } : {}),
+            profit: safeNum(serviceDoc.profit ?? 0),
+            repeatable: typeof serviceDoc.repeatable === "boolean" ? serviceDoc.repeatable : false,
+            requireUpload: typeof serviceDoc.requireUpload === "boolean" ? serviceDoc.requireUpload : false,
+          };
+        }
+
+        // take attachments/clientSecret from metadata or leave empty
+        const attachmentsToWrite = (requestSnap && requestSnap.data() && requestSnap.data().attachments) || attachmentsMeta || {};
+        const clientSecretToWrite = (requestSnap && requestSnap.data() && requestSnap.data().clientSecret) || md.clientSecret || null;
+
+        const reqObj = {
+          requestId: reqIdToUse,
+          paymentIntentId,
+          customerId: userRef.id,
+          serviceId: serviceMap?.serviceId || serviceId || "",
+          serviceName: serviceMap?.name || serviceNameFromMeta || "",
+          requestType,
+          paidAmount: amountAED,
+          printingFee: serviceMap?.printingFee ?? printingFeeFromMeta ?? 0,
+          coinsGiven,
+          coinsUsed,
+          createdAt: nowISO(),
+          lastUpdated: nowISO(),
+          status: "paid",
+          paidAt: nowISO(),
+          userEmail: uDoc.data().email || "",
+          statusHistory: [{ status: "paid", timestamp: nowISO(), updatedBy: "server-confirmPayment" }],
+          metadata: md || {},
+          attachments: attachmentsToWrite || {},
+          clientSecret: clientSecretToWrite || null,
+          processingFee: processingFeeMeta || 0,
+          assignedTo: assignedToMeta || "",
+          assignedToName: assignedToNameMeta || "",
+          // embed service map if available
+          ...(serviceMap ? { service: serviceMap, requiredDocuments: serviceMap.requiredDocuments || [] } : {}),
         };
 
         tx.set(db.collection("requests").doc(reqIdToUse), reqObj);
