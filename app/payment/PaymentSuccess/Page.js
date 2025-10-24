@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import Image from "next/image";
-import PaymentSuccessPage from "../PaymentSuccess/PaymentSuccessPage";
+import PaymentSuccessPage from "./Page";
 import { addDoc, collection } from "firebase/firestore";
 import { firestore } from "@/lib/firebase.client";
 
