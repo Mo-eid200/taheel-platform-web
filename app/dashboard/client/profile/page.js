@@ -44,7 +44,7 @@ import WalletWidget from "@/components/clientheader/WalletWidget";
 import CoinsWidget from "@/components/clientheader/CoinsWidget";
 import NotificationWidget from "@/components/clientheader/NotificationWidget";
 import { translateServiceFields } from "@/utils/translate";
-import { useOpenOrderFromQuery } from "./order-redirect-handler";
+// useOpenOrderFromQuery merged here (hook implementation is included below)
 
 // ========== Helper functions ==========
 function getDayGreeting(lang = "ar") {
@@ -114,38 +114,68 @@ function SectionTitle({ icon, color = "emerald", children }) {
   );
 }
 
+// ========== Hook: useOpenOrderFromQuery (merged here) ==========
+import { useCallback } from "react";
+function useOpenOrderFromQuery(openOrderCallback, onError) {
+  const search = useSearchParams();
+  const router = useRouter();
+  const [loadingOrderFromQuery, setLoadingOrderFromQuery] = useState(false);
 
-function ClientProfilePageClientSide(/* props */) {
-  const [selectedOrder, setSelectedOrder] = useState(null);
-  const [orderFetchError, setOrderFetchError] = useState(null);
+  useEffect(() => {
+    const orderParam = search.get("order");
+    const piParam = search.get("pi");
+    if (!orderParam && !piParam) return;
 
-  const { loadingOrderFromQuery } = useOpenOrderFromQuery(
-    (orderData) => {
-      // هنا افتح المودال أو انتقل لعرض تفاصيل الطلب داخل الصفحة
-      setSelectedOrder(orderData);
-      // مثال: scrollToOrderSection() أو setShowOrderModal(true)
-    },
-    (err) => {
-      setOrderFetchError(err);
-      // ممكن عرض رسالة للمستخدم
-    }
-  );
+    let cancelled = false;
+    setLoadingOrderFromQuery(true);
 
-  // استخدم selectedOrder لعرض تفاصيل فورياً (مودال، لوحة جانبية، ...)
+    (async () => {
+      try {
+        // Try direct doc get if orderParam provided (treat as doc id)
+        if (orderParam) {
+          try {
+            const ref = doc(firestore, "requests", String(orderParam));
+            const snap = await getDoc(ref);
+            if (!cancelled && snap.exists()) {
+              openOrderCallback({ id: snap.id, ...snap.data() });
+              setLoadingOrderFromQuery(false);
+              return;
+            }
+          } catch (e) {
+            console.warn("Direct getDoc failed:", e);
+            // fallthrough to query approach
+          }
+        }
 
-  return (
-    <>
-      {/* existing profile UI */}
-      {loadingOrderFromQuery && <div className="text-sm text-gray-400">جاري جلب تفاصيل الطلب...</div>}
-      {orderFetchError && <div className="text-sm text-red-400">خطأ في جلب الطلب</div>}
+        // Fallback: search by paymentIntentId or orderNumber
+        const qField = piParam ? "paymentIntentId" : "orderNumber";
+        const qValue = piParam ? piParam : orderParam;
+        const q = query(collection(firestore, "requests"), where(qField, "==", String(qValue)));
+        const qs = await getDocs(q);
+        if (!cancelled) {
+          if (!qs.empty) {
+            const d = qs.docs[0];
+            openOrderCallback({ id: d.id, ...d.data() });
+          } else {
+            onError && onError({ code: "NOT_FOUND", message: "Order not found" });
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching order from query:", err);
+        onError && onError(err);
+      } finally {
+        if (!cancelled) setLoadingOrderFromQuery(false);
+      }
+    })();
 
-      {selectedOrder && (
-        <OrderDetailsModal order={selectedOrder} onClose={() => setSelectedOrder(null)} />
-      )}
-    </>
-  );
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search?.toString?.()]);
+
+  return { loadingOrderFromQuery };
 }
-
 
 // ========== Main Component (Inner) ==========
 function ClientProfilePageInner({ userId }) {
@@ -174,6 +204,20 @@ function ClientProfilePageInner({ userId }) {
   const [selectedSubcategory, setSelectedSubcategory] = useState("");
   const [resolvedUserId, setResolvedUserId] = useState(null);
   const [resolving, setResolving] = useState(true);
+
+  // Order-from-query handling (integrated)
+  const [selectedOrderFromQuery, setSelectedOrderFromQuery] = useState(null);
+  const [orderFetchErrorState, setOrderFetchErrorState] = useState(null);
+  const { loadingOrderFromQuery } = useOpenOrderFromQuery(
+    (orderData) => {
+      // When an order is found via query param: switch to orders tab and open simple details modal
+      setSelectedSection("orders");
+      setSelectedOrderFromQuery(orderData);
+    },
+    (err) => {
+      setOrderFetchErrorState(err);
+    }
+  );
 
   // ========= SESSION AUTO LOGOUT =========
   useEffect(() => {
@@ -503,7 +547,7 @@ useEffect(() => {
         alert(lang === "ar" ? "تم شحن المحفظة بنجاح!" : "Wallet charged successfully!");
       },
       onFailure: () => {
-        alert(lang === "ar" ? "فشل الدفع! برجاء المحاولة مرة أخرى" : "Payment failed! Please try again.");
+        alert(lang === "ار" ? "فشل الدفع! برجاء المحاولة مرة أخرى" : "Payment failed! Please try again.");
       }
     });
   }
@@ -607,19 +651,6 @@ useEffect(() => {
       />
 
       <div className="flex-1 flex flex-col relative z-10">
-        {/* Decorations */}
-        <div className="absolute inset-0 pointer-events-none z-0">
-          {!darkMode && (
-            <>
-              <div className="absolute -top-32 -left-20 w-[280px] h-[280px] bg-emerald-400 opacity-20 rounded-full blur-3xl animate-pulse" />
-              <div className="absolute top-0 right-0 w-[170px] h-[170px] bg-gradient-to-br from-emerald-900 to-emerald-400 opacity-30 rounded-full blur-2xl" />
-              <svg className="absolute bottom-0 left-0 w-full h-24 md:h-32 opacity-30" viewBox="0 0 500 80" fill="none">
-                <path d="M0 80 Q250 0 500 80V100H0V80Z" fill="#10b981" />
-              </svg>
-            </>
-          )}
-        </div>
-
         {/* Header */}
         <header className={`w-full z-30 ${darkMode ? "bg-gray-900/95" : "bg-gradient-to-b from-[#0b131e]/95 to-[#22304a]/90"} flex items-center justify-between px-2 sm:px-8 py-4 border-b border-emerald-900 shadow-xl sticky top-0 transition-colors duration-700`}>
           {/* Logo + info */}
@@ -956,6 +987,45 @@ useEffect(() => {
           >
             ×
           </button>
+        </div>
+      )}
+
+      {/* Simple modal to show order fetched from ?order=... (safe, self-contained) */}
+      {loadingOrderFromQuery && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg p-6 shadow-lg max-w-lg w-full text-center">
+            <div className="text-lg font-bold mb-2">{lang === "ار" ? "جاري جلب تفاصيل الطلب..." : "Fetching order details..."}</div>
+            <div className="text-sm text-gray-600">{lang === "ar" ? "الرجاء الانتظار..." : "Please wait..."}</div>
+          </div>
+        </div>
+      )}
+
+      {orderFetchErrorState && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg p-6 shadow-lg max-w-lg w-full text-center">
+            <div className="text-lg font-bold mb-2 text-red-600">{lang === "ar" ? "خطأ في جلب الطلب" : "Error fetching order"}</div>
+            <div className="text-sm text-gray-600 mb-4">{String(orderFetchErrorState.message || orderFetchErrorState)}</div>
+            <div className="flex justify-center gap-3">
+              <button onClick={() => setOrderFetchErrorState(null)} className="px-4 py-2 bg-emerald-600 text-white rounded">{lang === "ar" ? "حسناً" : "OK"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedOrderFromQuery && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-3xl w-full overflow-auto">
+            <div className="p-4 border-b flex items-center justify-between">
+              <h3 className="text-lg font-bold">{lang === "ar" ? "تفاصيل الطلب" : "Order details"}</h3>
+              <div className="flex gap-2">
+                <button onClick={() => { setSelectedOrderFromQuery(null); router.push(`${clientDashboardPath}`); }} className="px-3 py-1 rounded border">{lang === "ar" ? "إغلاق" : "Close"}</button>
+                <button onClick={() => { setSelectedOrderFromQuery(null); router.push(`${clientDashboardPath}?order=${encodeURIComponent(selectedOrderFromQuery.requestId || selectedOrderFromQuery.orderNumber || selectedOrderFromQuery.id)}`); }} className="px-3 py-1 rounded bg-emerald-600 text-white">{lang === "ar" ? "اذهب للطلب" : "Go to order"}</button>
+              </div>
+            </div>
+            <div className="p-6">
+              <pre className="whitespace-pre-wrap text-sm text-gray-800">{JSON.stringify(selectedOrderFromQuery, null, 2)}</pre>
+            </div>
+          </div>
         </div>
       )}
     </div>
