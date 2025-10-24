@@ -6,14 +6,11 @@ import { Elements, CardElement, useStripe, useElements } from "@stripe/react-str
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import PaymentSuccessPage from "../PaymentSuccess/PaymentSuccessPage";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { addDoc, collection } from "firebase/firestore";
 import { firestore } from "@/lib/firebase.client";
 
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
 
-/**
- * نصوص العرض (عربي / إنجليزي)
- */
 const LANG = {
   en: {
     title: "Pay for Service",
@@ -53,29 +50,81 @@ const LANG = {
   }
 };
 
-/**
- * Helpers
- */
-async function moveOrderToRequests(paymentData, paymentId, orderNumber) {
+// دالة إنشاء الطلب بعد الدفع وتوزيع العمولة
+async function createOrderAfterPayment(paymentData, paymentId) {
   try {
-    // نستخدم merge:true حتى لا نحذف حقول موجودة مسبقًا
-    const docRef = doc(firestore, "requests", orderNumber);
-    await setDoc(docRef, {
-      ...paymentData,
-      paymentId,
+    const {
+      service,
+      orderNumber,
+      finalPrice,
+      totalPrice,
+      printingFee,
+      vat,
+      coinDiscount,
+      userEmail,
+      processingFee,
+      lang,
+      customerId,
+      uploadedDocs
+    } = paymentData;
+
+    const employeeData = service?.employeeData || {};
+
+    // تحقق من تخصص الموظف
+    const serviceProviders = Array.isArray(service?.providers) ? service.providers : [];
+    const isSpecialist =
+      serviceProviders.some(
+        p =>
+          p === employeeData?.providerName ||
+          p === employeeData?.speciality ||
+          p === employeeData?.id ||
+          p === employeeData?.name
+      );
+
+    const assignedTo = isSpecialist ? employeeData?.id : "";
+    const assignedToName = isSpecialist ? employeeData?.name : "";
+
+    const orderDoc = {
+      orderNumber,
+      clientId: customerId || service?.userId,
+      clientName: service?.userName,
+      serviceId: service?.id,
+      serviceName: service?.name,
+      price: Number(service?.price) || 0,
+      printingFee: Number(service?.printingFee) || 0,
+      vat: Number(service?.vat) || 0,
+      coinDiscount: Number(service?.coinDiscount) || 0,
+      processingFee: Number(processingFee) || 0,
+      finalPrice: Number(finalPrice) || 0,
       status: "paid",
-      paidAt: new Date().toISOString()
-    }, { merge: true });
+      providers: serviceProviders,
+      assignedTo,
+      assignedToName,
+      createdAt: new Date().toISOString(),
+      paymentId,
+      userEmail,
+      lang,
+      uploadedDocs: uploadedDocs || {}
+    };
+
+    await addDoc(collection(firestore, "requests"), orderDoc);
+
+    // إضافة العمولة لو الموظف متخصص
+    if (isSpecialist && Number(service?.printingFee) > 0) {
+      const commission = +(Number(service?.printingFee) * 0.2).toFixed(2);
+      await addDoc(collection(firestore, "commissions"), {
+        employeeId: employeeData?.id,
+        orderId: orderNumber,
+        type: "creation",
+        amount: commission,
+        timestamp: new Date().toISOString()
+      });
+    }
   } catch (error) {
-    console.error("Error updating request:", error);
-    throw error;
+    console.error("خطأ في إنشاء الطلب بعد الدفع:", error);
   }
 }
 
-/**
- * نموذج البطاقة - يتولى تأكيد الدفع عبر Stripe Elements ثم استدعاء API السيرفر لتأكيد الطلب،
- * ثم تحديث doc الطلب محليًا/مرّكزيًا وإعادة التوجيه إلى صفحة النجاح.
- */
 function CardForm({ paymentData, lang = "ar", onSuccess }) {
   const stripe = useStripe();
   const elements = useElements();
@@ -85,22 +134,20 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
   const [payMsg, setPayMsg] = useState("");
   const [msgSuccess, setMsgSuccess] = useState(false);
 
-  // قيم الخدمة/المبلغ من paymentData (fallbacks)
-  const serviceName = paymentData?.service?.name || paymentData?.serviceName || "اسم غير متوفر";
-  const servicePrice = Number(paymentData?.service?.price ?? paymentData?.paidAmount ?? 0);
-  const printingFee = Number(paymentData?.service?.printingFee ?? paymentData?.printingFee ?? 0);
-  const vat = Number(paymentData?.service?.vat ?? paymentData?.vat ?? 0);
-  const coinDiscount = Number(paymentData?.service?.coinDiscount ?? paymentData?.coinDiscount ?? 0);
-  const totalPrice = Number(paymentData?.totalPrice ?? paymentData?.paidAmount ?? 0);
-  const finalPrice = Number(paymentData?.finalPrice ?? paymentData?.paidAmount ?? 0);
-  const processingFee = Number(paymentData?.processingFee ?? 0);
-  const orderNumber = paymentData?.orderNumber;
-  const clientSecret = paymentData?.clientSecret;
-
-  // اتجاه النص
+  // استخراج البيانات بأمان
+  const serviceName = paymentData.service?.name || paymentData.serviceName || "اسم غير متوفر";
+  const servicePrice = paymentData.service?.price || paymentData.price || 0;
+  const printingFee = paymentData.service?.printingFee || paymentData.printingFee || 0;
+  const vat = paymentData.service?.vat || paymentData.vat || 0;
+  const coinDiscount = paymentData.service?.coinDiscount || paymentData.coinDiscount || 0;
+  const totalPrice = paymentData.totalPrice || paymentData.price || 0;
+  const finalPrice = paymentData.finalPrice || paymentData.price || 0;
+  const processingFee = paymentData.processingFee || 0;
+  const orderNumber = paymentData.orderNumber;
+  const clientSecret = paymentData.clientSecret;
+  const userEmail = paymentData.userEmail || paymentData.service?.userEmail || "";
   const dir = lang === "ar" ? "rtl" : "ltr";
 
-  // main submit
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -112,6 +159,7 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
       setLoading(false);
       return;
     }
+
     if (!clientSecret) {
       setPayMsg(lang === "ar" ? "بيانات الدفع ناقصة." : "Missing payment data.");
       setLoading(false);
@@ -119,7 +167,7 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
     }
 
     try {
-      // confirmCardPayment via Stripe Elements
+      // تنفيذ الدفع عبر Stripe Elements
       const { error: stripeError, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
         payment_method: {
           card: elements.getElement(CardElement),
@@ -127,7 +175,7 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
       });
 
       if (stripeError) {
-        setPayMsg(stripeError.message || (lang === "ar" ? "فشل الدفع." : "Payment failed."));
+        setPayMsg(stripeError.message);
         setLoading(false);
         return;
       }
@@ -138,40 +186,22 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
         return;
       }
 
-      if (String(paymentIntent.status).toLowerCase() !== "succeeded") {
-        setPayMsg((lang === "ar" ? "الحالة: " : "Status: ") + paymentIntent.status);
+      if (paymentIntent.status !== "succeeded") {
+        setPayMsg(lang === "ar" ? `الحالة: ${paymentIntent.status}` : `Status: ${paymentIntent.status}`);
         setLoading(false);
         return;
       }
 
-      // دفع ناجح — حاول إخطار السيرفر لتأكيد وإنشاء/تحديث الطلب canonical
-      let serverOrder = null;
-      try {
-        const resp = await fetch("/api/confirmPayment", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ paymentIntentId: paymentIntent.id, requestId: orderNumber ?? null }),
-        });
-        const json = await resp.json().catch(() => ({}));
-        if (resp.ok && json.orderNumber) serverOrder = json.orderNumber;
-        else if (json.alreadyProcessed && json.orderNumber) serverOrder = json.orderNumber;
-        else {
-          // لا مشكلة، سنستخدم fallback (local orderNumber أو paymentIntent id)
-          console.warn("/api/confirmPayment did not return orderNumber:", resp.status, json);
-        }
-      } catch (err) {
-        console.warn("confirmPayment call failed:", err);
-      }
-
-      // حاول إرسال الإيميل (non-blocking)
+      // ارسال اي شيء للسيرفر (مثل تأكيد الدفع) يمكن اضافته هنا (مثلاً /api/confirmPayment)
+      // إرسال الإيميل (non-blocking)
       (async () => {
         try {
           await fetch("/api/sendOrderEmail", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              to: paymentData.userEmail,
-              orderNumber: serverOrder || orderNumber || null,
+              to: userEmail,
+              orderNumber,
               serviceName,
               price: servicePrice,
               printingFee,
@@ -189,40 +219,30 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
         }
       })();
 
-      // تحديث doc الطلب محلياً (merge:true) — لكن إن كان السيرفر أنشأ الطلب بالفعل هذا سيعمل merge دون مسح الحقول
+      // أنشئ الطلب المركزي بعد الدفع (server-side الأفضل، لكن هنا client-side createOrderAfterPayment)
       try {
-        const orderToUse = serverOrder || orderNumber;
-        if (orderToUse) {
-          await moveOrderToRequests(paymentData, paymentIntent.id, orderToUse);
-        } else {
-          console.warn("No orderNumber available to update requests doc. serverOrder:", serverOrder, "localOrder:", orderNumber);
-        }
+        await createOrderAfterPayment(paymentData, paymentIntent.id);
       } catch (err) {
-        console.warn("Failed to update request doc locally:", err);
-        // لا نوقف التوجيه بسبب فشل التحديث المحلي
+        console.warn("createOrderAfterPayment failed:", err);
       }
 
-      // عرض رسالة نجاح قصيرة ثم إعادة توجيه إلى صفحة النجاح
+      // عرض نجاح قصير ثم التوجيه إلى صفحة النجاح التي أردت
       setMsgSuccess(true);
       setPayMsg(LANG[lang].success);
 
-      // احصل على orderNumber لتمريره للصفحة التالية (أولوية لرقم السيرفر)
-      const orderForRedirect = serverOrder || orderNumber || null;
-      // تأخير بسيط لإظهار الرسالة للمستخدم، ثم التوجيه
       setTimeout(() => {
-        if (orderForRedirect) {
-          router.push(`/payment/success?order=${encodeURIComponent(orderForRedirect)}`);
-          if (typeof onSuccess === "function") onSuccess(paymentIntent.id, orderForRedirect);
+        // استخدم orderNumber إن وُجد، وإلا مرّر paymentIntent id
+        if (orderNumber) {
+          router.push(`/payment/PaymentSuccess?order=${encodeURIComponent(orderNumber)}`);
+          if (typeof onSuccess === "function") onSuccess(paymentIntent.id, orderNumber);
         } else {
-          // fallback: استخدم paymentIntent id
-          router.push(`/payment/success?pi=${encodeURIComponent(paymentIntent.id)}`);
+          router.push(`/payment/PaymentSuccess?pi=${encodeURIComponent(paymentIntent.id)}`);
           if (typeof onSuccess === "function") onSuccess(paymentIntent.id, null);
         }
-      }, 700);
-
+      }, 900);
     } catch (err) {
-      console.error("Payment flow error:", err);
-      setPayMsg(lang === "ar" ? "حدث خطأ أثناء معالجة الدفع." : "Unexpected payment error.");
+      console.error("خطأ في مسار الدفع:", err);
+      setPayMsg(LANG[lang].error);
     } finally {
       setLoading(false);
     }
@@ -241,7 +261,6 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
       <Image src="/logo-transparent-large.png" width={70} height={70} alt="Logo" className="mx-auto mb-2 rounded-full bg-white shadow-lg ring-2 ring-emerald-500" />
       <div className="text-emerald-300 font-black text-xl mb-1 text-center">{LANG[lang].title}</div>
       <div className="text-gray-200 text-sm mb-4 text-center">{LANG[lang].subtitle}</div>
-
       <div className="bg-[#22304a]/70 rounded-xl p-4 mb-3 w-full text-center shadow">
         <table className="w-full text-sm text-right mb-2 border-separate border-spacing-y-1">
           <tbody>
@@ -251,18 +270,18 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
             </tr>
             <tr>
               <td className="text-gray-300">{LANG[lang].amount}:</td>
-              <td>{servicePrice.toFixed(2)} د.إ</td>
+              <td>{Number(servicePrice).toFixed(2)} د.إ</td>
             </tr>
             {printingFee > 0 && (
               <tr>
                 <td className="text-gray-300">{LANG[lang].print}:</td>
-                <td>{printingFee.toFixed(2)} د.إ</td>
+                <td>{Number(printingFee).toFixed(2)} د.إ</td>
               </tr>
             )}
             {vat > 0 && (
               <tr>
                 <td className="text-gray-300">{LANG[lang].vat}:</td>
-                <td>{vat.toFixed(2)} د.إ</td>
+                <td>{Number(vat).toFixed(2)} د.إ</td>
               </tr>
             )}
             <tr>
@@ -277,22 +296,21 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
               <td className="text-gray-300">{LANG[lang].processingFee}:</td>
               <td>
                 {processingFee
-                  ? `${processingFee.toFixed(2)} د.إ`
+                  ? `${Number(processingFee).toFixed(2)} د.إ`
                   : "0 د.إ"}
               </td>
             </tr>
             <tr>
               <td className="text-gray-300">{LANG[lang].totalBeforeDiscount}:</td>
-              <td>{totalPrice.toFixed(2)} د.إ</td>
+              <td>{Number(totalPrice).toFixed(2)} د.إ</td>
             </tr>
             <tr>
               <td className="font-bold text-emerald-400">{LANG[lang].total}:</td>
-              <td className="font-bold text-emerald-300">{finalPrice.toFixed(2)} د.إ</td>
+              <td className="font-bold text-emerald-300">{Number(finalPrice).toFixed(2)} د.إ</td>
             </tr>
           </tbody>
         </table>
       </div>
-
       <div className="w-full mb-3">
         <label className="text-emerald-200 font-bold text-sm mb-1 block">{LANG[lang].cardLabel}</label>
         <div className="bg-white rounded-lg shadow p-2 border border-emerald-200">
@@ -318,22 +336,19 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
           />
         </div>
       </div>
-
       <button
         type="submit"
         disabled={!stripe || loading}
         className={`w-full py-3 rounded-full bg-gradient-to-r from-emerald-600 via-emerald-500 to-green-700 text-white font-black text-lg mt-3 shadow-lg transition hover:scale-105 hover:brightness-110 ${loading ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
       >
-        {loading ? LANG[lang].processing : `${LANG[lang].payBtn} (${finalPrice.toFixed(2)} د.إ)`}
+        {loading ? LANG[lang].processing : `${LANG[lang].payBtn} (${Number(finalPrice).toFixed(2)} د.إ)`}
       </button>
-
       {payMsg && (
         <div className={`mt-3 text-center font-bold text-xs flex flex-row items-center justify-center gap-1 ${msgSuccess ? "text-emerald-400" : "text-red-600"}`}>
           {msgSuccess ? <span>✅</span> : <span>⚠️</span>}
           <span>{payMsg}</span>
         </div>
       )}
-
       <div className="w-full text-center mt-6 text-xs text-gray-400 font-semibold flex items-center justify-center gap-2">
         <span>🔒</span>
         {lang === "ar"
@@ -344,9 +359,6 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
   );
 }
 
-/**
- * الصفحة التي تعرض نموذج الدفع وتقوم بتحميل paymentData من requests أو من localStorage
- */
 export default function CardPaymentPage() {
   const [success, setSuccess] = useState(false);
   const [paymentId, setPaymentId] = useState("");
@@ -354,31 +366,8 @@ export default function CardPaymentPage() {
   const [paymentData, setPaymentData] = useState(null);
 
   useEffect(() => {
-    // جلب رقم الطلب من رابط الصفحة
-    const params = new URLSearchParams(window.location.search);
-    const orderNum = params.get("order");
-    (async function init() {
-      if (orderNum) {
-        try {
-          const docRef = doc(firestore, "requests", orderNum);
-          const snap = await getDoc(docRef);
-          if (snap.exists()) {
-            setPaymentData({ ...snap.data(), orderNumber: orderNum });
-          } else {
-            // لو الطلب غير موجود حالياً ننتظر بيانات من localStorage كـ fallback
-            const data = JSON.parse(localStorage.getItem("paymentData") || "null");
-            setPaymentData(data);
-          }
-        } catch (err) {
-          console.warn("Failed to fetch request doc:", err);
-          const data = JSON.parse(localStorage.getItem("paymentData") || "null");
-          setPaymentData(data);
-        }
-      } else {
-        const data = JSON.parse(localStorage.getItem("paymentData") || "null");
-        setPaymentData(data);
-      }
-    })();
+    const data = JSON.parse(localStorage.getItem("paymentData"));
+    setPaymentData(data);
   }, []);
 
   if (!paymentData || !paymentData.clientSecret) {
@@ -393,13 +382,13 @@ export default function CardPaymentPage() {
     return (
       <PaymentSuccessPage
         paymentId={paymentId}
-        amount={paymentData.finalPrice}
-        serviceName={paymentData.service?.name || paymentData.serviceName}
+        amount={paymentData.finalPrice || paymentData.price || 0}
+        serviceName={paymentData.service?.name || paymentData.serviceName || "اسم غير متوفر"}
         orderNumber={orderNumber}
         printingFee={paymentData.service?.printingFee || paymentData.printingFee || 0}
         vat={paymentData.service?.vat || paymentData.vat || 0}
         processingFee={paymentData.processingFee || 0}
-        lang={paymentData.lang || "ar"}
+        lang={paymentData.lang}
       />
     );
   }
@@ -407,18 +396,18 @@ export default function CardPaymentPage() {
   return (
     <div
       dir={paymentData.lang === "ar" ? "rtl" : "ltr"}
-      lang={paymentData.lang || "ar"}
+      lang={paymentData.lang}
       className="min-h-screen flex flex-col items-center justify-center font-sans"
       style={{ background: "linear-gradient(180deg, #0b131e 0%, #22304a 30%, #122024 60%, #1d4d40 100%)" }}
     >
       <Elements stripe={stripePromise} options={{ clientSecret: paymentData.clientSecret }}>
         <CardForm
           paymentData={paymentData}
-          lang={paymentData.lang || "ar"}
+          lang={paymentData.lang}
           onSuccess={(id, orderNum) => {
             setSuccess(true);
             setPaymentId(id);
-            setOrderNumber(orderNum || paymentData.orderNumber || "");
+            setOrderNumber(orderNum);
           }}
         />
       </Elements>
