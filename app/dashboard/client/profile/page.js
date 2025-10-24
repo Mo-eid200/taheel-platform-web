@@ -44,6 +44,7 @@ import WalletWidget from "@/components/clientheader/WalletWidget";
 import CoinsWidget from "@/components/clientheader/CoinsWidget";
 import NotificationWidget from "@/components/clientheader/NotificationWidget";
 import { translateServiceFields } from "@/utils/translate";
+import { useOpenOrderFromQuery } from "./order-redirect-handler";
 
 // ========== Helper functions ==========
 function getDayGreeting(lang = "ar") {
@@ -112,6 +113,39 @@ function SectionTitle({ icon, color = "emerald", children }) {
     </div>
   );
 }
+
+
+function ClientProfilePageClientSide(/* props */) {
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [orderFetchError, setOrderFetchError] = useState(null);
+
+  const { loadingOrderFromQuery } = useOpenOrderFromQuery(
+    (orderData) => {
+      // هنا افتح المودال أو انتقل لعرض تفاصيل الطلب داخل الصفحة
+      setSelectedOrder(orderData);
+      // مثال: scrollToOrderSection() أو setShowOrderModal(true)
+    },
+    (err) => {
+      setOrderFetchError(err);
+      // ممكن عرض رسالة للمستخدم
+    }
+  );
+
+  // استخدم selectedOrder لعرض تفاصيل فورياً (مودال، لوحة جانبية، ...)
+
+  return (
+    <>
+      {/* existing profile UI */}
+      {loadingOrderFromQuery && <div className="text-sm text-gray-400">جاري جلب تفاصيل الطلب...</div>}
+      {orderFetchError && <div className="text-sm text-red-400">خطأ في جلب الطلب</div>}
+
+      {selectedOrder && (
+        <OrderDetailsModal order={selectedOrder} onClose={() => setSelectedOrder(null)} />
+      )}
+    </>
+  );
+}
+
 
 // ========== Main Component (Inner) ==========
 function ClientProfilePageInner({ userId }) {
