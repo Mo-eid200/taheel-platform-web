@@ -1,366 +1,222 @@
 "use client";
-import { useState, useEffect } from "react";
-import { loadStripe } from "@stripe/stripe-js";
-import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
-import Image from "next/image";
-import PaymentSuccessPage from "./Page";
-import { addDoc, collection } from "firebase/firestore";
+
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { firestore } from "@/lib/firebase.client";
+import Image from "next/image";
 
-const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
+/**
+ * صفحة نجاح الدفع — تعرض تفاصيل الطلب، رقم التتبع، ملخص الدفع،
+ * رسالة شكر وعداد تحويل تلقائي لصفحة العميل.
+ *
+ * Usage:
+ *  /payment/PaymentSuccess?order=REQ-123456    -> fetch by doc id
+ *  /payment/PaymentSuccess?pi=pi_ABC...        -> query where paymentIntentId == pi
+ *
+ * عند انتهاء العداد سيتم التوجيه إلى مسار العميل الافتراضي clientDashboardPath
+ * ويمكن تغيير المسار حسب هيكل مشروعك.
+ */
 
-const LANG = {
-  en: {
-    title: "Pay for Service",
-    subtitle: "Your payment is secure and encrypted.",
-    cardLabel: "Card Information",
-    payBtn: "Pay Now",
-    success: "Payment successful!",
-    error: "Payment failed.",
-    service: "Service",
-    amount: "Amount",
-    vat: "VAT",
-    print: "Printing Fee",
-    coinDiscount: "Coins Discount",
-    processingFee: "Processing Fee",
-    totalBeforeDiscount: "Total Before Discount",
-    total: "Total",
-    back: "Back to Home",
-    processing: "Processing..."
-  },
-  ar: {
-    title: "دفع الخدمة",
-    subtitle: "مدفوعاتك محمية ومشفرة بالكامل.",
-    cardLabel: "بيانات البطاقة",
-    payBtn: "ادفع الآن",
-    success: "تم الدفع بنجاح!",
-    error: "فشل الدفع.",
-    service: "الخدمة",
-    amount: "المبلغ",
-    vat: "ضريبة القيمة المضافة",
-    print: "رسوم الطباعة",
-    coinDiscount: "خصم الكوينات",
-    processingFee: "رسوم معالجة الدفع الإلكتروني",
-    totalBeforeDiscount: "الإجمالي قبل الخصم",
-    total: "الإجمالي",
-    back: "العودة للرئيسية",
-    processing: "جارٍ الدفع..."
-  }
-};
+const clientDashboardPath = "/dashboard/client/profile"; // وجهة التحويل النهائية للعميل
 
-// دالة إنشاء الطلب بعد الدفع وتوزيع العمولة
-async function createOrderAfterPayment(paymentData, paymentId) {
-  try {
-    const {
-      service,
-      orderNumber,
-      finalPrice,
-      totalPrice,
-      printingFee,
-      vat,
-      coinDiscount,
-      userEmail,
-      processingFee,
-      lang,
-      customerId,
-      uploadedDocs
-    } = paymentData;
-
-    const employeeData = service?.employeeData || {};
-
-    // تحقق من تخصص الموظف
-    const serviceProviders = Array.isArray(service?.providers) ? service.providers : [];
-    const isSpecialist =
-      serviceProviders.some(
-        p =>
-          p === employeeData?.providerName ||
-          p === employeeData?.speciality ||
-          p === employeeData?.id ||
-          p === employeeData?.name
-      );
-
-    const assignedTo = isSpecialist ? employeeData?.id : "";
-    const assignedToName = isSpecialist ? employeeData?.name : "";
-
-    const orderDoc = {
-      orderNumber,
-      clientId: customerId || service?.userId,
-      clientName: service?.userName,
-      serviceId: service?.id,
-      serviceName: service?.name,
-      price: Number(service?.price) || 0,
-      printingFee: Number(service?.printingFee) || 0,
-      vat: Number(service?.vat) || 0,
-      coinDiscount: Number(service?.coinDiscount) || 0,
-      processingFee: Number(processingFee) || 0,
-      finalPrice: Number(finalPrice) || 0,
-      status: "paid",
-      providers: serviceProviders,
-      assignedTo,
-      assignedToName,
-      createdAt: new Date().toISOString(),
-      paymentId,
-      userEmail,
-      lang,
-      uploadedDocs: uploadedDocs || {}
-    };
-
-    await addDoc(collection(firestore, "requests"), orderDoc);
-
-    // إضافة العمولة لو الموظف متخصص
-    if (isSpecialist && Number(service?.printingFee) > 0) {
-      const commission = +(Number(service?.printingFee) * 0.2).toFixed(2);
-      await addDoc(collection(firestore, "commissions"), {
-        employeeId: employeeData?.id,
-        orderId: orderNumber,
-        type: "creation",
-        amount: commission,
-        timestamp: new Date().toISOString()
-      });
-    }
-  } catch (error) {
-    console.error("خطأ في إنشاء الطلب بعد الدفع:", error);
-  }
+function fmtAmount(v) {
+  const n = Number(v ?? 0);
+  if (!isFinite(n)) return "0.00";
+  return n.toFixed(2);
 }
 
-function CardForm({ paymentData, lang = "ar", onSuccess }) {
-  const stripe = useStripe();
-  const elements = useElements();
-  const [loading, setLoading] = useState(false);
-  const [payMsg, setPayMsg] = useState("");
-  const [msgSuccess, setMsgSuccess] = useState(false);
+export default function PaymentSuccessRoute() {
+  const search = useSearchParams();
+  const router = useRouter();
+  const order = search.get("order");
+  const pi = search.get("pi");
+  const langParam = search.get("lang") || "ar";
 
-  // استخراج البيانات بأمان
-  const serviceName = paymentData.service?.name || paymentData.serviceName || "اسم غير متوفر";
-  const servicePrice = paymentData.service?.price || paymentData.price || 0;
-  const printingFee = paymentData.service?.printingFee || paymentData.printingFee || 0;
-  const vat = paymentData.service?.vat || paymentData.vat || 0;
-  const coinDiscount = paymentData.service?.coinDiscount || paymentData.coinDiscount || 0;
-  const totalPrice = paymentData.totalPrice || paymentData.price || 0;
-  const finalPrice = paymentData.finalPrice || paymentData.price || 0;
-  const processingFee = paymentData.processingFee || 0;
-  const orderNumber = paymentData.orderNumber;
-  const clientSecret = paymentData.clientSecret;
-  const userEmail = paymentData.userEmail || paymentData.service?.userEmail || "";
-  const dir = lang === "ar" ? "rtl" : "ltr";
+  const [loading, setLoading] = useState(true);
+  const [payment, setPayment] = useState(null);
+  const [error, setError] = useState("");
+  const [countdown, setCountdown] = useState(6);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setPayMsg("");
-    setMsgSuccess(false);
-
-    // تنفيذ الدفع عبر Stripe Elements
-    const { error: stripeError, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
-      payment_method: {
-        card: elements.getElement(CardElement),
-      },
-    });
-
-    if (stripeError) {
-      setPayMsg(stripeError.message);
-      setLoading(false);
-      return;
-    }
-
-    // بعد النجاح: أرسل الإيميل (اختياري)
-    if (paymentIntent && paymentIntent.status === "succeeded") {
-      setMsgSuccess(true);
-      setPayMsg(LANG[lang].success);
-
-      await fetch("/api/sendOrderEmail", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to: userEmail,
-          orderNumber,
-          serviceName,
-          price: servicePrice,
-          printingFee,
-          vat,
-          coinDiscount,
-          processingFee,
-          finalPrice,
-          paymentId: paymentIntent.id,
-          paymentMethod: "gateway",
-          lang
-        }),
-      });
-
-      await createOrderAfterPayment(paymentData, paymentIntent.id);
-
-      setTimeout(() => {
-        onSuccess(paymentIntent.id, orderNumber);
-      }, 1200);
-    } else {
-      setPayMsg(LANG[lang].error);
-    }
-    setLoading(false);
-  };
-
-  return (
-    <form
-      dir={dir}
-      lang={lang}
-      onSubmit={handleSubmit}
-      className="max-w-md mx-auto bg-white rounded-3xl shadow-2xl border border-emerald-200 p-7 flex flex-col items-center"
-      style={{
-        background: "linear-gradient(180deg,#0b131e 0%,#22304a 30%,#122024 60%,#1d4d40 100%)"
-      }}
-    >
-      <Image src="/logo-transparent-large.png" width={70} height={70} alt="Logo" className="mx-auto mb-2 rounded-full bg-white shadow-lg ring-2 ring-emerald-500" />
-      <div className="text-emerald-300 font-black text-xl mb-1 text-center">{LANG[lang].title}</div>
-      <div className="text-gray-200 text-sm mb-4 text-center">{LANG[lang].subtitle}</div>
-      <div className="bg-[#22304a]/70 rounded-xl p-4 mb-3 w-full text-center shadow">
-        <table className="w-full text-sm text-right mb-2 border-separate border-spacing-y-1">
-          <tbody>
-            <tr>
-              <td className="text-gray-300">{LANG[lang].service}:</td>
-              <td className="text-emerald-200 font-bold">{serviceName}</td>
-            </tr>
-            <tr>
-              <td className="text-gray-300">{LANG[lang].amount}:</td>
-              <td>{Number(servicePrice).toFixed(2)} د.إ</td>
-            </tr>
-            {printingFee > 0 && (
-              <tr>
-                <td className="text-gray-300">{LANG[lang].print}:</td>
-                <td>{Number(printingFee).toFixed(2)} د.إ</td>
-              </tr>
-            )}
-            {vat > 0 && (
-              <tr>
-                <td className="text-gray-300">{LANG[lang].vat}:</td>
-                <td>{Number(vat).toFixed(2)} د.إ</td>
-              </tr>
-            )}
-            <tr>
-              <td className="text-gray-300">{LANG[lang].coinDiscount}:</td>
-              <td>
-                {coinDiscount && Number(coinDiscount) > 0
-                  ? `-${Number(coinDiscount).toFixed(2)} د.إ`
-                  : "0 د.إ"}
-              </td>
-            </tr>
-            <tr>
-              <td className="text-gray-300">{LANG[lang].processingFee}:</td>
-              <td>
-                {processingFee
-                  ? `${Number(processingFee).toFixed(2)} د.إ`
-                  : "0 د.إ"}
-              </td>
-            </tr>
-            <tr>
-              <td className="text-gray-300">{LANG[lang].totalBeforeDiscount}:</td>
-              <td>{Number(totalPrice).toFixed(2)} د.إ</td>
-            </tr>
-            <tr>
-              <td className="font-bold text-emerald-400">{LANG[lang].total}:</td>
-              <td className="font-bold text-emerald-300">{Number(finalPrice).toFixed(2)} د.إ</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <div className="w-full mb-3">
-        <label className="text-emerald-200 font-bold text-sm mb-1 block">{LANG[lang].cardLabel}</label>
-        <div className="bg-white rounded-lg shadow p-2 border border-emerald-200">
-          <CardElement
-            options={{
-              style: {
-                base: {
-                  fontSize: "18px",
-                  color: "#22304a",
-                  fontFamily: "inherit",
-                  direction: dir,
-                  letterSpacing: "0.8px",
-                  "::placeholder": {
-                    color: "#94a3b8",
-                  },
-                },
-                invalid: {
-                  color: "#dc2626",
-                  iconColor: "#dc2626"
-                }
-              }
-            }}
-          />
-        </div>
-      </div>
-      <button
-        type="submit"
-        disabled={!stripe || loading}
-        className={`w-full py-3 rounded-full bg-gradient-to-r from-emerald-600 via-emerald-500 to-green-700 text-white font-black text-lg mt-3 shadow-lg transition hover:scale-105 hover:brightness-110 ${loading ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
-      >
-        {loading ? LANG[lang].processing : `${LANG[lang].payBtn} (${Number(finalPrice).toFixed(2)} د.إ)`}
-      </button>
-      {payMsg && (
-        <div className={`mt-3 text-center font-bold text-xs flex flex-row items-center justify-center gap-1 ${msgSuccess ? "text-emerald-400" : "text-red-600"}`}>
-          {msgSuccess ? <span>✅</span> : <span>⚠️</span>}
-          <span>{payMsg}</span>
-        </div>
-      )}
-      <div className="w-full text-center mt-6 text-xs text-gray-400 font-semibold flex items-center justify-center gap-2">
-        <span>🔒</span>
-        {lang === "ar"
-          ? "جميع بيانات الدفع مشفرة ومحمية عبر Stripe"
-          : "All payment data is encrypted and protected via Stripe"}
-      </div>
-    </form>
-  );
-}
-
-export default function CardPaymentPage() {
-  const [success, setSuccess] = useState(false);
-  const [paymentId, setPaymentId] = useState("");
-  const [orderNumber, setOrderNumber] = useState("");
-  const [paymentData, setPaymentData] = useState(null);
-
+  // جلب بيانات الطلب من Firestore
   useEffect(() => {
-    const data = JSON.parse(localStorage.getItem("paymentData"));
-    setPaymentData(data);
-  }, []);
+    let mounted = true;
+    async function load() {
+      setLoading(true);
+      setError("");
+      try {
+        if (order) {
+          const ref = doc(firestore, "requests", order);
+          const snap = await getDoc(ref);
+          if (!mounted) return;
+          if (!snap.exists()) {
+            setError(langParam === "ar" ? "لم يتم العثور على الطلب." : "Order not found.");
+            setPayment(null);
+          } else {
+            setPayment({ id: snap.id, ...snap.data() });
+          }
+        } else if (pi) {
+          const q = query(collection(firestore, "requests"), where("paymentIntentId", "==", pi));
+          const qs = await getDocs(q);
+          if (!mounted) return;
+          if (qs.empty) {
+            setError(langParam === "ar" ? "لا يوجد طلب مرتبط بمعرف الدفع هذا." : "No request found for this payment id.");
+            setPayment(null);
+          } else {
+            const docSnap = qs.docs[0];
+            setPayment({ id: docSnap.id, ...docSnap.data() });
+          }
+        } else {
+          setError(langParam === "ar" ? "لم يتم استدعاء الصفحة مع رقم الطلب." : "No order or payment id provided.");
+          setPayment(null);
+        }
+      } catch (e) {
+        console.error("Failed to load payment data:", e);
+        if (!mounted) return;
+        setError(langParam === "ar" ? "فشل في جلب بيانات الطلب." : "Failed to load payment data.");
+        setPayment(null);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+    load();
+    return () => { mounted = false; };
+  }, [order, pi, langParam]);
 
-  if (!paymentData || !paymentData.clientSecret) {
+  // عداد التحويل التلقائي — يبدأ عند توفر بيانات الدفع
+  useEffect(() => {
+    if (!payment) return;
+    let mounted = true;
+    let t = null;
+    setCountdown(6);
+    t = setInterval(() => {
+      setCountdown((c) => {
+        if (!mounted) return 0;
+        if (c <= 1) {
+          clearInterval(t);
+          // تحويل عند انتهاء العداد: أفضّل تمرير رقم الطلب للداشبورد
+          const redirectBase = payment.redirectTo || clientDashboardPath;
+          const orderId = payment.requestId || payment.orderNumber || payment.id || null;
+          const target = orderId ? `${redirectBase}?order=${encodeURIComponent(orderId)}` : redirectBase;
+          // توجيه
+          router.push(target);
+          return 0;
+        }
+        return c - 1;
+      });
+    }, 1000);
+    return () => {
+      mounted = false;
+      if (t) clearInterval(t);
+    };
+  }, [payment, router]);
+
+  const t = (ar, en) => (langParam === "ar" ? ar : en);
+
+  if (loading) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center font-sans bg-black text-white">
-        <div className="text-xl font-bold">لم يتم العثور على بيانات الدفع. يرجى العودة للمحفظة أو إعادة المحاولة.</div>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-900 to-emerald-900 text-white p-6">
+        <div className="text-center space-y-4">
+          <div className="animate-pulse text-2xl font-bold">{t("جارٍ استرجاع بيانات الدفع...", "Loading payment data...")}</div>
+          <div className="text-sm text-white/75">{t("يرجى الانتظار لحظة.", "Please wait a moment.")}</div>
+        </div>
       </div>
     );
   }
 
-  if (success) {
+  if (error || !payment) {
     return (
-      <PaymentSuccessPage
-        paymentId={paymentId}
-        amount={paymentData.finalPrice || paymentData.price || 0}
-        serviceName={paymentData.service?.name || paymentData.serviceName || "اسم غير متوفر"}
-        orderNumber={orderNumber}
-        printingFee={paymentData.service?.printingFee || paymentData.printingFee || 0}
-        vat={paymentData.service?.vat || paymentData.vat || 0}
-        processingFee={paymentData.processingFee || 0}
-        lang={paymentData.lang}
-      />
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-900 to-emerald-900 text-white p-6">
+        <div className="max-w-lg w-full bg-white/5 border border-white/10 rounded-2xl p-6 text-center">
+          <h2 className="text-xl font-bold mb-2">{t("تعذر عرض تفاصيل الدفع", "Unable to show payment details")}</h2>
+          <p className="mb-4 text-sm text-white/80">{error || t("الطلب غير موجود.", "Order not found.")}</p>
+          <div className="flex items-center justify-center gap-3">
+            <button onClick={() => router.push("/")} className="px-4 py-2 bg-emerald-500 rounded text-white font-semibold">
+              {t("العودة للرئيسية", "Back to home")}
+            </button>
+            <button onClick={() => router.push(clientDashboardPath)} className="px-4 py-2 border rounded text-white border-white/20">
+              {t("الذهاب للوحة التحكم", "Go to dashboard")}
+            </button>
+          </div>
+        </div>
+      </div>
     );
   }
 
+  // تجهيز البيانات للعرض
+  const service = payment.service || {};
+  const tracking = payment.requestId || payment.orderNumber || payment.id || "";
+  const paidAmount = Number(payment.paidAmount ?? payment.finalPrice ?? 0);
+  const printingFee = Number(payment.printingFee ?? 0);
+  const vat = Number(payment.tax ?? payment.vat ?? 0);
+  const processingFee = Number(payment.processingFee ?? 0);
+  const paidAt = payment.paidAt || payment.lastUpdated || payment.createdAt || "";
+
   return (
-    <div
-      dir={paymentData.lang === "ar" ? "rtl" : "ltr"}
-      lang={paymentData.lang}
-      className="min-h-screen flex flex-col items-center justify-center font-sans"
-      style={{ background: "linear-gradient(180deg, #0b131e 0%, #22304a 30%, #122024 60%, #1d4d40 100%)" }}
-    >
-      <Elements stripe={stripePromise} options={{ clientSecret: paymentData.clientSecret }}>
-        <CardForm
-          paymentData={paymentData}
-          lang={paymentData.lang}
-          onSuccess={(id, orderNum) => {
-            setSuccess(true);
-            setPaymentId(id);
-            setOrderNumber(orderNum);
-          }}
-        />
-      </Elements>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-900 to-emerald-900 p-6">
+      <div className="w-full max-w-3xl bg-white/5 border border-white/10 rounded-3xl p-6 shadow-lg text-slate-200">
+        <div className="flex items-center gap-4">
+          <div className="w-16 h-16 bg-emerald-500 rounded-full flex items-center justify-center text-white text-3xl font-extrabold shadow">
+            ✓
+          </div>
+          <div>
+            <h1 className="text-2xl font-extrabold text-white">{t("تم استلام الدفع", "Payment received")}</h1>
+            <p className="text-sm text-white/80">{t("شكراً لثقتك في تأهيل — جارٍ العمل على طلبك الآن.", "Thanks for trusting Taheel — we are processing your order now.")}</p>
+          </div>
+        </div>
+
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <section className="bg-white/3 rounded-xl p-4">
+            <h3 className="text-sm font-semibold text-white mb-3">{t("تفاصيل الطلب", "Order details")}</h3>
+            <dl className="text-sm text-white/90 space-y-2">
+              <div><span className="font-semibold">{t("رقم التتبع", "Tracking No.")}:</span> <span className="font-mono ml-2">{tracking}</span></div>
+              <div><span className="font-semibold">{t("الخدمة", "Service")}:</span> <span className="ml-2">{service.name || payment.serviceName || t("غير محدد", "Not specified")}</span></div>
+              <div><span className="font-semibold">{t("حالة الطلب", "Status")}:</span> <span className="ml-2">{payment.status || "paid"}</span></div>
+              <div><span className="font-semibold">{t("المسؤول/الموظف", "Assigned to")}:</span> <span className="ml-2">{payment.assignedToName || payment.assignedTo || t("سيتم التعيين لاحقاً", "Will be assigned")}</span></div>
+            </dl>
+          </section>
+
+          <section className="bg-white/3 rounded-xl p-4">
+            <h3 className="text-sm font-semibold text-white mb-3">{t("ملخص الدفع", "Payment summary")}</h3>
+            <dl className="text-sm text-white/90 space-y-2">
+              <div><span className="font-semibold">{t("المبلغ المدفوع", "Paid")}:</span> <span className="ml-2">{fmtAmount(paidAmount)} د.إ</span></div>
+              <div><span className="font-semibold">{t("رسوم الطباعة", "Printing fee")}:</span> <span className="ml-2">{fmtAmount(printingFee)} د.إ</span></div>
+              <div><span className="font-semibold">{t("الضريبة", "VAT")}:</span> <span className="ml-2">{fmtAmount(vat)} د.إ</span></div>
+              <div><span className="font-semibold">{t("رسوم المعالجة", "Processing fee")}:</span> <span className="ml-2">{fmtAmount(processingFee)} د.إ</span></div>
+              <div><span className="font-semibold">{t("تاريخ الدفع", "Paid at")}:</span> <span className="ml-2">{paidAt ? new Date(paidAt).toLocaleString() : "-"}</span></div>
+            </dl>
+          </section>
+        </div>
+
+        <div className="mt-6 bg-white/3 rounded-xl p-4">
+          <h3 className="text-sm font-semibold text-white mb-2">{t("ملاحظات", "Notes")}</h3>
+          <p className="text-sm text-white/80">{t("جاري العمل على طلبكم. سنوافيكم بالتحديثات عبر لوحة التحكم والإشعارات. شكراً لثقتكم في تأهيل.", "We are working on your order. We'll update you via your dashboard and notifications. Thanks for choosing Taheel.")}</p>
+        </div>
+
+        <div className="mt-6 flex flex-col md:flex-row items-center justify-between gap-3">
+          <div className="text-sm text-white/80">
+            {t("سيتم تحويلك تلقائيًا إلى صفحة حسابك خلال", "You will be redirected to your account in")} <span className="font-bold text-emerald-300">{countdown}</span> {t("ثوانٍ", "s")}
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                const redirectBase = payment.redirectTo || clientDashboardPath;
+                const orderId = payment.requestId || payment.orderNumber || payment.id || null;
+                const target = orderId ? `${redirectBase}?order=${encodeURIComponent(orderId)}` : redirectBase;
+                router.push(target);
+              }}
+              className="px-4 py-2 bg-emerald-500 rounded text-white font-semibold"
+            >
+              {t("اذهب الآن", "Go now")}
+            </button>
+
+            <button onClick={() => router.push("/")} className="px-4 py-2 border rounded text-white border-white/20">
+              {t("العودة للرئيسية", "Back to home")}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -11,6 +11,9 @@ import { firestore } from "@/lib/firebase.client";
 
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
 
+/**
+ * نصوص الواجهة (عربي / إنجليزي)
+ */
 const LANG = {
   en: {
     title: "Pay for Service",
@@ -27,7 +30,6 @@ const LANG = {
     processingFee: "Processing Fee",
     totalBeforeDiscount: "Total Before Discount",
     total: "Total",
-    back: "Back to Home",
     processing: "Processing..."
   },
   ar: {
@@ -45,93 +47,79 @@ const LANG = {
     processingFee: "رسوم معالجة الدفع الإلكتروني",
     totalBeforeDiscount: "الإجمالي قبل الخصم",
     total: "الإجمالي",
-    back: "العودة للرئيسية",
     processing: "جارٍ الدفع..."
   }
 };
 
-// NOTE: this is still a client-side fallback for quick testing.
-// Recommended: move this logic server-side (/api/createOrder) for production.
-async function createOrderAfterPayment(paymentData, paymentId) {
-  try {
-    const {
-      service,
-      orderNumber,
-      finalPrice,
-      totalPrice,
-      printingFee,
-      vat,
-      coinDiscount,
-      userEmail,
-      processingFee,
-      lang,
-      customerId,
-      uploadedDocs
-    } = paymentData || {};
+/**
+ * أنشئ/حدّث doc الطلب في Firestore باستخدام orderNumber أو paymentId كـ doc id
+ * (مؤقت client-side — الأفضل تحرّكه للسيرفر لاحقاً)
+ */
+async function createOrUpdateRequestDoc(paymentData, paymentId) {
+  const orderNumber = paymentData?.orderNumber;
+  const docId = orderNumber || paymentId;
+  if (!docId) throw new Error("Missing orderNumber and paymentId");
 
-    const employeeData = service?.employeeData || {};
+  const service = paymentData?.service || {};
+  const serviceProviders = Array.isArray(service.providers) ? service.providers : [];
 
-    const serviceProviders = Array.isArray(service?.providers) ? service.providers : [];
-    const isSpecialist =
-      serviceProviders.some(
-        p =>
-          p === employeeData?.providerName ||
-          p === employeeData?.speciality ||
-          p === employeeData?.id ||
-          p === employeeData?.name
-      );
+  const employeeData = service.employeeData || {};
+  const isSpecialist =
+    serviceProviders.some(
+      p =>
+        p === employeeData?.providerName ||
+        p === employeeData?.speciality ||
+        p === employeeData?.id ||
+        p === employeeData?.name
+    );
 
-    const assignedTo = isSpecialist ? employeeData?.id : "";
-    const assignedToName = isSpecialist ? employeeData?.name : "";
+  const orderDoc = {
+    requestId: docId,
+    orderNumber: orderNumber || docId,
+    paymentId,
+    customerId: paymentData.customerId || paymentData.userId || "",
+    serviceId: service.serviceId || service.id || paymentData.serviceId || "",
+    serviceName: service.name || paymentData.serviceName || "",
+    service: service && Object.keys(service).length ? service : undefined,
+    paidAmount: Number(paymentData.finalPrice ?? paymentData.paidAmount ?? 0),
+    printingFee: Number(service.printingFee ?? paymentData.printingFee ?? 0),
+    processingFee: Number(paymentData.processingFee ?? 0),
+    coinsUsed: Number(paymentData.coinsUsed ?? 0),
+    coinsGiven: Number(paymentData.coinsGiven ?? 0),
+    status: "paid",
+    paidAt: new Date().toISOString(),
+    lastUpdated: new Date().toISOString(),
+    providers: serviceProviders,
+    assignedTo: isSpecialist ? (employeeData.id || "") : (paymentData.assignedTo || ""),
+    assignedToName: isSpecialist ? (employeeData.name || "") : (paymentData.assignedToName || ""),
+    userEmail: paymentData.userEmail || "",
+    attachments: paymentData.uploadedDocs || paymentData.attachments || {},
+    metadata: paymentData.metadata || {}
+  };
 
-    // Decide doc id: prefer orderNumber if available, else use paymentId
-    const docId = orderNumber || paymentId;
+  // حذف المفاتيح الغير معرّفة
+  Object.keys(orderDoc).forEach(k => orderDoc[k] === undefined && delete orderDoc[k]);
 
-    const orderDoc = {
-      orderNumber: orderNumber || paymentId,
-      clientId: customerId || service?.userId,
-      clientName: service?.userName,
-      serviceId: service?.id,
-      serviceName: service?.name,
-      price: Number(service?.price) || 0,
-      printingFee: Number(service?.printingFee) || Number(printingFee) || 0,
-      vat: Number(service?.vat) || Number(vat) || 0,
-      coinDiscount: Number(service?.coinDiscount) || Number(coinDiscount) || 0,
-      processingFee: Number(processingFee) || 0,
-      finalPrice: Number(finalPrice) || Number(totalPrice) || 0,
-      status: "paid",
-      providers: serviceProviders,
-      assignedTo,
-      assignedToName,
-      createdAt: new Date().toISOString(),
-      paymentId,
-      userEmail,
-      lang,
-      uploadedDocs: uploadedDocs || {}
-    };
+  await setDoc(doc(firestore, "requests", String(docId)), orderDoc, { merge: true });
 
-    // Use setDoc with merge:true so existing server-written fields (clientSecret, metadata, etc.) are preserved
-    await setDoc(doc(firestore, "requests", String(docId)), orderDoc, { merge: true });
-
-    // Add commission doc if needed (still client-side here)
-    if (isSpecialist && Number(service?.printingFee) > 0) {
-      const commission = +(Number(service?.printingFee) * 0.2).toFixed(2);
-      await setDoc(doc(firestore, "commissions", `${docId}-creation`), {
-        employeeId: employeeData?.id,
-        orderId: orderNumber || paymentId,
-        type: "creation",
-        amount: commission,
-        timestamp: new Date().toISOString()
-      }, { merge: true });
-    }
-
-    return docId;
-  } catch (error) {
-    console.error("خطأ في إنشاء الطلب بعد الدفع:", error);
-    throw error;
+  // عمولة الموظف (خيار اختياري، محلي)
+  if (isSpecialist && Number(service.printingFee ?? 0) > 0) {
+    const commission = +(Number(service.printingFee) * 0.2).toFixed(2);
+    await setDoc(doc(firestore, "commissions", `${docId}-creation`), {
+      employeeId: employeeData?.id || "",
+      orderId: orderNumber || docId,
+      type: "creation",
+      amount: commission,
+      timestamp: new Date().toISOString()
+    }, { merge: true });
   }
+
+  return docId;
 }
 
+/**
+ * نموذج إدخال البطاقة والتعامل مع Stripe
+ */
 function CardForm({ paymentData, lang = "ar", onSuccess }) {
   const stripe = useStripe();
   const elements = useElements();
@@ -141,15 +129,14 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
   const [payMsg, setPayMsg] = useState("");
   const [msgSuccess, setMsgSuccess] = useState(false);
 
-  // استخراج البيانات بأمان
   const serviceName = paymentData?.service?.name || paymentData?.serviceName || "اسم غير متوفر";
-  const servicePrice = paymentData?.service?.price || paymentData?.price || 0;
-  const printingFee = paymentData?.service?.printingFee || paymentData?.printingFee || 0;
-  const vat = paymentData?.service?.vat || paymentData?.vat || 0;
-  const coinDiscount = paymentData?.service?.coinDiscount || paymentData?.coinDiscount || 0;
-  const totalPrice = paymentData?.totalPrice || paymentData?.price || 0;
-  const finalPrice = paymentData?.finalPrice || paymentData?.price || 0;
-  const processingFee = paymentData?.processingFee || 0;
+  const servicePrice = Number(paymentData?.service?.price ?? paymentData?.price ?? 0);
+  const printingFee = Number(paymentData?.service?.printingFee ?? paymentData?.printingFee ?? 0);
+  const vat = Number(paymentData?.service?.vat ?? paymentData?.vat ?? 0);
+  const coinDiscount = Number(paymentData?.service?.coinDiscount ?? paymentData?.coinDiscount ?? 0);
+  const totalPrice = Number(paymentData?.totalPrice ?? paymentData?.price ?? 0);
+  const finalPrice = Number(paymentData?.finalPrice ?? paymentData?.price ?? 0);
+  const processingFee = Number(paymentData?.processingFee ?? 0);
   const orderNumber = paymentData?.orderNumber;
   const clientSecret = paymentData?.clientSecret;
   const userEmail = paymentData?.userEmail || paymentData?.service?.userEmail || "";
@@ -173,11 +160,8 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
     }
 
     try {
-      // confirm card payment
       const { error: stripeError, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
-        payment_method: {
-          card: elements.getElement(CardElement)
-        }
+        payment_method: { card: elements.getElement(CardElement) }
       });
 
       if (stripeError) {
@@ -185,20 +169,18 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
         setLoading(false);
         return;
       }
-
       if (!paymentIntent) {
         setPayMsg(lang === "ar" ? "لم يتم استلام نتيجة الدفع." : "No payment result.");
         setLoading(false);
         return;
       }
-
       if (String(paymentIntent.status).toLowerCase() !== "succeeded") {
         setPayMsg((lang === "ar" ? "الحالة: " : "Status: ") + paymentIntent.status);
         setLoading(false);
         return;
       }
 
-      // non-blocking: notify server to create/update canonical request (confirmPayment endpoint)
+      // non-blocking: أخطر السيرفر لعمل التأكيد المركزي (webhook-safe)
       (async () => {
         try {
           await fetch("/api/confirmPayment", {
@@ -206,12 +188,12 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ paymentIntentId: paymentIntent.id, requestId: orderNumber ?? null })
           });
-        } catch (e) {
-          console.warn("confirmPayment call failed:", e);
+        } catch (err) {
+          console.warn("confirmPayment call failed:", err);
         }
       })();
 
-      // fire-and-forget send email
+      // إرسال إيميل بشكل غير محظور
       (async () => {
         try {
           await fetch("/api/sendOrderEmail", {
@@ -232,24 +214,23 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
               lang
             })
           });
-        } catch (e) {
-          console.warn("sendOrderEmail failed:", e);
+        } catch (err) {
+          console.warn("sendOrderEmail failed:", err);
         }
       })();
 
-      // create/update request locally (merge) — returns doc id used
+      // أنشئ/حدّث مستند الطلب في Firestore (merge) وأحصل على doc id المستخدم
       let docId = null;
       try {
-        docId = await createOrderAfterPayment(paymentData, paymentIntent.id);
+        docId = await createOrUpdateRequestDoc(paymentData, paymentIntent.id);
       } catch (err) {
-        console.warn("createOrderAfterPayment failed:", err);
+        console.warn("createOrUpdateRequestDoc failed:", err);
       }
 
-      // success feedback
+      // عرض نجاح قصير ثم تحويل المستخدم
       setMsgSuccess(true);
       setPayMsg(LANG[lang].success);
 
-      // redirect to PaymentSuccess route (prefer docId/orderNumber)
       const orderForRedirect = orderNumber || docId || null;
       setTimeout(() => {
         if (orderForRedirect) {
@@ -269,15 +250,7 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
   };
 
   return (
-    <form
-      dir={dir}
-      lang={lang}
-      onSubmit={handleSubmit}
-      className="max-w-md mx-auto bg-white rounded-3xl shadow-2xl border border-emerald-200 p-7 flex flex-col items-center"
-      style={{
-        background: "linear-gradient(180deg,#0b131e 0%,#22304a 30%,#122024 60%,#1d4d40 100%)"
-      }}
-    >
+    <form dir={dir} lang={lang} onSubmit={handleSubmit} className="max-w-md mx-auto bg-white rounded-3xl shadow-2xl border border-emerald-200 p-7 flex flex-col items-center" style={{ background: "linear-gradient(180deg,#0b131e 0%,#22304a 30%,#122024 60%,#1d4d40 100%)" }}>
       <Image src="/logo-transparent-large.png" width={70} height={70} alt="Logo" className="mx-auto mb-2 rounded-full bg-white shadow-lg ring-2 ring-emerald-500" />
       <div className="text-emerald-300 font-black text-xl mb-1 text-center">{LANG[lang].title}</div>
       <div className="text-gray-200 text-sm mb-4 text-center">{LANG[lang].subtitle}</div>
@@ -285,44 +258,14 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
       <div className="bg-[#22304a]/70 rounded-xl p-4 mb-3 w-full text-center shadow">
         <table className="w-full text-sm text-right mb-2 border-separate border-spacing-y-1">
           <tbody>
-            <tr>
-              <td className="text-gray-300">{LANG[lang].service}:</td>
-              <td className="text-emerald-200 font-bold">{serviceName}</td>
-            </tr>
-            <tr>
-              <td className="text-gray-300">{LANG[lang].amount}:</td>
-              <td>{Number(servicePrice).toFixed(2)} د.إ</td>
-            </tr>
-            {printingFee > 0 && (
-              <tr>
-                <td className="text-gray-300">{LANG[lang].print}:</td>
-                <td>{Number(printingFee).toFixed(2)} د.إ</td>
-              </tr>
-            )}
-            {vat > 0 && (
-              <tr>
-                <td className="text-gray-300">{LANG[lang].vat}:</td>
-                <td>{Number(vat).toFixed(2)} د.إ</td>
-              </tr>
-            )}
-            <tr>
-              <td className="text-gray-300">{LANG[lang].coinDiscount}:</td>
-              <td>
-                {coinDiscount && Number(coinDiscount) > 0 ? `-${Number(coinDiscount).toFixed(2)} د.إ` : "0 د.إ"}
-              </td>
-            </tr>
-            <tr>
-              <td className="text-gray-300">{LANG[lang].processingFee}:</td>
-              <td>{processingFee ? `${Number(processingFee).toFixed(2)} د.إ` : "0 د.إ"}</td>
-            </tr>
-            <tr>
-              <td className="text-gray-300">{LANG[lang].totalBeforeDiscount}:</td>
-              <td>{Number(totalPrice).toFixed(2)} د.إ</td>
-            </tr>
-            <tr>
-              <td className="font-bold text-emerald-400">{LANG[lang].total}:</td>
-              <td className="font-bold text-emerald-300">{Number(finalPrice).toFixed(2)} د.إ</td>
-            </tr>
+            <tr><td className="text-gray-300">{LANG[lang].service}:</td><td className="text-emerald-200 font-bold">{serviceName}</td></tr>
+            <tr><td className="text-gray-300">{LANG[lang].amount}:</td><td>{servicePrice.toFixed(2)} د.إ</td></tr>
+            {printingFee > 0 && <tr><td className="text-gray-300">{LANG[lang].print}:</td><td>{printingFee.toFixed(2)} د.إ</td></tr>}
+            {vat > 0 && <tr><td className="text-gray-300">{LANG[lang].vat}:</td><td>{vat.toFixed(2)} د.إ</td></tr>}
+            <tr><td className="text-gray-300">{LANG[lang].coinDiscount}:</td><td>{coinDiscount && Number(coinDiscount) > 0 ? `-${Number(coinDiscount).toFixed(2)} د.إ` : "0 د.إ"}</td></tr>
+            <tr><td className="text-gray-300">{LANG[lang].processingFee}:</td><td>{processingFee ? `${processingFee.toFixed(2)} د.إ` : "0 د.إ"}</td></tr>
+            <tr><td className="text-gray-300">{LANG[lang].totalBeforeDiscount}:</td><td>{totalPrice.toFixed(2)} د.إ</td></tr>
+            <tr><td className="font-bold text-emerald-400">{LANG[lang].total}:</td><td className="font-bold text-emerald-300">{finalPrice.toFixed(2)} د.إ</td></tr>
           </tbody>
         </table>
       </div>
@@ -330,43 +273,17 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
       <div className="w-full mb-3">
         <label className="text-emerald-200 font-bold text-sm mb-1 block">{LANG[lang].cardLabel}</label>
         <div className="bg-white rounded-lg shadow p-2 border border-emerald-200">
-          <CardElement
-            options={{
-              style: {
-                base: {
-                  fontSize: "18px",
-                  color: "#22304a",
-                  fontFamily: "inherit",
-                  direction: dir,
-                  letterSpacing: "0.8px",
-                  "::placeholder": { color: "#94a3b8" }
-                },
-                invalid: { color: "#dc2626", iconColor: "#dc2626" }
-              }
-            }}
-          />
+          <CardElement options={{ style: { base: { fontSize: "18px", color: "#22304a", fontFamily: "inherit", direction: dir, letterSpacing: "0.8px", "::placeholder": { color: "#94a3b8" } }, invalid: { color: "#dc2626", iconColor: "#dc2626" } } }} />
         </div>
       </div>
 
-      <button
-        type="submit"
-        disabled={!stripe || loading}
-        className={`w-full py-3 rounded-full bg-gradient-to-r from-emerald-600 via-emerald-500 to-green-700 text-white font-black text-lg mt-3 shadow-lg transition hover:scale-105 hover:brightness-110 ${loading ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
-      >
-        {loading ? LANG[lang].processing : `${LANG[lang].payBtn} (${Number(finalPrice).toFixed(2)} د.إ)`}
+      <button type="submit" disabled={!stripe || loading} className={`w-full py-3 rounded-full bg-gradient-to-r from-emerald-600 via-emerald-500 to-green-700 text-white font-black text-lg mt-3 shadow-lg transition hover:scale-105 hover:brightness-110 ${loading ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}>
+        {loading ? LANG[lang].processing : `${LANG[lang].payBtn} (${finalPrice.toFixed(2)} د.إ)`}
       </button>
 
-      {payMsg && (
-        <div className={`mt-3 text-center font-bold text-xs flex flex-row items-center justify-center gap-1 ${msgSuccess ? "text-emerald-400" : "text-red-600"}`}>
-          {msgSuccess ? <span>✅</span> : <span>⚠️</span>}
-          <span>{payMsg}</span>
-        </div>
-      )}
+      {payMsg && <div className={`mt-3 text-center font-bold text-xs flex items-center justify-center gap-1 ${msgSuccess ? "text-emerald-400" : "text-red-600"}`}>{msgSuccess ? <span>✅</span> : <span>⚠️</span>}<span>{payMsg}</span></div>}
 
-      <div className="w-full text-center mt-6 text-xs text-gray-400 font-semibold flex items-center justify-center gap-2">
-        <span>🔒</span>
-        {lang === "ar" ? "جميع بيانات الدفع مشفرة ومحمية عبر Stripe" : "All payment data is encrypted and protected via Stripe"}
-      </div>
+      <div className="w-full text-center mt-6 text-xs text-gray-400 font-semibold flex items-center justify-center gap-2"><span>🔒</span>{lang === "ar" ? "جميع بيانات الدفع مشفرة ومحمية عبر Stripe" : "All payment data is encrypted and protected via Stripe"}</div>
     </form>
   );
 }
@@ -378,8 +295,12 @@ export default function CardPaymentPage() {
   const [paymentData, setPaymentData] = useState(null);
 
   useEffect(() => {
-    const data = JSON.parse(localStorage.getItem("paymentData"));
-    setPaymentData(data);
+    try {
+      const raw = localStorage.getItem("paymentData");
+      if (raw) setPaymentData(JSON.parse(raw));
+    } catch (e) {
+      setPaymentData(null);
+    }
   }, []);
 
   if (!paymentData || !paymentData.clientSecret) {
@@ -406,22 +327,9 @@ export default function CardPaymentPage() {
   }
 
   return (
-    <div
-      dir={paymentData.lang === "ar" ? "rtl" : "ltr"}
-      lang={paymentData.lang}
-      className="min-h-screen flex flex-col items-center justify-center font-sans"
-      style={{ background: "linear-gradient(180deg, #0b131e 0%, #22304a 30%, #122024 60%, #1d4d40 100%)" }}
-    >
+    <div dir={paymentData.lang === "ar" ? "rtl" : "ltr"} lang={paymentData.lang} className="min-h-screen flex flex-col items-center justify-center font-sans" style={{ background: "linear-gradient(180deg, #0b131e 0%, #22304a 30%, #122024 60%, #1d4d40 100%)" }}>
       <Elements stripe={stripePromise} options={{ clientSecret: paymentData.clientSecret }}>
-        <CardForm
-          paymentData={paymentData}
-          lang={paymentData.lang}
-          onSuccess={(id, orderNum) => {
-            setSuccess(true);
-            setPaymentId(id);
-            setOrderNumber(orderNum);
-          }}
-        />
+        <CardForm paymentData={paymentData} lang={paymentData.lang} onSuccess={(id, orderNum) => { setSuccess(true); setPaymentId(id); setOrderNumber(orderNum); }} />
       </Elements>
     </div>
   );
