@@ -1035,23 +1035,6 @@ useEffect(() => {
           </div>
         </div>
       )}
-
-      {selectedOrderFromQuery && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-3xl w-full overflow-auto">
-            <div className="p-4 border-b flex items-center justify-between">
-              <h3 className="text-lg font-bold">{lang === "ar" ? "تفاصيل الطلب" : "Order details"}</h3>
-              <div className="flex gap-2">
-                <button onClick={() => { setSelectedOrderFromQuery(null); router.push(`${clientDashboardPath}`); }} className="px-3 py-1 rounded border">{lang === "ar" ? "إغلاق" : "Close"}</button>
-                <button onClick={() => { setSelectedOrderFromQuery(null); router.push(`${clientDashboardPath}?order=${encodeURIComponent(selectedOrderFromQuery.requestId || selectedOrderFromQuery.orderNumber || selectedOrderFromQuery.id)}`); }} className="px-3 py-1 rounded bg-emerald-600 text-white">{lang === "ar" ? "اذهب للطلب" : "Go to order"}</button>
-              </div>
-            </div>
-            <div className="p-6">
-              <pre className="whitespace-pre-wrap text-sm text-gray-800">{JSON.stringify(selectedOrderFromQuery, null, 2)}</pre>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
