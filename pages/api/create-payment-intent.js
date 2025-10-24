@@ -75,8 +75,11 @@ export default async function handler(req, res) {
         assignedTo: assignedTo || "",
         assignedToName: assignedToName || "",
         lang: String(lang || "ar"),
-      },
       description: `دفع خدمة ${serviceName}`,
+      amount: String(amount),           
+      currency: "AED",                   
+      userEmail: String(userEmail || ""), 
+      },
     });
 
     // أنشئ doc الطلب (بغض النظر إن كانت شحن محفظة أم خدمة) — status يبقى pending حتى يكتمل الدفع
