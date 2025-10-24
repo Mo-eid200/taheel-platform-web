@@ -2,11 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  collection,
+  query,
+  where,
+  getDocs,
+} from "firebase/firestore";
 import { firestore } from "@/lib/firebase.client";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
-/* صفحة نجاح الدفع — نسخة مُحسّنة بحراسة إضافية وعرض لوج واضح */
+/* صفحة نجاح الدفع */
 const clientDashboardPath = "/dashboard/client/profile";
 
 function safeNumber(v) {
@@ -26,56 +33,119 @@ function PaymentSuccessInner({ langParam, search, router }) {
   const [error, setError] = useState("");
   const [countdown, setCountdown] = useState(6);
 
-  // جلب بيانات الطلب / الدفع
+  // ---------------------------------
+  // 1) تحميل بيانات الطلب / الدفع من Firestore
+  // ---------------------------------
   useEffect(() => {
     let mounted = true;
+
     async function load() {
       setLoading(true);
       setError("");
       try {
         if (order) {
+          // ابحث مباشرة بالـ requestId (document id)
           const ref = doc(firestore, "requests", order);
           const snap = await getDoc(ref);
           if (!mounted) return;
           if (!snap.exists()) {
-            setError(langParam === "ar" ? "لم يتم العثور على الطلب." : "Order not found.");
+            setError(
+              langParam === "ar"
+                ? "لم يتم العثور على الطلب."
+                : "Order not found."
+            );
             setPayment(null);
           } else {
             setPayment({ id: snap.id, ...snap.data() });
           }
         } else if (pi) {
-          const q = query(collection(firestore, "requests"), where("paymentIntentId", "==", pi));
+          // fallback: دور بالـ paymentIntentId
+          const q = query(
+            collection(firestore, "requests"),
+            where("paymentIntentId", "==", pi)
+          );
           const qs = await getDocs(q);
           if (!mounted) return;
           if (qs.empty) {
-            setError(langParam === "ar" ? "لا يوجد طلب مرتبط بمعرف الدفع هذا." : "No request found for this payment id.");
+            setError(
+              langParam === "ar"
+                ? "لا يوجد طلب مرتبط بمعرف الدفع هذا."
+                : "No request found for this payment id."
+            );
             setPayment(null);
           } else {
             const docSnap = qs.docs[0];
             setPayment({ id: docSnap.id, ...docSnap.data() });
           }
         } else {
-          setError(langParam === "ar" ? "لم يتم استدعاء الصفحة مع رقم الطلب." : "No order or payment id provided.");
+          // لا order و لا pi
+          setError(
+            langParam === "ar"
+              ? "لم يتم استدعاء الصفحة مع رقم الطلب."
+              : "No order or payment id provided."
+          );
           setPayment(null);
         }
       } catch (e) {
         console.error("PaymentSuccess load error:", e);
         if (!mounted) return;
-        setError(langParam === "ar" ? "فشل في جلب بيانات الطلب." : "Failed to load payment data.");
+        setError(
+          langParam === "ar"
+            ? "فشل في جلب بيانات الطلب."
+            : "Failed to load payment data."
+        );
         setPayment(null);
       } finally {
         if (mounted) setLoading(false);
       }
     }
+
     load();
     return () => {
       mounted = false;
     };
   }, [order, pi, langParam]);
 
-  // 1) شغّل العداد بس لما الـ payment يبقى موجود
+  // ---------------------------------
+  // 2) util: نبني لينك الداشبورد الصحيح بالـ userId و order
+  // ---------------------------------
+  const buildProfileTarget = () => {
+    if (!payment) return clientDashboardPath;
+
+    // الـ userId اللي الداشبورد محتاجه عشان يجيب بيانات العميل
+    const userIdFromPayment =
+      payment.customerId ||
+      payment.customer_id ||
+      payment.userId ||
+      "";
+
+    // رقم الطلب عشان لو عايز تفتح التراكينج بتاعه
+    const orderId =
+      payment.requestId ||
+      payment.orderNumber ||
+      payment.id ||
+      order ||
+      "";
+
+    // مهم جداً: لازم دايمًا نحط userId
+    // ولو فيه orderId نزوده كمان
+    if (orderId) {
+      return `${clientDashboardPath}?userId=${encodeURIComponent(
+        userIdFromPayment
+      )}&order=${encodeURIComponent(orderId)}`;
+    }
+
+    return `${clientDashboardPath}?userId=${encodeURIComponent(
+      userIdFromPayment
+    )}`;
+  };
+
+  // ---------------------------------
+  // 3) شغّل العداد بعد ما الدفع يبقى معروف
+  // ---------------------------------
   useEffect(() => {
-    if (!payment) return; // ما نعدش قبل ما نجيب الطلب فعلاً
+    if (!payment) return; // ما نبدأش العداد غير بعد ما نجيب الطلب فعلاً
+
     setCountdown(6);
 
     const intervalId = setInterval(() => {
@@ -87,31 +157,26 @@ function PaymentSuccessInner({ langParam, search, router }) {
     };
   }, [payment]);
 
-  // 2) لما العداد يوصل 0 فعلاً، اعمل redirect
+  // ---------------------------------
+  // 4) أول ما العداد يوصل 0 رجعه للداشبورد
+  // ---------------------------------
   useEffect(() => {
     if (!payment) return;
     if (countdown > 0) return;
 
-    const orderId =
-      payment.requestId ||
-      payment.orderNumber ||
-      payment.id ||
-      order ||
-      null;
-
-    const target = orderId
-      ? `${clientDashboardPath}?order=${encodeURIComponent(orderId)}`
-      : clientDashboardPath;
-
     try {
-      router.replace(target); // replace = مافيش رجوع لصفحة الدفع
+      const target = buildProfileTarget();
+      router.replace(target); // replace = مايرجعش تاني لصفحة الدفع
     } catch (err) {
       console.error("Redirect failed:", err);
     }
-  }, [countdown, payment, router, order]);
+  }, [countdown, payment, router, buildProfileTarget]);
 
   const t = (ar, en) => (langParam === "ar" ? ar : en);
 
+  // ---------------------------------
+  // حالات التحميل / الخطأ
+  // ---------------------------------
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-900 to-emerald-900 text-white p-6">
@@ -132,7 +197,10 @@ function PaymentSuccessInner({ langParam, search, router }) {
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-900 to-emerald-900 text-white p-6">
         <div className="max-w-lg w-full bg-white/5 border border-white/10 rounded-2xl p-6 text-center">
           <h2 className="text-xl font-bold mb-2">
-            {t("تعذر عرض تفاصيل الدفع", "Unable to show payment details")}
+            {t(
+              "تعذر عرض تفاصيل الدفع",
+              "Unable to show payment details"
+            )}
           </h2>
           <p className="mb-4 text-sm text-white/80">
             {error || t("الطلب غير موجود.", "Order not found.")}
@@ -145,7 +213,18 @@ function PaymentSuccessInner({ langParam, search, router }) {
               {t("العودة للرئيسية", "Back to home")}
             </button>
             <button
-              onClick={() => router.replace(clientDashboardPath)}
+              onClick={() => {
+                try {
+                  // حتى في حالة الخطأ، هنحاول نبعته على لوحة العميل لو فيه userId جوه payment (نادراً ما يكون null هنا)
+                  const fallbackTarget = payment
+                    ? buildProfileTarget()
+                    : clientDashboardPath;
+                  router.replace(fallbackTarget);
+                } catch (e) {
+                  console.error("Dashboard redirect error:", e);
+                  router.replace(clientDashboardPath);
+                }
+              }}
               className="px-4 py-2 border rounded text-white border-white/20"
             >
               {t("الذهاب للوحة التحكم", "Go to dashboard")}
@@ -156,14 +235,18 @@ function PaymentSuccessInner({ langParam, search, router }) {
     );
   }
 
-  // safe access to fields (prevent rendering objects)
+  // ---------------------------------
+  // البيانات المعروضة في الشاشة
+  // ---------------------------------
   const service =
     payment.service && typeof payment.service === "object"
       ? payment.service
       : {};
+
   const tracking = String(
     payment.requestId || payment.orderNumber || payment.id || ""
   );
+
   const paidAmount = safeNumber(
     payment.paidAmount ?? payment.finalPrice ?? 0
   );
@@ -175,26 +258,14 @@ function PaymentSuccessInner({ langParam, search, router }) {
   try {
     if (payment.paidAt)
       paidAtStr = new Date(payment.paidAt).toLocaleString();
-  } catch (e) {
+  } catch {
     paidAtStr = String(payment.paidAt || "-");
   }
-
-  // helper to build profile-target with order id if available
-  const buildProfileTarget = () => {
-    const orderId =
-      payment.requestId ||
-      payment.orderNumber ||
-      payment.id ||
-      order ||
-      null;
-    return orderId
-      ? `${clientDashboardPath}?order=${encodeURIComponent(orderId)}`
-      : clientDashboardPath;
-  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-900 to-emerald-900 p-6">
       <div className="w-full max-w-3xl bg-white/5 border border-white/10 rounded-3xl p-6 shadow-lg text-slate-200">
+        {/* العنوان و علامة الصح */}
         <div className="flex items-center gap-4">
           <div className="w-16 h-16 bg-emerald-500 rounded-full flex items-center justify-center text-white text-3xl font-extrabold shadow">
             ✓
@@ -212,6 +283,7 @@ function PaymentSuccessInner({ langParam, search, router }) {
           </div>
         </div>
 
+        {/* تفاصيل الطلب و الملخص المالي */}
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
           <section className="bg-white/3 rounded-xl p-4">
             <h3 className="text-sm font-semibold text-white mb-3">
@@ -302,6 +374,7 @@ function PaymentSuccessInner({ langParam, search, router }) {
           </section>
         </div>
 
+        {/* ملاحظات */}
         <div className="mt-6 bg-white/3 rounded-xl p-4">
           <h3 className="text-sm font-semibold text-white mb-2">
             {t("ملاحظات", "Notes")}
@@ -314,6 +387,7 @@ function PaymentSuccessInner({ langParam, search, router }) {
           </p>
         </div>
 
+        {/* العداد + الأزرار */}
         <div className="mt-6 flex flex-col md:flex-row items-center justify-between gap-3">
           <div className="text-sm text-white/80">
             {t(
@@ -329,9 +403,8 @@ function PaymentSuccessInner({ langParam, search, router }) {
           <div className="flex gap-2">
             <button
               onClick={() => {
-                const target = buildProfileTarget();
                 try {
-                  router.replace(target);
+                  router.replace(buildProfileTarget());
                 } catch (e) {
                   console.error("Go now replace error:", e);
                 }
@@ -343,9 +416,8 @@ function PaymentSuccessInner({ langParam, search, router }) {
 
             <button
               onClick={() => {
-                const target = buildProfileTarget();
                 try {
-                  router.replace(target);
+                  router.replace(buildProfileTarget());
                 } catch (e) {
                   console.error("Back to profile replace error:", e);
                 }
