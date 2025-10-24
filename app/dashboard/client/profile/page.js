@@ -219,6 +219,30 @@ function ClientProfilePageInner({ userId }) {
     }
   );
 
+useEffect(() => {
+  if (typeof window === "undefined") return;
+  // push a history state so we can intercept Back
+  window.history.pushState(null, "", window.location.href);
+
+  const onPopState = (e) => {
+    // إذا المستخدم ما زال مسجّل الدخول (client != null) فنعيد دفعه لداخل البروفايل
+    if (client) {
+      // إعادة وضع نفس الحالة في التاريخ حتى يبقى داخل البروفايل
+      window.history.pushState(null, "", window.location.href);
+      // اختيارياً يمكنك إظهار toast أو تحذير صغير هنا
+      // مثال: toast.info("للبقاء في لوحة التحكم، الرجاء تسجيل الخروج أولاً");
+    } else {
+      // إن لم يكن مسجلاً، نسمح للمتصفح بالرجوع (ياخذ المستخدم للمكان الطبيعي أو لصفحة تسجيل الدخول حسب منطقك)
+    }
+  };
+
+  window.addEventListener("popstate", onPopState);
+  return () => {
+    window.removeEventListener("popstate", onPopState);
+  };
+}, [client]);
+
+
   // ========= SESSION AUTO LOGOUT =========
   useEffect(() => {
     const timer = setTimeout(() => {

@@ -70,7 +70,7 @@ function PaymentSuccessInner({ langParam, search, router }) {
     return () => { mounted = false; };
   }, [order, pi, langParam]);
 
-  // countdown redirect (ALWAYS redirect to client profile)
+  // countdown redirect (ALWAYS redirect to client profile) — use replace to avoid back to payment
   useEffect(() => {
     if (!payment) return;
     let mounted = true;
@@ -85,9 +85,10 @@ function PaymentSuccessInner({ langParam, search, router }) {
             const orderId = payment.requestId || payment.orderNumber || payment.id || order || null;
             const target = orderId ? `${clientDashboardPath}?order=${encodeURIComponent(orderId)}` : clientDashboardPath;
             try {
-              router.push(target);
+              // use replace so PaymentSuccess is replaced in history (user can't go back to it)
+              router.replace(target);
             } catch (err) {
-              console.error("Router push failed:", err);
+              console.error("Router replace failed:", err);
             }
           } catch (err) {
             console.error("Redirect error:", err);
@@ -120,8 +121,8 @@ function PaymentSuccessInner({ langParam, search, router }) {
           <h2 className="text-xl font-bold mb-2">{t("تعذر عرض تفاصيل الدفع", "Unable to show payment details")}</h2>
           <p className="mb-4 text-sm text-white/80">{error || t("الطلب غير موجود.", "Order not found.")}</p>
           <div className="flex items-center justify-center gap-3">
-            <button onClick={() => router.push("/")} className="px-4 py-2 bg-emerald-500 rounded text-white font-semibold">{t("العودة للرئيسية","Back to home")}</button>
-            <button onClick={() => router.push(clientDashboardPath)} className="px-4 py-2 border rounded text-white border-white/20">{t("الذهاب للوحة التحكم","Go to dashboard")}</button>
+            <button onClick={() => router.replace("/")} className="px-4 py-2 bg-emerald-500 rounded text-white font-semibold">{t("العودة للرئيسية","Back to home")}</button>
+            <button onClick={() => router.replace(clientDashboardPath)} className="px-4 py-2 border rounded text-white border-white/20">{t("الذهاب للوحة التحكم","Go to dashboard")}</button>
           </div>
         </div>
       </div>
@@ -189,12 +190,12 @@ function PaymentSuccessInner({ langParam, search, router }) {
           <div className="flex gap-2">
             <button onClick={() => {
               const target = buildProfileTarget();
-              try { router.push(target); } catch (e) { console.error("Go now push error:", e); }
+              try { router.replace(target); } catch (e) { console.error("Go now replace error:", e); }
             }} className="px-4 py-2 bg-emerald-500 rounded text-white font-semibold">{t("اذهب الآن","Go now")}</button>
 
             <button onClick={() => {
               const target = buildProfileTarget();
-              try { router.push(target); } catch (e) { console.error("Back to profile push error:", e); }
+              try { router.replace(target); } catch (e) { console.error("Back to profile replace error:", e); }
             }} className="px-4 py-2 border rounded text-white border-white/20">{t("الذهاب للبروفايل","Go to profile")}</button>
           </div>
         </div>
