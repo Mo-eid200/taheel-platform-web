@@ -6,7 +6,7 @@ import { Elements, CardElement, useStripe, useElements } from "@stripe/react-str
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import PaymentSuccessPage from "../PaymentSuccess/Page";
-import { addDoc, collection } from "firebase/firestore";
+import { doc, setDoc } from "firebase/firestore";
 import { firestore } from "@/lib/firebase.client";
 
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
@@ -50,7 +50,8 @@ const LANG = {
   }
 };
 
-// دالة إنشاء الطلب بعد الدفع وتوزيع العمولة
+// NOTE: this is still a client-side fallback for quick testing.
+// Recommended: move this logic server-side (/api/createOrder) for production.
 async function createOrderAfterPayment(paymentData, paymentId) {
   try {
     const {
@@ -66,11 +67,10 @@ async function createOrderAfterPayment(paymentData, paymentId) {
       lang,
       customerId,
       uploadedDocs
-    } = paymentData;
+    } = paymentData || {};
 
     const employeeData = service?.employeeData || {};
 
-    // تحقق من تخصص الموظف
     const serviceProviders = Array.isArray(service?.providers) ? service.providers : [];
     const isSpecialist =
       serviceProviders.some(
@@ -84,18 +84,21 @@ async function createOrderAfterPayment(paymentData, paymentId) {
     const assignedTo = isSpecialist ? employeeData?.id : "";
     const assignedToName = isSpecialist ? employeeData?.name : "";
 
+    // Decide doc id: prefer orderNumber if available, else use paymentId
+    const docId = orderNumber || paymentId;
+
     const orderDoc = {
-      orderNumber,
+      orderNumber: orderNumber || paymentId,
       clientId: customerId || service?.userId,
       clientName: service?.userName,
       serviceId: service?.id,
       serviceName: service?.name,
       price: Number(service?.price) || 0,
-      printingFee: Number(service?.printingFee) || 0,
-      vat: Number(service?.vat) || 0,
-      coinDiscount: Number(service?.coinDiscount) || 0,
+      printingFee: Number(service?.printingFee) || Number(printingFee) || 0,
+      vat: Number(service?.vat) || Number(vat) || 0,
+      coinDiscount: Number(service?.coinDiscount) || Number(coinDiscount) || 0,
       processingFee: Number(processingFee) || 0,
-      finalPrice: Number(finalPrice) || 0,
+      finalPrice: Number(finalPrice) || Number(totalPrice) || 0,
       status: "paid",
       providers: serviceProviders,
       assignedTo,
@@ -107,21 +110,25 @@ async function createOrderAfterPayment(paymentData, paymentId) {
       uploadedDocs: uploadedDocs || {}
     };
 
-    await addDoc(collection(firestore, "requests"), orderDoc);
+    // Use setDoc with merge:true so existing server-written fields (clientSecret, metadata, etc.) are preserved
+    await setDoc(doc(firestore, "requests", String(docId)), orderDoc, { merge: true });
 
-    // إضافة العمولة لو الموظف متخصص
+    // Add commission doc if needed (still client-side here)
     if (isSpecialist && Number(service?.printingFee) > 0) {
       const commission = +(Number(service?.printingFee) * 0.2).toFixed(2);
-      await addDoc(collection(firestore, "commissions"), {
+      await setDoc(doc(firestore, "commissions", `${docId}-creation`), {
         employeeId: employeeData?.id,
-        orderId: orderNumber,
+        orderId: orderNumber || paymentId,
         type: "creation",
         amount: commission,
         timestamp: new Date().toISOString()
-      });
+      }, { merge: true });
     }
+
+    return docId;
   } catch (error) {
     console.error("خطأ في إنشاء الطلب بعد الدفع:", error);
+    throw error;
   }
 }
 
@@ -135,17 +142,17 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
   const [msgSuccess, setMsgSuccess] = useState(false);
 
   // استخراج البيانات بأمان
-  const serviceName = paymentData.service?.name || paymentData.serviceName || "اسم غير متوفر";
-  const servicePrice = paymentData.service?.price || paymentData.price || 0;
-  const printingFee = paymentData.service?.printingFee || paymentData.printingFee || 0;
-  const vat = paymentData.service?.vat || paymentData.vat || 0;
-  const coinDiscount = paymentData.service?.coinDiscount || paymentData.coinDiscount || 0;
-  const totalPrice = paymentData.totalPrice || paymentData.price || 0;
-  const finalPrice = paymentData.finalPrice || paymentData.price || 0;
-  const processingFee = paymentData.processingFee || 0;
-  const orderNumber = paymentData.orderNumber;
-  const clientSecret = paymentData.clientSecret;
-  const userEmail = paymentData.userEmail || paymentData.service?.userEmail || "";
+  const serviceName = paymentData?.service?.name || paymentData?.serviceName || "اسم غير متوفر";
+  const servicePrice = paymentData?.service?.price || paymentData?.price || 0;
+  const printingFee = paymentData?.service?.printingFee || paymentData?.printingFee || 0;
+  const vat = paymentData?.service?.vat || paymentData?.vat || 0;
+  const coinDiscount = paymentData?.service?.coinDiscount || paymentData?.coinDiscount || 0;
+  const totalPrice = paymentData?.totalPrice || paymentData?.price || 0;
+  const finalPrice = paymentData?.finalPrice || paymentData?.price || 0;
+  const processingFee = paymentData?.processingFee || 0;
+  const orderNumber = paymentData?.orderNumber;
+  const clientSecret = paymentData?.clientSecret;
+  const userEmail = paymentData?.userEmail || paymentData?.service?.userEmail || "";
   const dir = lang === "ar" ? "rtl" : "ltr";
 
   const handleSubmit = async (e) => {
@@ -159,7 +166,6 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
       setLoading(false);
       return;
     }
-
     if (!clientSecret) {
       setPayMsg(lang === "ar" ? "بيانات الدفع ناقصة." : "Missing payment data.");
       setLoading(false);
@@ -167,15 +173,15 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
     }
 
     try {
-      // تنفيذ الدفع عبر Stripe Elements
+      // confirm card payment
       const { error: stripeError, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
         payment_method: {
-          card: elements.getElement(CardElement),
-        },
+          card: elements.getElement(CardElement)
+        }
       });
 
       if (stripeError) {
-        setPayMsg(stripeError.message);
+        setPayMsg(stripeError.message || (lang === "ar" ? "فشل الدفع." : "Payment failed."));
         setLoading(false);
         return;
       }
@@ -186,14 +192,26 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
         return;
       }
 
-      if (paymentIntent.status !== "succeeded") {
-        setPayMsg(lang === "ar" ? `الحالة: ${paymentIntent.status}` : `Status: ${paymentIntent.status}`);
+      if (String(paymentIntent.status).toLowerCase() !== "succeeded") {
+        setPayMsg((lang === "ar" ? "الحالة: " : "Status: ") + paymentIntent.status);
         setLoading(false);
         return;
       }
 
-      // ارسال اي شيء للسيرفر (مثل تأكيد الدفع) يمكن اضافته هنا (مثلاً /api/confirmPayment)
-      // إرسال الإيميل (non-blocking)
+      // non-blocking: notify server to create/update canonical request (confirmPayment endpoint)
+      (async () => {
+        try {
+          await fetch("/api/confirmPayment", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ paymentIntentId: paymentIntent.id, requestId: orderNumber ?? null })
+          });
+        } catch (e) {
+          console.warn("confirmPayment call failed:", e);
+        }
+      })();
+
+      // fire-and-forget send email
       (async () => {
         try {
           await fetch("/api/sendOrderEmail", {
@@ -212,37 +230,39 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
               paymentId: paymentIntent.id,
               paymentMethod: "gateway",
               lang
-            }),
+            })
           });
         } catch (e) {
           console.warn("sendOrderEmail failed:", e);
         }
       })();
 
-      // أنشئ الطلب المركزي بعد الدفع (server-side الأفضل، لكن هنا client-side createOrderAfterPayment)
+      // create/update request locally (merge) — returns doc id used
+      let docId = null;
       try {
-        await createOrderAfterPayment(paymentData, paymentIntent.id);
+        docId = await createOrderAfterPayment(paymentData, paymentIntent.id);
       } catch (err) {
         console.warn("createOrderAfterPayment failed:", err);
       }
 
-      // عرض نجاح قصير ثم التوجيه إلى صفحة النجاح التي أردت
+      // success feedback
       setMsgSuccess(true);
       setPayMsg(LANG[lang].success);
 
+      // redirect to PaymentSuccess route (prefer docId/orderNumber)
+      const orderForRedirect = orderNumber || docId || null;
       setTimeout(() => {
-        // استخدم orderNumber إن وُجد، وإلا مرّر paymentIntent id
-        if (orderNumber) {
-          router.push(`/payment/PaymentSuccess?order=${encodeURIComponent(orderNumber)}`);
-          if (typeof onSuccess === "function") onSuccess(paymentIntent.id, orderNumber);
+        if (orderForRedirect) {
+          router.push(`/payment/PaymentSuccess?order=${encodeURIComponent(orderForRedirect)}`);
         } else {
           router.push(`/payment/PaymentSuccess?pi=${encodeURIComponent(paymentIntent.id)}`);
-          if (typeof onSuccess === "function") onSuccess(paymentIntent.id, null);
         }
-      }, 900);
+        if (typeof onSuccess === "function") onSuccess(paymentIntent.id, orderForRedirect);
+      }, 700);
+
     } catch (err) {
-      console.error("خطأ في مسار الدفع:", err);
-      setPayMsg(LANG[lang].error);
+      console.error("Payment flow error:", err);
+      setPayMsg(lang === "ar" ? "حدث خطأ أثناء معالجة الدفع." : "Unexpected payment error.");
     } finally {
       setLoading(false);
     }
@@ -261,6 +281,7 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
       <Image src="/logo-transparent-large.png" width={70} height={70} alt="Logo" className="mx-auto mb-2 rounded-full bg-white shadow-lg ring-2 ring-emerald-500" />
       <div className="text-emerald-300 font-black text-xl mb-1 text-center">{LANG[lang].title}</div>
       <div className="text-gray-200 text-sm mb-4 text-center">{LANG[lang].subtitle}</div>
+
       <div className="bg-[#22304a]/70 rounded-xl p-4 mb-3 w-full text-center shadow">
         <table className="w-full text-sm text-right mb-2 border-separate border-spacing-y-1">
           <tbody>
@@ -287,18 +308,12 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
             <tr>
               <td className="text-gray-300">{LANG[lang].coinDiscount}:</td>
               <td>
-                {coinDiscount && Number(coinDiscount) > 0
-                  ? `-${Number(coinDiscount).toFixed(2)} د.إ`
-                  : "0 د.إ"}
+                {coinDiscount && Number(coinDiscount) > 0 ? `-${Number(coinDiscount).toFixed(2)} د.إ` : "0 د.إ"}
               </td>
             </tr>
             <tr>
               <td className="text-gray-300">{LANG[lang].processingFee}:</td>
-              <td>
-                {processingFee
-                  ? `${Number(processingFee).toFixed(2)} د.إ`
-                  : "0 د.إ"}
-              </td>
+              <td>{processingFee ? `${Number(processingFee).toFixed(2)} د.إ` : "0 د.إ"}</td>
             </tr>
             <tr>
               <td className="text-gray-300">{LANG[lang].totalBeforeDiscount}:</td>
@@ -311,6 +326,7 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
           </tbody>
         </table>
       </div>
+
       <div className="w-full mb-3">
         <label className="text-emerald-200 font-bold text-sm mb-1 block">{LANG[lang].cardLabel}</label>
         <div className="bg-white rounded-lg shadow p-2 border border-emerald-200">
@@ -323,19 +339,15 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
                   fontFamily: "inherit",
                   direction: dir,
                   letterSpacing: "0.8px",
-                  "::placeholder": {
-                    color: "#94a3b8",
-                  },
+                  "::placeholder": { color: "#94a3b8" }
                 },
-                invalid: {
-                  color: "#dc2626",
-                  iconColor: "#dc2626"
-                }
+                invalid: { color: "#dc2626", iconColor: "#dc2626" }
               }
             }}
           />
         </div>
       </div>
+
       <button
         type="submit"
         disabled={!stripe || loading}
@@ -343,17 +355,17 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
       >
         {loading ? LANG[lang].processing : `${LANG[lang].payBtn} (${Number(finalPrice).toFixed(2)} د.إ)`}
       </button>
+
       {payMsg && (
         <div className={`mt-3 text-center font-bold text-xs flex flex-row items-center justify-center gap-1 ${msgSuccess ? "text-emerald-400" : "text-red-600"}`}>
           {msgSuccess ? <span>✅</span> : <span>⚠️</span>}
           <span>{payMsg}</span>
         </div>
       )}
+
       <div className="w-full text-center mt-6 text-xs text-gray-400 font-semibold flex items-center justify-center gap-2">
         <span>🔒</span>
-        {lang === "ar"
-          ? "جميع بيانات الدفع مشفرة ومحمية عبر Stripe"
-          : "All payment data is encrypted and protected via Stripe"}
+        {lang === "ar" ? "جميع بيانات الدفع مشفرة ومحمية عبر Stripe" : "All payment data is encrypted and protected via Stripe"}
       </div>
     </form>
   );
