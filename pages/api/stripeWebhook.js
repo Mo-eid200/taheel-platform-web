@@ -4,7 +4,7 @@
 import Stripe from "stripe";
 import admin from "firebase-admin";
 
-// مهم جداً في Next.js pages API علشان ناخد raw body ونعمل verify للـ signature بتاع Stripe
+// لازم في Next.js API Routes علشان ناخد الـ raw body ونعمل verify للـ Stripe signature
 export const config = { api: { bodyParser: false } };
 
 // ---------- Firebase Admin init (idempotent) ----------
@@ -38,7 +38,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2022-11-15",
 });
 
-// ---------- small helpers ----------
+// ---------- helpers ----------
 function safeNum(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -47,7 +47,7 @@ function nowISO() {
   return new Date().toISOString();
 }
 
-// read raw body (for signature check)
+// ناخد الـ raw body من req (Stripe محتاج ده علشان يتحقق من الـ signature)
 async function getRawBody(req) {
   const chunks = [];
   for await (const chunk of req) {
@@ -56,11 +56,13 @@ async function getRawBody(req) {
   return Buffer.concat(chunks);
 }
 
-// load service metadata exactly like confirmPayment uses
-async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFallback = "") {
-  // نفس الـ logic اللي في confirmPayment:
-  // بنحاول نجيب service details من servicesByClientType/<clientType>
-  // ولو مش لاقيين نجرّب في client types تانية
+// نجيب تعريف الخدمة من servicesByClientType بنفس منطق confirmPayment
+async function fetchServiceFromByClientType(
+  serviceId,
+  clientType,
+  serviceNameFallback = ""
+) {
+  // بنحاول clientType الرئيسي الأول، ولو مش موجود نجرب باقي الأنواع
   const clientTypesToTry = clientType
     ? [clientType]
     : ["company", "resident", "nonresident", "other"];
@@ -72,19 +74,20 @@ async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFa
       if (!snap.exists) continue;
       const all = snap.data() || {};
 
-      // match direct key
+      // محاولة match بـ key المباشر
       if (serviceId && Object.prototype.hasOwnProperty.call(all, serviceId)) {
         return all[serviceId];
       }
 
-      // match on inner fields
+      // محاولة match من جوه الـ object
       for (const k of Object.keys(all)) {
         const s = all[k];
         if (!s) continue;
         if (
           (s.serviceId && String(s.serviceId) === String(serviceId)) ||
           (serviceId && String(k) === String(serviceId)) ||
-          (serviceNameFallback && String(s.name) === String(serviceNameFallback))
+          (serviceNameFallback &&
+            String(s.name) === String(serviceNameFallback))
         ) {
           return s;
         }
@@ -124,18 +127,20 @@ export default async function handler(req, res) {
     return res.status(400).send(`Webhook Error: ${err?.message}`);
   }
 
-  // 2) handle only payment_intent.succeeded
+  // 2) احنا مهتمين بس بـ payment_intent.succeeded
   if (event.type !== "payment_intent.succeeded") {
-    // بنرد 200 علشان Stripe مايعيدش spam للوبهوك
     return res.json({ received: true });
   }
 
   try {
-    // ---------- pull data from the event ----------
+    // =============================
+    //        Extract data
+    // =============================
     const pi = event.data.object;
     const paymentIntentId = pi.id;
     const md = pi.metadata || {};
 
+    // نوع العملية: شحن محفظة ولا خدمة عادية
     const requestType =
       md.requestType ||
       (md.serviceName &&
@@ -143,15 +148,20 @@ export default async function handler(req, res) {
         ? "wallet_recharge"
         : "service");
 
+    // requestId/ orderNumber اللي frontend بعته
     let reqId = md.requestId || md.orderNumber || null;
 
     const coinsGiven = safeNum(
       md.coinsGiven ?? md.cashbackCoins ?? md.coins ?? 0
     );
     const coinsUsed = safeNum(md.coinsUsed ?? 0);
+
     const printingFeeFromMeta = safeNum(md.printingFee ?? 0);
     const processingFeeMeta = safeNum(
-      md.processingFee ?? md.processing_fee ?? md.processing_fee_value ?? 0
+      md.processingFee ??
+        md.processing_fee ??
+        md.processing_fee_value ??
+        0
     );
 
     const serviceId = md.serviceId || "";
@@ -166,7 +176,7 @@ export default async function handler(req, res) {
     const assignedToNameMeta =
       md.assignedToName || md.assigned_to_name || "";
 
-    // attachments could be stringified JSON in metadata
+    // attachments جايين من الميتاداتا كـ JSON String
     let attachmentsMeta = {};
     if (md.attachments) {
       try {
@@ -176,10 +186,13 @@ export default async function handler(req, res) {
       }
     }
 
+    // Stripe بيدي المبلغ بالـ "أصغر وحدة" (فلس)، فـ /100 يطلع د.إ
     const amountSmallest = pi.amount_received ?? pi.amount ?? 0;
     const amountAED = Number((amountSmallest / 100).toFixed(2));
 
-    // 3) idempotency check
+    // =============================
+    //   3) idempotency check
+    // =============================
     const processedRef = db
       .collection("stripePaymentsProcessed")
       .doc(paymentIntentId);
@@ -189,7 +202,9 @@ export default async function handler(req, res) {
       return res.json({ received: true });
     }
 
-    // 4) try to locate the request (order) in Firestore
+    // =============================
+    //   4) Locate request (order)
+    // =============================
     let requestRef = null;
     let requestSnap = null;
 
@@ -209,47 +224,59 @@ export default async function handler(req, res) {
       }
     }
 
-    // 5) locate user doc (customer)
+    // =============================
+    //   5) Locate user (IMPORTANT)
+    // =============================
+    // الـ frontend لازم يكون بعِت md.customerId = نفس الـ document ID جوه users
     const customerIdMeta = md.customerId || md.userId || null;
-    let userSnap = null;
 
-    if (customerIdMeta) {
-      let q = await db
-        .collection("users")
-        .where("customerId", "==", String(customerIdMeta))
-        .limit(1)
-        .get();
-      if (!q.empty) {
-        userSnap = q.docs[0];
-      } else {
-        q = await db
-          .collection("users")
-          .where("uid", "==", String(customerIdMeta))
-          .limit(1)
-          .get();
-        if (!q.empty) userSnap = q.docs[0];
-      }
+    if (!customerIdMeta) {
+      console.warn(
+        "❗ Missing customerId in Stripe metadata for PI:",
+        paymentIntentId
+      );
+      await processedRef.set({
+        paymentIntentId,
+        processedAt: admin.firestore.FieldValue.serverTimestamp(),
+        note: "missing_customerId",
+        metadata: md,
+      });
+      return res.json({ received: true });
     }
 
-    // fallback: maybe the request already has customerId
-    if (!userSnap && requestSnap && requestSnap.exists) {
+    // هنا بنفترض إن document ID = customerIdMeta
+    let userRef = db.collection("users").doc(String(customerIdMeta));
+    let userSnap = await userRef.get();
+
+    // fallback بسيط: لو الـ request اللي لقيناه فيه customerId مختلف، جرّب تستعمله
+    if (!userSnap.exists && requestSnap && requestSnap.exists) {
       const rdata = requestSnap.data() || {};
-      const cid = rdata.customerId || rdata.customer_id || null;
-      if (cid) {
-        const q = await db
+      if (rdata.customerId && rdata.customerId !== customerIdMeta) {
+        const altUserRef = db
           .collection("users")
-          .where("customerId", "==", String(cid))
-          .limit(1)
-          .get();
-        if (!q.empty) {
-          userSnap = q.docs[0];
+          .doc(String(rdata.customerId));
+        const altSnap = await altUserRef.get();
+        if (altSnap.exists) {
+          console.log(
+            "➡ using fallback user:",
+            rdata.customerId,
+            "instead of",
+            customerIdMeta
+          );
+          userRef = altUserRef;
+          userSnap = altSnap;
         }
       }
     }
 
-    if (!userSnap) {
-      console.warn("❗ user not found for PI:", paymentIntentId, md);
-      // نسجل كـ processed علشان ما نعيدش فلوس بعدين بالغلط
+    // لو بعد كل ده برضه مفيش يوزر مسجل
+    if (!userSnap.exists) {
+      console.warn(
+        "❗ user not found for PI:",
+        paymentIntentId,
+        "customerId:",
+        customerIdMeta
+      );
       await processedRef.set({
         paymentIntentId,
         processedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -259,18 +286,20 @@ export default async function handler(req, res) {
       return res.json({ received: true });
     }
 
-    const userRef = userSnap.ref;
-
-    // 6) load service def (to embed same structure used in confirmPayment)
+    // =============================
+    //   6) Load service definition
+    // =============================
     const serviceDoc = await fetchServiceFromByClientType(
       serviceId,
       clientTypeMeta,
       serviceNameFromMeta
     );
 
-    // 7) run transaction: update/create request, update wallet/coins, log transaction, notification, mark processed
+    // =============================
+    //   7) Firestore Transaction
+    // =============================
     await db.runTransaction(async (tx) => {
-      // if some other worker handled this in the meantime -> stop
+      // متخليش اتنين workers يعالجوا نفس الـ PI مع بعض
       const procCheck = await tx.get(processedRef);
       if (procCheck.exists) {
         throw new Error("ALREADY_PROCESSED");
@@ -281,12 +310,12 @@ export default async function handler(req, res) {
         throw new Error("User disappeared during transaction");
       }
 
-      // we'll mutate this
+      // هنستعمل finalRequestId بعدين سواء كنا حدّثنا طلب قديم أو عملنا جديد
       let finalRequestId = reqId || null;
 
-      // ------------------
+      // --------------------------------
       // A) UPDATE OR CREATE REQUEST DOC
-      // ------------------
+      // --------------------------------
       if (requestSnap && requestSnap.exists) {
         // update existing request
         finalRequestId = String(requestSnap.id);
@@ -315,10 +344,13 @@ export default async function handler(req, res) {
               : processingFeeMeta || 0,
         };
 
-        // preserve existing attachments/clientSecret if available
+        // attachments & clientSecret
         if (rdata.attachments) {
           updates.attachments = rdata.attachments;
-        } else if (attachmentsMeta && Object.keys(attachmentsMeta).length) {
+        } else if (
+          attachmentsMeta &&
+          Object.keys(attachmentsMeta).length
+        ) {
           updates.attachments = attachmentsMeta;
         }
 
@@ -328,7 +360,7 @@ export default async function handler(req, res) {
           updates.clientSecret = md.clientSecret;
         }
 
-        // merge/refresh service map if we know it
+        // service embedding
         if (serviceDoc) {
           const svc = {
             name: serviceDoc.name || serviceNameFromMeta || "",
@@ -340,19 +372,29 @@ export default async function handler(req, res) {
               : [],
             category: serviceDoc.category || "",
             subcategory:
-              serviceDoc.subcategory || serviceDoc.subCategory || "",
+              serviceDoc.subcategory ||
+              serviceDoc.subCategory ||
+              "",
             clientPrice: safeNum(
-              serviceDoc.clientPrice ?? serviceDoc.price ?? amountAED
+              serviceDoc.clientPrice ??
+                serviceDoc.price ??
+                amountAED
             ),
             price: safeNum(
-              serviceDoc.price ?? serviceDoc.clientPrice ?? amountAED
+              serviceDoc.price ??
+                serviceDoc.clientPrice ??
+                amountAED
             ),
             printingFee: safeNum(
-              serviceDoc.printingFee ?? printingFeeFromMeta ?? 0
+              serviceDoc.printingFee ??
+                printingFeeFromMeta ??
+                0
             ),
             tax: safeNum(serviceDoc.tax ?? 0),
             description: serviceDoc.description || "",
-            requiredDocuments: Array.isArray(serviceDoc.requiredDocuments)
+            requiredDocuments: Array.isArray(
+              serviceDoc.requiredDocuments
+            )
               ? serviceDoc.requiredDocuments
               : [],
             active:
@@ -375,7 +417,6 @@ export default async function handler(req, res) {
           updates.serviceName = svc.name;
           updates.serviceId = svc.serviceId;
           updates.providers = svc.providers;
-          // don't lose a printingFee already in doc
           updates.printingFee =
             rdata.printingFee ??
             svc.printingFee ??
@@ -383,12 +424,11 @@ export default async function handler(req, res) {
             0;
           updates.requiredDocuments = svc.requiredDocuments;
         } else {
-          // fallback: only metadata
           if (serviceNameFromMeta) updates.serviceName = serviceNameFromMeta;
           if (serviceId) updates.serviceId = serviceId;
         }
 
-        // assignedTo info
+        // assignedTo
         updates.assignedTo = rdata.assignedTo || assignedToMeta || "";
         updates.assignedToName =
           rdata.assignedToName || assignedToNameMeta || "";
@@ -414,19 +454,29 @@ export default async function handler(req, res) {
               : [],
             category: serviceDoc.category || "",
             subcategory:
-              serviceDoc.subcategory || serviceDoc.subCategory || "",
+              serviceDoc.subcategory ||
+              serviceDoc.subCategory ||
+              "",
             clientPrice: safeNum(
-              serviceDoc.clientPrice ?? serviceDoc.price ?? amountAED
+              serviceDoc.clientPrice ??
+                serviceDoc.price ??
+                amountAED
             ),
             price: safeNum(
-              serviceDoc.price ?? serviceDoc.clientPrice ?? amountAED
+              serviceDoc.price ??
+                serviceDoc.clientPrice ??
+                amountAED
             ),
             printingFee: safeNum(
-              serviceDoc.printingFee ?? printingFeeFromMeta ?? 0
+              serviceDoc.printingFee ??
+                printingFeeFromMeta ??
+                0
             ),
             tax: safeNum(serviceDoc.tax ?? 0),
             description: serviceDoc.description || "",
-            requiredDocuments: Array.isArray(serviceDoc.requiredDocuments)
+            requiredDocuments: Array.isArray(
+              serviceDoc.requiredDocuments
+            )
               ? serviceDoc.requiredDocuments
               : [],
             active:
@@ -449,7 +499,7 @@ export default async function handler(req, res) {
         const reqObj = {
           requestId: finalRequestId,
           paymentIntentId: paymentIntentId,
-          customerId: userRef.id,
+          customerId: userRef.id, // ده هو نفس الـ doc id بتاع اليوزر
           serviceId: serviceMap?.serviceId || serviceId || "",
           serviceName: serviceMap?.name || serviceNameFromMeta || "",
           requestType,
@@ -489,13 +539,13 @@ export default async function handler(req, res) {
 
         tx.set(db.collection("requests").doc(finalRequestId), reqObj);
 
-        // بقى عندنا requestRef/ requestSnap virtual بعد الإنشاء
+        // حدّث الـ refs عشان باقي الكود لو محتاجه
         requestRef = db.collection("requests").doc(finalRequestId);
       }
 
-      // ------------------
+      // --------------------------------
       // B) WALLET / COINS UPDATE
-      // ------------------
+      // --------------------------------
       if (requestType === "wallet_recharge") {
         const prevWallet = Number(
           uDoc.data().walletBalance ?? uDoc.data().wallet ?? 0
@@ -515,22 +565,20 @@ export default async function handler(req, res) {
             admin.firestore.FieldValue.serverTimestamp(),
         });
       } else {
-        // خدمة عادية
+        // خدمة عادية = زوّد coins بس لو فيه bonus
         if (coinsGiven > 0) {
           tx.update(userRef, {
-            coins: admin.firestore.FieldValue.increment(
-              coinsGiven
-            ),
+            coins: admin.firestore.FieldValue.increment(coinsGiven),
           });
         }
       }
 
-      // ------------------
+      // --------------------------------
       // C) TRANSACTION RECORD
-      // ------------------
+      // --------------------------------
       const txRef = db.collection("transactions").doc();
       tx.set(txRef, {
-        userId: userRef.id,
+        userId: userRef.id, // نفس الـ customerId
         requestId: finalRequestId,
         amount: amountAED,
         currency: pi.currency || "aed",
@@ -538,13 +586,12 @@ export default async function handler(req, res) {
         status: "succeeded",
         paymentIntentId: paymentIntentId,
         coinsAdded: coinsGiven,
-        createdAt:
-          admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      // ------------------
-      // D) NOTIFICATION (زي confirmPayment)
-      // ------------------
+      // --------------------------------
+      // D) NOTIFICATION
+      // --------------------------------
       const notifRef = db.collection("notifications").doc();
       tx.set(notifRef, {
         targetId: userRef.id,
@@ -557,8 +604,7 @@ export default async function handler(req, res) {
             : `تم استلام دفعتك بقيمة ${amountAED.toFixed(
                 2
               )} د.إ الآن. رقم الطلب: ${finalRequestId}`,
-        timestamp:
-          admin.firestore.FieldValue.serverTimestamp(),
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
         isRead: false,
         metadata: {
           orderId: finalRequestId,
@@ -566,26 +612,24 @@ export default async function handler(req, res) {
         },
       });
 
-      // ------------------
-      // E) MARK AS PROCESSED (idempotency key)
-      // ------------------
+      // --------------------------------
+      // E) MARK AS PROCESSED
+      // --------------------------------
       tx.set(processedRef, {
         paymentIntentId,
-        processedAt:
-          admin.firestore.FieldValue.serverTimestamp(),
+        processedAt: admin.firestore.FieldValue.serverTimestamp(),
         requestId: finalRequestId,
         amount: amountAED,
       });
     });
 
-    // done
     console.log(
       `✅ webhook processed ${paymentIntentId} (AED ${amountAED})`
     );
     return res.json({ received: true });
   } catch (err) {
     if (err.message === "ALREADY_PROCESSED") {
-      // لو دخلنا الـ txn في نفس اللحظة مرتين
+      // في حالة الاتنين استجابوا في نفس اللحظة
       return res.json({ received: true });
     }
     console.error("❌ webhook processing error:", err);

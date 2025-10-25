@@ -34,6 +34,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2022-11-15",
 });
 
+// helpers
 function safeNum(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -42,7 +43,7 @@ function nowISO() {
   return new Date().toISOString();
 }
 
-// helper: fetch service data from servicesByClientType/{clientType}
+// نفس اللى في الويب هوك: نقرأ الخدمة من servicesByClientType
 async function fetchServiceFromByClientType(
   serviceId,
   clientType,
@@ -51,17 +52,20 @@ async function fetchServiceFromByClientType(
   const clientTypesToTry = clientType
     ? [clientType]
     : ["company", "resident", "nonresident", "other"];
+
   for (const ct of clientTypesToTry) {
     try {
       const docRef = db.collection("servicesByClientType").doc(String(ct));
       const snap = await docRef.get();
       if (!snap.exists) continue;
       const all = snap.data() || {};
+
       // direct key match
       if (serviceId && Object.prototype.hasOwnProperty.call(all, serviceId)) {
         return all[serviceId];
       }
-      // search by inner id or name
+
+      // match by fields
       for (const k of Object.keys(all)) {
         const s = all[k];
         if (!s) continue;
@@ -77,6 +81,7 @@ async function fetchServiceFromByClientType(
       console.warn("fetchServiceFromByClientType error for", ct, e?.message || e);
     }
   }
+
   return null;
 }
 
@@ -89,16 +94,21 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Missing paymentIntentId" });
 
   try {
-    // Retrieve PaymentIntent
+    // 1) هات الـ PaymentIntent من Stripe
     const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
-    if (!pi) return res.status(400).json({ error: "PaymentIntent not found" });
+    if (!pi) {
+      return res.status(400).json({ error: "PaymentIntent not found" });
+    }
     if (String(pi.status).toLowerCase() !== "succeeded") {
-      return res
-        .status(400)
-        .json({ error: "PaymentIntent not succeeded", status: pi.status });
+      return res.status(400).json({
+        error: "PaymentIntent not succeeded",
+        status: pi.status,
+      });
     }
 
+    // 2) جهّز الداتا من الـ metadata
     const md = pi.metadata || {};
+
     let reqId =
       providedRequestId || md.requestId || md.orderNumber || null;
 
@@ -109,21 +119,29 @@ export default async function handler(req, res) {
         ? "wallet_recharge"
         : "service");
 
-    const coinsGiven = safeNum(md.coinsGiven ?? md.cashbackCoins ?? md.coins ?? 0);
+    const coinsGiven = safeNum(
+      md.coinsGiven ?? md.cashbackCoins ?? md.coins ?? 0
+    );
     const coinsUsed = safeNum(md.coinsUsed ?? 0);
+
     const printingFeeFromMeta = safeNum(md.printingFee ?? 0);
+    const processingFeeMeta = safeNum(
+      md.processingFee ??
+        md.processing_fee ??
+        md.processing_fee_value ??
+        0
+    );
+
     const serviceId = md.serviceId || "";
     const serviceNameFromMeta = md.serviceName || "";
     const clientTypeMeta =
       md.clientType || md.client_type || md.serviceClientType || "";
+
     const assignedToMeta = md.assignedTo || md.assigned_to || "";
     const assignedToNameMeta =
       md.assignedToName || md.assigned_to_name || "";
-    const processingFeeMeta = safeNum(
-      md.processingFee ?? md.processing_fee ?? md.processing_fee_value ?? 0
-    );
 
-    // safe parse attachments
+    // attachments ممكن تكون جايه كـ JSON string
     let attachmentsMeta = null;
     if (md.attachments) {
       try {
@@ -133,9 +151,11 @@ export default async function handler(req, res) {
       }
     }
 
+    // Stripe بيرجع الفلوس بالـ "أصغر وحدة" (فلس)، فـ /100 = AED
     const amountSmallest = pi.amount_received ?? pi.amount ?? 0;
     const amountAED = Number((amountSmallest / 100).toFixed(2));
 
+    // 3) idempotency check: stripePaymentsProcessed
     const processedRef = db
       .collection("stripePaymentsProcessed")
       .doc(paymentIntentId);
@@ -150,9 +170,10 @@ export default async function handler(req, res) {
       });
     }
 
-    // locate request doc
+    // 4) لو الطلب موجود أصلاً، جيبه
     let requestRef = null;
     let requestSnap = null;
+
     if (reqId) {
       requestRef = db.collection("requests").doc(String(reqId));
       requestSnap = await requestRef.get();
@@ -169,75 +190,98 @@ export default async function handler(req, res) {
       }
     }
 
-    // find user
-    let userSnap = null;
+    // 5) هات اليوزر بنفس النظام الجديد:
+    // لازم الموبايل / الويب يكون حاطط md.customerId = نفس ID الدوكيومنت في users
     const customerIdMeta = md.customerId || md.userId || null;
-    if (customerIdMeta) {
-      let q = await db
-        .collection("users")
-        .where("customerId", "==", String(customerIdMeta))
-        .limit(1)
-        .get();
-      if (!q.empty) userSnap = q.docs[0];
-      else {
-        q = await db
-          .collection("users")
-          .where("uid", "==", String(customerIdMeta))
-          .limit(1)
-          .get();
-        if (!q.empty) userSnap = q.docs[0];
-      }
+    if (!customerIdMeta) {
+      // مفيش عميل وبالتالي مفيش حد نحطله فلوس/coins
+      await processedRef.set({
+        paymentIntentId,
+        processedAt: admin.firestore.FieldValue.serverTimestamp(),
+        note: "missing_customerId",
+        metadata: md,
+      });
+      return res
+        .status(400)
+        .json({ error: "Missing customerId in metadata" });
     }
-    if (!userSnap && requestSnap && requestSnap.exists) {
+
+    // هنا بقى الشغل الجديد: users/<customerIdMeta>
+    let userRef = db.collection("users").doc(String(customerIdMeta));
+    let userSnap = await userRef.get();
+
+    // fallback: لو لقيت request قديم و فيه customerId مختلف، جرّب تروح عليه
+    if (!userSnap.exists && requestSnap && requestSnap.exists) {
       const rdata = requestSnap.data() || {};
-      const cid = rdata.customerId || rdata.customer_id || null;
-      if (cid) {
-        const q = await db
+      if (rdata.customerId && rdata.customerId !== customerIdMeta) {
+        const altUserRef = db
           .collection("users")
-          .where("customerId", "==", String(cid))
-          .limit(1)
-          .get();
-        if (!q.empty) userSnap = q.docs[0];
+          .doc(String(rdata.customerId));
+        const altSnap = await altUserRef.get();
+        if (altSnap.exists) {
+          console.log(
+            "➡ using fallback user:",
+            rdata.customerId,
+            "instead of",
+            customerIdMeta
+          );
+          userRef = altUserRef;
+          userSnap = altSnap;
+        }
       }
     }
 
-    if (!userSnap) {
+    if (!userSnap.exists) {
+      // لسه مفيش حتى بعد الـ fallback
       await processedRef.set({
         paymentIntentId,
         processedAt: admin.firestore.FieldValue.serverTimestamp(),
         note: "user_not_found",
         metadata: md,
       });
-      console.warn("confirmPayment: user not found", { paymentIntentId, md });
+      console.warn("confirmPayment: user not found", {
+        paymentIntentId,
+        md,
+      });
       return res.status(400).json({ error: "User not found" });
     }
 
-    const userRef = userSnap.ref;
+    // 6) هات تعريف السيرفس علشان نسجله جوا الطلب
     const serviceDoc = await fetchServiceFromByClientType(
       serviceId,
       clientTypeMeta,
       serviceNameFromMeta
     );
 
-    // -------------------- TRANSACTION --------------------
+    // =========================
+    // 7) Firestore Transaction
+    // =========================
     let finalRequestId = reqId || null;
 
     await db.runTransaction(async (tx) => {
+      // double-check idempotency جوا الـ txn
       const proc = await tx.get(processedRef);
       if (proc.exists) throw new Error("ALREADY_PROCESSED");
 
       const uDoc = await tx.get(userRef);
-      if (!uDoc.exists) throw new Error("User disappeared during transaction");
+      if (!uDoc.exists)
+        throw new Error("User disappeared during transaction");
 
+      // ده هنستخدمه جوه السطور
       let reqIdToUse = reqId;
 
+      // --------------------------------
+      // A) UPDATE EXISTING REQUEST
+      // --------------------------------
       if (requestSnap && requestSnap.exists) {
-        // ===== update existing =====
         reqIdToUse = String(requestSnap.id);
+        finalRequestId = reqIdToUse;
+
         const rdata = requestSnap.data() || {};
         const history = Array.isArray(rdata.statusHistory)
           ? rdata.statusHistory.slice()
           : [];
+
         history.push({
           status: "paid",
           timestamp: nowISO(),
@@ -257,14 +301,21 @@ export default async function handler(req, res) {
               : processingFeeMeta || 0,
         };
 
-        if (rdata.attachments) updates.attachments = rdata.attachments;
-        else if (attachmentsMeta) updates.attachments = attachmentsMeta;
+        // attachments
+        if (rdata.attachments) {
+          updates.attachments = rdata.attachments;
+        } else if (attachmentsMeta) {
+          updates.attachments = attachmentsMeta;
+        }
 
-        if (rdata.clientSecret)
+        // clientSecret
+        if (rdata.clientSecret) {
           updates.clientSecret = rdata.clientSecret;
-        else if (md.clientSecret)
+        } else if (md.clientSecret) {
           updates.clientSecret = md.clientSecret;
+        }
 
+        // Inject service map
         if (serviceDoc) {
           const svc = {
             name: serviceDoc.name || serviceNameFromMeta || "",
@@ -275,19 +326,30 @@ export default async function handler(req, res) {
               ? [serviceDoc.providers]
               : [],
             category: serviceDoc.category || "",
-            subcategory: serviceDoc.subcategory || serviceDoc.subCategory || "",
+            subcategory:
+              serviceDoc.subcategory ||
+              serviceDoc.subCategory ||
+              "",
             clientPrice: safeNum(
-              serviceDoc.clientPrice ?? serviceDoc.price ?? amountAED
+              serviceDoc.clientPrice ??
+                serviceDoc.price ??
+                amountAED
             ),
             price: safeNum(
-              serviceDoc.price ?? serviceDoc.clientPrice ?? amountAED
+              serviceDoc.price ??
+                serviceDoc.clientPrice ??
+                amountAED
             ),
             printingFee: safeNum(
-              serviceDoc.printingFee ?? printingFeeFromMeta ?? 0
+              serviceDoc.printingFee ??
+                printingFeeFromMeta ??
+                0
             ),
             tax: safeNum(serviceDoc.tax ?? 0),
             description: serviceDoc.description || "",
-            requiredDocuments: Array.isArray(serviceDoc.requiredDocuments)
+            requiredDocuments: Array.isArray(
+              serviceDoc.requiredDocuments
+            )
               ? serviceDoc.requiredDocuments
               : [],
             active:
@@ -305,30 +367,38 @@ export default async function handler(req, res) {
                 ? serviceDoc.requireUpload
                 : false,
           };
+
           updates.service = svc;
           updates.serviceName = svc.name;
           updates.serviceId = svc.serviceId;
           updates.providers = svc.providers;
-          updates.printingFee = rdata.printingFee ?? svc.printingFee;
+          updates.printingFee =
+            rdata.printingFee ??
+            svc.printingFee ??
+            printingFeeFromMeta ??
+            0;
           updates.requiredDocuments = svc.requiredDocuments;
         } else {
           if (serviceNameFromMeta) updates.serviceName = serviceNameFromMeta;
           if (serviceId) updates.serviceId = serviceId;
         }
 
+        // موظف المراجعة
         updates.assignedTo =
           rdata.assignedTo || assignedToMeta || "";
         updates.assignedToName =
           rdata.assignedToName || assignedToNameMeta || "";
 
         tx.update(requestRef, updates);
-        finalRequestId = reqIdToUse;
       } else {
-        // ===== create new =====
-        if (!reqIdToUse)
-          reqIdToUse = `REQ-${Math.floor(100 + Math.random() * 900)}-${Math.floor(
-            1000 + Math.random() * 9000
-          )}`;
+        // --------------------------------
+        // B) CREATE NEW REQUEST
+        // --------------------------------
+        if (!reqIdToUse) {
+          reqIdToUse = `REQ-${Math.floor(
+            100 + Math.random() * 900
+          )}-${Math.floor(1000 + Math.random() * 9000)}`;
+        }
         finalRequestId = reqIdToUse;
 
         let serviceMap = null;
@@ -342,19 +412,30 @@ export default async function handler(req, res) {
               ? [serviceDoc.providers]
               : [],
             category: serviceDoc.category || "",
-            subcategory: serviceDoc.subcategory || serviceDoc.subCategory || "",
+            subcategory:
+              serviceDoc.subcategory ||
+              serviceDoc.subCategory ||
+              "",
             clientPrice: safeNum(
-              serviceDoc.clientPrice ?? serviceDoc.price ?? amountAED
+              serviceDoc.clientPrice ??
+                serviceDoc.price ??
+                amountAED
             ),
             price: safeNum(
-              serviceDoc.price ?? serviceDoc.clientPrice ?? amountAED
+              serviceDoc.price ??
+                serviceDoc.clientPrice ??
+                amountAED
             ),
             printingFee: safeNum(
-              serviceDoc.printingFee ?? printingFeeFromMeta ?? 0
+              serviceDoc.printingFee ??
+                printingFeeFromMeta ??
+                0
             ),
             tax: safeNum(serviceDoc.tax ?? 0),
             description: serviceDoc.description || "",
-            requiredDocuments: Array.isArray(serviceDoc.requiredDocuments)
+            requiredDocuments: Array.isArray(
+              serviceDoc.requiredDocuments
+            )
               ? serviceDoc.requiredDocuments
               : [],
             active:
@@ -377,12 +458,16 @@ export default async function handler(req, res) {
         const reqObj = {
           requestId: reqIdToUse,
           paymentIntentId,
-          customerId: userRef.id,
+          customerId: userRef.id, // IMPORTANT: ده نفس الـ doc id جوه users
           serviceId: serviceMap?.serviceId || serviceId || "",
-          serviceName: serviceMap?.name || serviceNameFromMeta || "",
+          serviceName:
+            serviceMap?.name || serviceNameFromMeta || "",
           requestType,
           paidAmount: amountAED,
-          printingFee: serviceMap?.printingFee ?? printingFeeFromMeta ?? 0,
+          printingFee:
+            serviceMap?.printingFee ??
+            printingFeeFromMeta ??
+            0,
           coinsGiven,
           coinsUsed,
           createdAt: nowISO(),
@@ -404,78 +489,120 @@ export default async function handler(req, res) {
           assignedTo: assignedToMeta || "",
           assignedToName: assignedToNameMeta || "",
           ...(serviceMap
-            ? { service: serviceMap, requiredDocuments: serviceMap.requiredDocuments || [] }
+            ? {
+                service: serviceMap,
+                requiredDocuments:
+                  serviceMap.requiredDocuments || [],
+              }
             : {}),
         };
 
         tx.set(db.collection("requests").doc(reqIdToUse), reqObj);
       }
 
-      // wallet / coins
+      // --------------------------------
+      // C) UPDATE WALLET / COINS
+      // --------------------------------
       if (requestType === "wallet_recharge") {
         const prevWallet = Number(
           uDoc.data().walletBalance ?? uDoc.data().wallet ?? 0
         );
         const newWallet = +(prevWallet + amountAED).toFixed(2);
+
         tx.update(userRef, {
           walletBalance: newWallet,
           ...(coinsGiven > 0
-            ? { coins: admin.firestore.FieldValue.increment(coinsGiven) }
+            ? {
+                coins:
+                  admin.firestore.FieldValue.increment(
+                    coinsGiven
+                  ),
+              }
             : {}),
-          lastWalletUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          lastWalletUpdatedAt:
+            admin.firestore.FieldValue.serverTimestamp(),
         });
       } else {
-        if (coinsGiven > 0)
+        if (coinsGiven > 0) {
           tx.update(userRef, {
-            coins: admin.firestore.FieldValue.increment(coinsGiven),
+            coins: admin.firestore.FieldValue.increment(
+              coinsGiven
+            ),
           });
+        }
       }
 
-      // transaction record
+      // --------------------------------
+      // D) TRANSACTION LOG
+      // --------------------------------
       const txRef = db.collection("transactions").doc();
       tx.set(txRef, {
         userId: userRef.id,
-        requestId: reqIdToUse,
+        requestId: finalRequestId,
         amount: amountAED,
         currency: pi.currency || "aed",
         type: "credit",
         status: "succeeded",
         paymentIntentId,
         coinsAdded: coinsGiven,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt:
+          admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      // notification
+      // --------------------------------
+      // E) NOTIFICATION
+      // --------------------------------
       const notifRef = db.collection("notifications").doc();
       tx.set(notifRef, {
         targetId: userRef.id,
-        title: md.lang === "en" ? "Payment Confirmed" : "تم تأكيد الدفع",
+        title:
+          md.lang === "en"
+            ? "Payment Confirmed"
+            : "تم تأكيد الدفع",
         body:
           md.lang === "en"
-            ? `Your payment of ${amountAED.toFixed(2)} AED was received. Order: ${reqIdToUse}`
+            ? `Your payment of ${amountAED.toFixed(
+                2
+              )} AED was received. Order: ${finalRequestId}`
             : `تم استلام دفعتك بقيمة ${amountAED.toFixed(
                 2
-              )} د.إ الآن. رقم الطلب: ${reqIdToUse}`,
-        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+              )} د.إ الآن. رقم الطلب: ${finalRequestId}`,
+        timestamp:
+          admin.firestore.FieldValue.serverTimestamp(),
         isRead: false,
-        metadata: { orderId: reqIdToUse, paymentIntentId },
+        metadata: {
+          orderId: finalRequestId,
+          paymentIntentId,
+        },
       });
 
-      // mark processed
+      // --------------------------------
+      // F) MARK AS PROCESSED
+      // --------------------------------
       tx.set(processedRef, {
         paymentIntentId,
-        processedAt: admin.firestore.FieldValue.serverTimestamp(),
-        requestId: reqIdToUse,
+        processedAt:
+          admin.firestore.FieldValue.serverTimestamp(),
+        requestId: finalRequestId,
         amount: amountAED,
       });
-    }); // end transaction
+    });
 
-    return res.status(200).json({ ok: true, orderNumber: finalRequestId });
+    // كله تمام
+    return res.status(200).json({
+      ok: true,
+      orderNumber: finalRequestId,
+    });
   } catch (err) {
     if (err.message === "ALREADY_PROCESSED") {
-      return res.status(200).json({ ok: true, alreadyProcessed: true });
+      return res
+        .status(200)
+        .json({ ok: true, alreadyProcessed: true });
     }
+
     console.error("confirmPayment error:", err);
-    return res.status(500).json({ error: err.message || "internal_error" });
+    return res
+      .status(500)
+      .json({ error: err.message || "internal_error" });
   }
 }

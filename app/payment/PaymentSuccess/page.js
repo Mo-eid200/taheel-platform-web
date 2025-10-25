@@ -13,9 +13,10 @@ import {
 import { firestore } from "@/lib/firebase.client";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
-/* صفحة نجاح الدفع */
+// أين هنرجع العميل بعد الدفع
 const DASHBOARD_BASE = "/dashboard/client";
 
+// أرقام نظيفة
 function safeNumber(v) {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
@@ -24,7 +25,11 @@ function fmtAmount(v) {
   return safeNumber(v).toFixed(2);
 }
 
+// ------------- Component الأساسي الداخلي -------------
 function PaymentSuccessInner({ langParam, search, router }) {
+  // القيم اللي جايين في URL
+  // مثال: /payment/PaymentSuccess?order=REQ-123-4567&lang=ar
+  // أو:    /payment/PaymentSuccess?pi=pi_1234abcd&lang=en
   const order = search.get("order");
   const pi = search.get("pi");
 
@@ -33,7 +38,10 @@ function PaymentSuccessInner({ langParam, search, router }) {
   const [error, setError] = useState("");
   const [countdown, setCountdown] = useState(6);
 
-  // 1) حمّل بيانات الطلب / الدفع
+  // small inline translator
+  const t = (ar, en) => (langParam === "ar" ? ar : en);
+
+  // 1) تحميل بيانات الطلب من Firestore
   useEffect(() => {
     let mounted = true;
 
@@ -43,25 +51,29 @@ function PaymentSuccessInner({ langParam, search, router }) {
 
       try {
         if (order) {
-          // جرب تجيب الطلب بالـ requestId مباشرة
+          // لو معاك requestId (زي REQ-123-4567)
           const ref = doc(firestore, "requests", order);
           const snap = await getDoc(ref);
 
           if (!mounted) return;
 
           if (!snap.exists()) {
-            setError(langParam === "ar" ? "لم يتم العثور على الطلب." : "Order not found.");
+            setError(
+              langParam === "ar"
+                ? "لم يتم العثور على الطلب."
+                : "Order not found."
+            );
             setPayment(null);
           } else {
             setPayment({ id: snap.id, ...snap.data() });
           }
         } else if (pi) {
-          // fallback: لو جالك بس paymentIntentId
-          const q = query(
+          // لو معاك بس paymentIntentId من Stripe
+          const qRef = query(
             collection(firestore, "requests"),
             where("paymentIntentId", "==", pi)
           );
-          const qs = await getDocs(q);
+          const qs = await getDocs(qRef);
 
           if (!mounted) return;
 
@@ -77,7 +89,7 @@ function PaymentSuccessInner({ langParam, search, router }) {
             setPayment({ id: docSnap.id, ...docSnap.data() });
           }
         } else {
-          // لو الصفحة اتفتحت من غير order ولا pi
+          // مفيش order ولا pi في ال URL
           setError(
             langParam === "ar"
               ? "لم يتم استدعاء الصفحة مع رقم الطلب."
@@ -102,44 +114,38 @@ function PaymentSuccessInner({ langParam, search, router }) {
     }
 
     load();
-
     return () => {
       mounted = false;
     };
   }, [order, pi, langParam]);
 
-  // ========= helper functions =========
-
-  // نحدد الـ userId علشان نرجّع العميل للوحة التحكم السليمة
+  // 2) getCustomerIdSafe + buildDashboardTarget
   function getCustomerIdSafe(payObj) {
     if (!payObj) return null;
-    // هو بيتخزن عندنا في الطلب كـ customerId
+    // backend بيحط customerId جوه الطلب (confirmPayment/webhook)
     return payObj.customerId || null;
   }
 
-  // اللينك النهائي اللي هنروح له بعد الدفع
   function buildDashboardTarget(payObj) {
     const customerId = getCustomerIdSafe(payObj);
     const langFinal = langParam || "ar";
 
     if (customerId) {
-      // المطلوب منك:
-      // https://www.taheel.ae/dashboard/client?userId=RES-200-9180&lang=ar
+      // /dashboard/client?userId=RES-200-9180&lang=ar
       return `${DASHBOARD_BASE}?userId=${encodeURIComponent(
         customerId
       )}&lang=${encodeURIComponent(langFinal)}`;
     }
 
-    // fallback لو لأي سبب مش لاقين customerId
+    // fallback لو الطلب مفيهوش customerId لأي سبب
     return `${DASHBOARD_BASE}?lang=${encodeURIComponent(langFinal)}`;
   }
 
-  // نبدأ العداد بس بعد ما الـ payment يكون موجود
+  // 3) تشغيل العداد لما الـ payment يكون جاهز
   useEffect(() => {
     if (!payment) return;
 
-    setCountdown(6);
-
+    setCountdown(6); // reset كل مرة بنجيب طلب جديد
     const intervalId = setInterval(() => {
       setCountdown((c) => (c > 0 ? c - 1 : 0));
     }, 1000);
@@ -147,25 +153,83 @@ function PaymentSuccessInner({ langParam, search, router }) {
     return () => clearInterval(intervalId);
   }, [payment]);
 
-  // أول ما العداد يوصل صفر → redirect
+  // 4) أول ما العداد يوصل صفر → redirect للداشبورد
   useEffect(() => {
     if (!payment) return;
     if (countdown > 0) return;
 
     const target = buildDashboardTarget(payment);
-
     try {
-      // مهم: replace عشان مايرجعش تاني لصفحة الدفع بالباك
-      router.replace(target);
+      router.replace(target); // replace عشان مايرجعش صفحة الدفع من زر Back
     } catch (err) {
       console.error("Redirect failed:", err);
     }
   }, [countdown, payment, router]);
 
-  const t = (ar, en) => (langParam === "ar" ? ar : en);
+  // 5) helpers لتجهيز الداتا للعرض
+  let paidAmount = 0;
+  let printingFee = 0;
+  let vat = 0;
+  let processingFee = 0;
+  let paidAtStr = "-";
+  let tracking = "-";
+  let assignedName = "";
+  let serviceName = "";
 
-  // ========= states (loading / error / success card) =========
+  if (payment) {
+    const service =
+      typeof payment.service === "object" ? payment.service : {};
 
+    tracking = String(
+      payment.requestId ||
+        payment.orderNumber ||
+        payment.id ||
+        ""
+    );
+
+    paidAmount = safeNumber(
+      payment.paidAmount ?? payment.finalPrice ?? 0
+    );
+    printingFee = safeNumber(payment.printingFee ?? 0);
+    vat = safeNumber(payment.tax ?? payment.vat ?? 0);
+    processingFee = safeNumber(payment.processingFee ?? 0);
+
+    // تاريخ الدفع بصيغة لطيفة حسب اللغة
+    try {
+      if (payment.paidAt) {
+        paidAtStr = new Date(payment.paidAt).toLocaleString(
+          langParam === "ar" ? "ar-AE" : "en-AE",
+          { hour12: false }
+        );
+      }
+    } catch {
+      paidAtStr = String(payment.paidAt || "-");
+    }
+
+    assignedName =
+      payment.assignedToName ||
+      payment.assignedTo ||
+      t("سيتم التعيين لاحقاً", "Will be assigned");
+
+    serviceName =
+      service.name ||
+      payment.serviceName ||
+      t("غير محدد", "Not specified");
+  }
+
+  // 6) زر "اذهب الآن"
+  function goNow() {
+    const target = buildDashboardTarget(payment);
+    try {
+      router.replace(target);
+    } catch (e) {
+      console.error("Go now replace error:", e);
+    }
+  }
+
+  // ------------- حالات الواجهة -------------
+
+  // حالة تحميل الداتا
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-900 to-emerald-900 text-white p-6">
@@ -181,7 +245,12 @@ function PaymentSuccessInner({ langParam, search, router }) {
     );
   }
 
+  // حالة الخطأ أو مفيش طلب
   if (error || !payment) {
+    const fallbackTarget = `${DASHBOARD_BASE}?lang=${encodeURIComponent(
+      langParam || "ar"
+    )}`;
+
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-900 to-emerald-900 text-white p-6">
         <div className="max-w-lg w-full bg-white/5 border border-white/10 rounded-2xl p-6 text-center">
@@ -190,7 +259,8 @@ function PaymentSuccessInner({ langParam, search, router }) {
           </h2>
 
           <p className="mb-4 text-sm text-white/80">
-            {error || t("الطلب غير موجود.", "Order not found.")}
+            {error ||
+              t("الطلب غير موجود.", "Order not found.")}
           </p>
 
           <div className="flex items-center justify-center gap-3">
@@ -202,10 +272,7 @@ function PaymentSuccessInner({ langParam, search, router }) {
             </button>
 
             <button
-              onClick={() => {
-                const target = buildDashboardTarget(payment);
-                router.replace(target);
-              }}
+              onClick={() => router.replace(fallbackTarget)}
               className="px-4 py-2 border rounded text-white border-white/20"
             >
               {t("الذهاب للوحة التحكم", "Go to dashboard")}
@@ -216,47 +283,11 @@ function PaymentSuccessInner({ langParam, search, router }) {
     );
   }
 
-  // =========== success card ===========
-
-  const service = typeof payment.service === "object" ? payment.service : {};
-  const tracking =
-    String(
-      payment.requestId ||
-        payment.orderNumber ||
-        payment.id ||
-        ""
-    ) || "-";
-
-  const paidAmount = Number(
-    payment.paidAmount ?? payment.finalPrice ?? 0
-  );
-  const printingFee = Number(payment.printingFee ?? 0);
-  const vat = Number(payment.tax ?? payment.vat ?? 0);
-  const processingFee = Number(payment.processingFee ?? 0);
-
-  let paidAtStr = "-";
-  try {
-    if (payment.paidAt) {
-      paidAtStr = new Date(payment.paidAt).toLocaleString();
-    }
-  } catch {
-    paidAtStr = String(payment.paidAt || "-");
-  }
-
-  // لما يضغط "اذهب الآن" نبعده لنفس الداشبورد الزايطه اللي فوق (من غير order)
-  function goNow() {
-    const target = buildDashboardTarget(payment);
-    try {
-      router.replace(target);
-    } catch (e) {
-      console.error("Go now replace error:", e);
-    }
-  }
-
+  // حالة النجاح
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-900 to-emerald-900 p-6">
       <div className="w-full max-w-3xl bg-white/5 border border-white/10 rounded-3xl p-6 shadow-lg text-slate-200">
-        {/* Title row */}
+        {/* العنوان و الرسالة */}
         <div className="flex items-center gap-4">
           <div className="w-16 h-16 bg-emerald-500 rounded-full flex items-center justify-center text-white text-3xl font-extrabold shadow">
             ✓
@@ -274,29 +305,29 @@ function PaymentSuccessInner({ langParam, search, router }) {
           </div>
         </div>
 
-        {/* Order / Payment summary */}
+        {/* تفاصيل الطلب وملخص الدفع */}
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* تفاصيل الطلب */}
           <section className="bg-white/3 rounded-xl p-4">
             <h3 className="text-sm font-semibold text-white mb-3">
               {t("تفاصيل الطلب", "Order details")}
             </h3>
+
             <dl className="text-sm text-white/90 space-y-2">
               <div>
                 <span className="font-semibold">
                   {t("رقم التتبع", "Tracking No.")}:
                 </span>{" "}
-                <span className="font-mono ml-2">{tracking}</span>
+                <span className="font-mono ml-2">
+                  {tracking || "-"}
+                </span>
               </div>
 
               <div>
                 <span className="font-semibold">
                   {t("الخدمة", "Service")}:
                 </span>{" "}
-                <span className="ml-2">
-                  {service.name ||
-                    payment.serviceName ||
-                    t("غير محدد", "Not specified")}
-                </span>
+                <span className="ml-2">{serviceName}</span>
               </div>
 
               <div>
@@ -313,25 +344,25 @@ function PaymentSuccessInner({ langParam, search, router }) {
                   {t("المسؤول/الموظف", "Assigned to")}:
                 </span>{" "}
                 <span className="ml-2">
-                  {payment.assignedToName ||
-                    payment.assignedTo ||
-                    t("سيتم التعيين لاحقاً", "Will be assigned")}
+                  {assignedName}
                 </span>
               </div>
             </dl>
           </section>
 
+          {/* ملخص الدفع */}
           <section className="bg-white/3 rounded-xl p-4">
             <h3 className="text-sm font-semibold text-white mb-3">
               {t("ملخص الدفع", "Payment summary")}
             </h3>
+
             <dl className="text-sm text-white/90 space-y-2">
               <div>
                 <span className="font-semibold">
                   {t("المبلغ المدفوع", "Paid")}:
                 </span>{" "}
                 <span className="ml-2">
-                  {paidAmount.toFixed(2)} د.إ
+                  {fmtAmount(paidAmount)} د.إ
                 </span>
               </div>
 
@@ -340,7 +371,7 @@ function PaymentSuccessInner({ langParam, search, router }) {
                   {t("رسوم الطباعة", "Printing fee")}:
                 </span>{" "}
                 <span className="ml-2">
-                  {printingFee.toFixed(2)} د.إ
+                  {fmtAmount(printingFee)} د.إ
                 </span>
               </div>
 
@@ -349,7 +380,7 @@ function PaymentSuccessInner({ langParam, search, router }) {
                   {t("الضريبة", "VAT")}:
                 </span>{" "}
                 <span className="ml-2">
-                  {vat.toFixed(2)} د.إ
+                  {fmtAmount(vat)} د.إ
                 </span>
               </div>
 
@@ -358,7 +389,7 @@ function PaymentSuccessInner({ langParam, search, router }) {
                   {t("رسوم المعالجة", "Processing fee")}:
                 </span>{" "}
                 <span className="ml-2">
-                  {processingFee.toFixed(2)} د.إ
+                  {fmtAmount(processingFee)} د.إ
                 </span>
               </div>
 
@@ -372,7 +403,7 @@ function PaymentSuccessInner({ langParam, search, router }) {
           </section>
         </div>
 
-        {/* Notes + redirect */}
+        {/* ملاحظات + أزرار */}
         <div className="mt-6 bg-white/3 rounded-xl p-4">
           <h3 className="text-sm font-semibold text-white mb-2">
             {t("ملاحظات", "Notes")}
@@ -385,7 +416,7 @@ function PaymentSuccessInner({ langParam, search, router }) {
           </p>
         </div>
 
-        {/* countdown + buttons */}
+        {/* عد تنازلي + أزرار الذهاب */}
         <div className="mt-6 flex flex-col md:flex-row items-center justify-between gap-3">
           <div className="text-sm text-white/80">
             {t(
@@ -419,6 +450,7 @@ function PaymentSuccessInner({ langParam, search, router }) {
   );
 }
 
+// ------------- الـ Wrapper اللي بيلقط query params ويمررها -------------
 export default function PaymentSuccessRouteWrapper() {
   const router = useRouter();
   const search = useSearchParams();

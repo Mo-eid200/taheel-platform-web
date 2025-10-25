@@ -1,24 +1,24 @@
-// Updated createPaymentIntent handler — creates PaymentIntent with detailed metadata
-// and always creates a 'request' document (requestType indicates wallet_recharge vs service).
-// Paste in your backend and mount route as you do (e.g., app.use('/api/pay', require('./routes/createPaymentIntent')))
+// /api/createPaymentIntent.js (أو route مشابه)
+import Stripe from "stripe";
+import { initializeApp, cert, getApps } from "firebase-admin/app";
+import { getFirestore } from "firebase-admin/firestore";
 
-import Stripe from 'stripe';
-import { initializeApp, cert, getApps } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
-
-// تهيئة Firebase Admin مرة واحدة فقط
+// تهيئة Firebase Admin مرة واحدة
 let firestore;
 if (!getApps().length) {
   const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
-  serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+  serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
   initializeApp({ credential: cert(serviceAccount) });
   firestore = getFirestore();
 } else {
   firestore = getFirestore();
 }
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2022-11-15' });
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: "2022-11-15",
+});
 
+// نولّد رقم طلب شبه "REQ-123-4567"
 function generateOrderNumber() {
   const part1 = Math.floor(100 + Math.random() * 900);
   const part2 = Math.floor(1000 + Math.random() * 9000);
@@ -26,100 +26,164 @@ function generateOrderNumber() {
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method !== "POST")
+    return res.status(405).json({ error: "Method not allowed" });
 
   const {
-    amount,
-    serviceId,
-    serviceName,
-    customerId,
+    amount,            // رقم عادي بالدرهم (مثلاً 250.00)
+    serviceId,         // ID الخدمة
+    serviceName,       // اسم الخدمة (عربي/إنجليزي أو حسب اللغة)
+    customerId,        // IMPORTANT: نفس الـ document ID في users
     userEmail,
-    attachments = {},
-    providers = [],
+    clientType,        // "resident" | "nonresident" | "company" | "other"
+    attachments = {},  // مستندات مرفوعة قبل الدفع (جواز/إقامة/الخ...)
+    providers = [],    // مزود الخدمة الداخلي (اختياري)
     coinsUsed = 0,
     coinsGiven = 0,
     printingFee = 0,
-    assignedTo = "",
+    processingFee = 0, // رسوم خدمة/بوابة لو فيه
+    assignedTo = "",   // uid الموظف أو كوده
     assignedToName = "",
-    status = "pending",
-    employeeData = {},
-    lang = "ar",
-  } = req.body;
+    status = "pending", // الطلب لسه مش مدفوع
+    employeeData = {},  // معلومات الموظف اللي استلم الطلب (للأدمن)
+    lang = "ar",        // "ar" | "en"
+  } = req.body || {};
 
-  if (!amount || !serviceName || !customerId || !userEmail) {
-    return res.status(400).json({ error: 'Missing required fields.' });
+  // validations الأساسية
+  if (
+    !amount ||
+    !serviceName ||
+    !customerId ||
+    !userEmail
+  ) {
+    return res.status(400).json({ error: "Missing required fields." });
   }
 
   try {
+    // هنبدأ دايمًا بإنشاء requestId بنفس الاستايل بتاعنا
     const requestId = generateOrderNumber();
 
-    // تعيين نوع الطلب لسهولة المعالجة في الـ webhook
-    const requestType = (serviceId === "wallet-recharge" || serviceName === "شحن المحفظة" || String(serviceName).toLowerCase().includes("wallet"))
-      ? "wallet_recharge"
-      : "service";
+    // لو الخدمة دي عبارة عن شحن محفظة أو "Wallet Recharge"
+    const requestType =
+      serviceId === "wallet-recharge" ||
+      serviceName === "شحن المحفظة" ||
+      String(serviceName).toLowerCase().includes("wallet")
+        ? "wallet_recharge"
+        : "service";
 
-    // أنشئ PaymentIntent مع metadata كاملة (مهمة للـ webhook)
+    // مهم: الويب هوك و confirmPayment بيعتمدوا على الـ metadata اللي بنبعتها هنا
+    // علشان يربطوا العملية باليوزر والطلب ويكملوا التحديث
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(Number(amount) * 100), // amount بالـ AED -> fils
-      currency: 'aed',
+      amount: Math.round(Number(amount) * 100), // بالـ fils
+      currency: "aed",
       receipt_email: userEmail,
       metadata: {
-        requestId,
-        customerId,
+        requestId,               // لازم
+        customerId,              // لازم - هو نفسه ID جوه users
         serviceId: serviceId || "",
         serviceName,
+        clientType: clientType || "",
+
+        requestType,             // "wallet_recharge" | "service"
+
         coinsUsed: String(coinsUsed || 0),
         coinsGiven: String(coinsGiven || 0),
+
         printingFee: String(printingFee || 0),
-        requestType,
+        processingFee: String(processingFee || 0),
+
         assignedTo: assignedTo || "",
         assignedToName: assignedToName || "",
+
         lang: String(lang || "ar"),
-      description: `دفع خدمة ${serviceName}`,
-      amount: String(amount),           
-      currency: "AED",                   
-      userEmail: String(userEmail || ""), 
+
+        // مفيد للـ admin/debug
+        amount: String(amount),
+        currency: "AED",
+        userEmail: String(userEmail || ""),
+
+        // نخزن الـ attachments INLINE كـ stringified json
+        // علشان لو العميل قفل الابليكيشن بعد الدفع مباشرة، الويب هوك يقدر يحفظ الملفات جوه الطلب
+        attachments: JSON.stringify(attachments || {}),
+
+        // معلومة اختيارية: نحتفظ بـ providers
+        providers: JSON.stringify(providers || []),
+
+        // ممكن تحط أي بيانات تخص الـ employee اللي استلم الطلب وقت الإنشاء
+        employeeData: JSON.stringify(employeeData || {}),
       },
+      description:
+        lang === "en"
+          ? `Payment for service ${serviceName}`
+          : `دفع خدمة ${serviceName}`,
     });
 
-    // أنشئ doc الطلب (بغض النظر إن كانت شحن محفظة أم خدمة) — status يبقى pending حتى يكتمل الدفع
+    // الطلب نفسه لازم يدخل Firestore من دلوقتي كـ draft/pending
+    // عشان نقدر نعرضه للموظف حتى قبل الدفع النهائي
+    // و confirmPayment / webhook هيكمّلوا عليه
+    const nowIso = new Date().toISOString();
+
     const requestDoc = {
       requestId,
       paymentIntentId: paymentIntent.id,
       clientSecret: paymentIntent.client_secret,
-      customerId,
+
+      customerId, // ده نفس ID بتاع document في users
       serviceId: serviceId || "",
       serviceName,
-      requestType,
-      paidAmount: Number(amount), // المبلغ الأساسي (قبل خصم/إضافة معالجة)
-      printingFee,
-      coinsUsed,
-      coinsGiven,
-      createdAt: new Date().toISOString(),
-      lastUpdated: new Date().toISOString(),
-      status,
+      requestType, // "wallet_recharge" / "service"
+
+      paidAmount: Number(amount), // المبلغ المتوقع
+      printingFee: Number(printingFee) || 0,
+      processingFee: Number(processingFee) || 0,
+
+      coinsUsed: Number(coinsUsed) || 0,
+      coinsGiven: Number(coinsGiven) || 0,
+
+      createdAt: nowIso,
+      lastUpdated: nowIso,
+      status, // "pending" في البداية - لسه مش "paid"
+      paidAt: null, // لسه
+
       userEmail,
-      attachments,
-      providers,
+
+      // مهم جداً: attachments اللي عند العميل وقت ما ضغط دفع
+      attachments, // object { passport: {...}, eidFront: {...}, ... }
+
+      providers, // array of providers / channels اللي هتنفذ الخدمة
+
       assignedTo,
       assignedToName,
-      employeeData,
+
+      employeeData, // معلومات الموظف اللي استلم الطلب (لو applicable)
+
       lang,
+
       statusHistory: [
         {
           status,
-          timestamp: new Date().toISOString(),
-          updatedBy: assignedToName || userEmail || "system"
-        }
-      ]
+          timestamp: nowIso,
+          updatedBy: assignedToName || userEmail || "system",
+        },
+      ],
     };
 
     await firestore.collection("requests").doc(requestId).set(requestDoc);
 
-    // أرجع clientSecret و رقم الطلب (واجهة العميل ستستخدم clientSecret لتأكيد البطاقة)
-    res.status(200).json({ clientSecret: paymentIntent.client_secret, orderNumber: requestId, paymentIntentId: paymentIntent.id });
+    // الرد اللي هنرجعه للفرونت:
+    // - clientSecret: علشان Stripe confirm card من الموبايل / الويب
+    // - orderNumber/requestId: علشان نعرضه للعميل ونعمل tracking
+    // - paymentIntentId: مهم لو حصل retry
+    return res.status(200).json({
+      ok: true,
+      clientSecret: paymentIntent.client_secret,
+      orderNumber: requestId,
+      paymentIntentId: paymentIntent.id,
+    });
   } catch (error) {
     console.error("createPaymentIntent error:", error);
-    res.status(500).json({ error: error.message || 'Internal server error' });
+    return res
+      .status(500)
+      .json({ error: error.message || "Internal server error" });
   }
 }
