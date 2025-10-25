@@ -4,10 +4,10 @@
 import Stripe from "stripe";
 import admin from "firebase-admin";
 
-// لازم في Next.js API Routes علشان ناخد الـ raw body ونعمل verify للـ Stripe signature
+// -------- Next.js config عشان ناخد raw body من Stripe --------
 export const config = { api: { bodyParser: false } };
 
-// ---------- Firebase Admin init (idempotent) ----------
+// -------- Firebase Admin init (idempotent) --------
 if (!admin.apps.length) {
   try {
     const sa = process.env.GOOGLE_SERVICE_ACCOUNT_KEY
@@ -18,7 +18,6 @@ if (!admin.apps.length) {
       sa.private_key = sa.private_key.replace(/\\n/g, "\n");
       admin.initializeApp({ credential: admin.credential.cert(sa) });
     } else {
-      // running on GCP or already authed
       admin.initializeApp();
     }
   } catch (e) {
@@ -33,12 +32,12 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 
-// ---------- Stripe init ----------
+// -------- Stripe init --------
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2022-11-15",
 });
 
-// ---------- helpers ----------
+// -------- helpers --------
 function safeNum(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -47,7 +46,7 @@ function nowISO() {
   return new Date().toISOString();
 }
 
-// ناخد الـ raw body من req (Stripe محتاج ده علشان يتحقق من الـ signature)
+// لازم ناخد raw body من req (Stripe محتاج ده للـ signature)
 async function getRawBody(req) {
   const chunks = [];
   for await (const chunk of req) {
@@ -56,13 +55,12 @@ async function getRawBody(req) {
   return Buffer.concat(chunks);
 }
 
-// نجيب تعريف الخدمة من servicesByClientType بنفس منطق confirmPayment
+// نجيب تعريف الخدمة من servicesByClientType (عشان embed service details جوه الطلب)
 async function fetchServiceFromByClientType(
   serviceId,
   clientType,
   serviceNameFallback = ""
 ) {
-  // بنحاول clientType الرئيسي الأول، ولو مش موجود نجرب باقي الأنواع
   const clientTypesToTry = clientType
     ? [clientType]
     : ["company", "resident", "nonresident", "other"];
@@ -74,12 +72,10 @@ async function fetchServiceFromByClientType(
       if (!snap.exists) continue;
       const all = snap.data() || {};
 
-      // محاولة match بـ key المباشر
       if (serviceId && Object.prototype.hasOwnProperty.call(all, serviceId)) {
         return all[serviceId];
       }
 
-      // محاولة match من جوه الـ object
       for (const k of Object.keys(all)) {
         const s = all[k];
         if (!s) continue;
@@ -104,7 +100,50 @@ async function fetchServiceFromByClientType(
   return null;
 }
 
-// ---------- MAIN HANDLER ----------
+// -------- push notification sender (Expo Push API) --------
+// NOTE: runtime في Next.js/Vercel (Node 18+) معاه fetch built-in
+// لو عندك Node قديم جدًا استخدم: import fetch from "node-fetch";
+async function sendExpoPushToUser(userRef, title, body, data = {}) {
+  try {
+    const userSnap = await userRef.get();
+    if (!userSnap.exists) {
+      console.warn("sendExpoPushToUser: user not found");
+      return;
+    }
+
+    const userData = userSnap.data() || {};
+    const expoPushToken = userData.expoPushToken;
+
+    if (!expoPushToken) {
+      console.warn("No expoPushToken for user:", userRef.id);
+      return;
+    }
+
+    // نضرب Expo push API
+    const resp = await fetch("https://exp.host/--/api/v2/push/send", {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Accept-Encoding": "gzip, deflate",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        to: expoPushToken,
+        sound: "default",
+        title,
+        body,
+        data,
+      }),
+    });
+
+    const json = await resp.json();
+    console.log("Expo push response:", json);
+  } catch (err) {
+    console.error("❌ sendExpoPushToUser error:", err);
+  }
+}
+
+// -------- MAIN HANDLER --------
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).send("Method Not Allowed");
@@ -127,7 +166,7 @@ export default async function handler(req, res) {
     return res.status(400).send(`Webhook Error: ${err?.message}`);
   }
 
-  // 2) احنا مهتمين بس بـ payment_intent.succeeded
+  // 2) إحنا مهتمين فقط بـ payment_intent.succeeded
   if (event.type !== "payment_intent.succeeded") {
     return res.json({ received: true });
   }
@@ -140,7 +179,6 @@ export default async function handler(req, res) {
     const paymentIntentId = pi.id;
     const md = pi.metadata || {};
 
-    // نوع العملية: شحن محفظة ولا خدمة عادية
     const requestType =
       md.requestType ||
       (md.serviceName &&
@@ -148,7 +186,6 @@ export default async function handler(req, res) {
         ? "wallet_recharge"
         : "service");
 
-    // requestId/ orderNumber اللي frontend بعته
     let reqId = md.requestId || md.orderNumber || null;
 
     const coinsGiven = safeNum(
@@ -176,7 +213,6 @@ export default async function handler(req, res) {
     const assignedToNameMeta =
       md.assignedToName || md.assigned_to_name || "";
 
-    // attachments جايين من الميتاداتا كـ JSON String
     let attachmentsMeta = {};
     if (md.attachments) {
       try {
@@ -186,7 +222,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // Stripe بيدي المبلغ بالـ "أصغر وحدة" (فلس)، فـ /100 يطلع د.إ
     const amountSmallest = pi.amount_received ?? pi.amount ?? 0;
     const amountAED = Number((amountSmallest / 100).toFixed(2));
 
@@ -225,11 +260,9 @@ export default async function handler(req, res) {
     }
 
     // =============================
-    //   5) Locate user (IMPORTANT)
+    //   5) Locate user
     // =============================
-    // الـ frontend لازم يكون بعِت md.customerId = نفس الـ document ID جوه users
     const customerIdMeta = md.customerId || md.userId || null;
-
     if (!customerIdMeta) {
       console.warn(
         "❗ Missing customerId in Stripe metadata for PI:",
@@ -244,11 +277,9 @@ export default async function handler(req, res) {
       return res.json({ received: true });
     }
 
-    // هنا بنفترض إن document ID = customerIdMeta
     let userRef = db.collection("users").doc(String(customerIdMeta));
     let userSnap = await userRef.get();
 
-    // fallback بسيط: لو الـ request اللي لقيناه فيه customerId مختلف، جرّب تستعمله
     if (!userSnap.exists && requestSnap && requestSnap.exists) {
       const rdata = requestSnap.data() || {};
       if (rdata.customerId && rdata.customerId !== customerIdMeta) {
@@ -269,7 +300,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // لو بعد كل ده برضه مفيش يوزر مسجل
     if (!userSnap.exists) {
       console.warn(
         "❗ user not found for PI:",
@@ -296,10 +326,23 @@ export default async function handler(req, res) {
     );
 
     // =============================
+    //   prepare push-notification vars
+    //   (هنمليهم جوه الترانزكشن ونبعت بعدين)
+    // =============================
+    let finalRequestIdAfterTx = null;
+    let notifyTitleAfterTx = "";
+    let notifyBodyAfterTx = "";
+    let notifyDataAfterTx = {};
+    const langIsEn = md.lang === "en";
+    const langIsAr = !langIsEn; // default عربي لو مفيش en صريحة
+
+    // هنحتاج الـ userRef بعدين
+    let userRefGlobal = userRef;
+
+    // =============================
     //   7) Firestore Transaction
     // =============================
     await db.runTransaction(async (tx) => {
-      // متخليش اتنين workers يعالجوا نفس الـ PI مع بعض
       const procCheck = await tx.get(processedRef);
       if (procCheck.exists) {
         throw new Error("ALREADY_PROCESSED");
@@ -310,14 +353,10 @@ export default async function handler(req, res) {
         throw new Error("User disappeared during transaction");
       }
 
-      // هنستعمل finalRequestId بعدين سواء كنا حدّثنا طلب قديم أو عملنا جديد
       let finalRequestId = reqId || null;
 
-      // --------------------------------
-      // A) UPDATE OR CREATE REQUEST DOC
-      // --------------------------------
+      // ------- A) UPDATE OR CREATE REQUEST -------
       if (requestSnap && requestSnap.exists) {
-        // update existing request
         finalRequestId = String(requestSnap.id);
 
         const rdata = requestSnap.data() || {};
@@ -344,7 +383,6 @@ export default async function handler(req, res) {
               : processingFeeMeta || 0,
         };
 
-        // attachments & clientSecret
         if (rdata.attachments) {
           updates.attachments = rdata.attachments;
         } else if (
@@ -360,7 +398,6 @@ export default async function handler(req, res) {
           updates.clientSecret = md.clientSecret;
         }
 
-        // service embedding
         if (serviceDoc) {
           const svc = {
             name: serviceDoc.name || serviceNameFromMeta || "",
@@ -428,8 +465,8 @@ export default async function handler(req, res) {
           if (serviceId) updates.serviceId = serviceId;
         }
 
-        // assignedTo
-        updates.assignedTo = rdata.assignedTo || assignedToMeta || "";
+        updates.assignedTo =
+          rdata.assignedTo || assignedToMeta || "";
         updates.assignedToName =
           rdata.assignedToName || assignedToNameMeta || "";
 
@@ -499,7 +536,7 @@ export default async function handler(req, res) {
         const reqObj = {
           requestId: finalRequestId,
           paymentIntentId: paymentIntentId,
-          customerId: userRef.id, // ده هو نفس الـ doc id بتاع اليوزر
+          customerId: userRef.id,
           serviceId: serviceMap?.serviceId || serviceId || "",
           serviceName: serviceMap?.name || serviceNameFromMeta || "",
           requestType,
@@ -539,13 +576,10 @@ export default async function handler(req, res) {
 
         tx.set(db.collection("requests").doc(finalRequestId), reqObj);
 
-        // حدّث الـ refs عشان باقي الكود لو محتاجه
         requestRef = db.collection("requests").doc(finalRequestId);
       }
 
-      // --------------------------------
-      // B) WALLET / COINS UPDATE
-      // --------------------------------
+      // ------- B) WALLET / COINS UPDATE -------
       if (requestType === "wallet_recharge") {
         const prevWallet = Number(
           uDoc.data().walletBalance ?? uDoc.data().wallet ?? 0
@@ -565,7 +599,6 @@ export default async function handler(req, res) {
             admin.firestore.FieldValue.serverTimestamp(),
         });
       } else {
-        // خدمة عادية = زوّد coins بس لو فيه bonus
         if (coinsGiven > 0) {
           tx.update(userRef, {
             coins: admin.firestore.FieldValue.increment(coinsGiven),
@@ -573,12 +606,10 @@ export default async function handler(req, res) {
         }
       }
 
-      // --------------------------------
-      // C) TRANSACTION RECORD
-      // --------------------------------
+      // ------- C) TRANSACTION RECORD -------
       const txRef = db.collection("transactions").doc();
       tx.set(txRef, {
-        userId: userRef.id, // نفس الـ customerId
+        userId: userRef.id,
         requestId: finalRequestId,
         amount: amountAED,
         currency: pi.currency || "aed",
@@ -589,21 +620,21 @@ export default async function handler(req, res) {
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      // --------------------------------
-      // D) NOTIFICATION
-      // --------------------------------
+      // ------- D) NOTIFICATION DOC (in-app inbox / history) -------
       const notifRef = db.collection("notifications").doc();
+      const notifTitle = langIsEn ? "Payment Confirmed" : "تم تأكيد الدفع";
+      const notifBody = langIsEn
+        ? `Your payment of ${amountAED.toFixed(
+            2
+          )} AED was received. Order: ${finalRequestId}`
+        : `تم استلام دفعتك بقيمة ${amountAED.toFixed(
+            2
+          )} د.إ الآن. رقم الطلب: ${finalRequestId}`;
+
       tx.set(notifRef, {
         targetId: userRef.id,
-        title: md.lang === "en" ? "Payment Confirmed" : "تم تأكيد الدفع",
-        body:
-          md.lang === "en"
-            ? `Your payment of ${amountAED.toFixed(
-                2
-              )} AED was received. Order: ${finalRequestId}`
-            : `تم استلام دفعتك بقيمة ${amountAED.toFixed(
-                2
-              )} د.إ الآن. رقم الطلب: ${finalRequestId}`,
+        title: notifTitle,
+        body: notifBody,
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
         isRead: false,
         metadata: {
@@ -612,9 +643,17 @@ export default async function handler(req, res) {
         },
       });
 
-      // --------------------------------
-      // E) MARK AS PROCESSED
-      // --------------------------------
+      // build push strings for after transaction
+      finalRequestIdAfterTx = finalRequestId;
+      notifyTitleAfterTx = notifTitle;
+      notifyBodyAfterTx = notifBody;
+      notifyDataAfterTx = {
+        type: "payment_success",
+        orderId: finalRequestId,
+        paymentIntentId,
+      };
+
+      // ------- E) MARK AS PROCESSED -------
       tx.set(processedRef, {
         paymentIntentId,
         processedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -623,13 +662,32 @@ export default async function handler(req, res) {
       });
     });
 
+    // =============================
+    //   Send PUSH after transaction
+    // =============================
+    try {
+      if (userRefGlobal && finalRequestIdAfterTx) {
+        await sendExpoPushToUser(
+          userRefGlobal,
+          notifyTitleAfterTx,
+          notifyBodyAfterTx,
+          notifyDataAfterTx
+        );
+      } else {
+        console.warn(
+          "Skipping push, missing userRefGlobal/finalRequestIdAfterTx"
+        );
+      }
+    } catch (pushErr) {
+      console.error("push send failed:", pushErr);
+    }
+
     console.log(
       `✅ webhook processed ${paymentIntentId} (AED ${amountAED})`
     );
     return res.json({ received: true });
   } catch (err) {
     if (err.message === "ALREADY_PROCESSED") {
-      // في حالة الاتنين استجابوا في نفس اللحظة
       return res.json({ received: true });
     }
     console.error("❌ webhook processing error:", err);
