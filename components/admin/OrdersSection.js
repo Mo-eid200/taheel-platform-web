@@ -21,6 +21,7 @@ import {
   MdPerson,
   MdVolumeUp,
 } from "react-icons/md";
+
 import {
   FaUserTie,
   FaUserAlt,
@@ -58,13 +59,16 @@ const STATUS_LABEL = {
 const STATUS_BADGE_STYLE = {
   new: "bg-sky-100 text-sky-800 border-sky-300",
   under_review: "bg-yellow-100 text-yellow-800 border-yellow-400",
-  government_processing: "bg-indigo-100 text-indigo-900 border-indigo-400",
+  government_processing:
+    "bg-indigo-100 text-indigo-900 border-indigo-400",
   completed: "bg-green-100 text-green-800 border-green-400",
   rejected: "bg-red-100 text-red-800 border-red-400",
-  pending_requirements: "bg-orange-100 text-orange-800 border-orange-400",
+  pending_requirements:
+    "bg-orange-100 text-orange-800 border-orange-400",
   archived: "bg-gray-100 text-gray-700 border-gray-400",
 };
 
+// التابات حسب نوع العميل
 const TYPE_TABS = [
   { key: "all", label: "الكل", icon: <MdPerson /> },
   { key: "resident", label: "المقيمين", icon: <FaUserCheck /> },
@@ -73,7 +77,7 @@ const TYPE_TABS = [
   { key: "other", label: "أخرى", icon: <FaUserAlt /> },
 ];
 
-// الموظف الحالي (مؤقت لحد ما توصلها بـ Auth فعلي)
+// الموظف الحالي (placeholder)
 const currentEmployee = {
   userId:
     typeof window !== "undefined" && window.localStorage
@@ -86,9 +90,10 @@ const currentEmployee = {
 };
 
 // =======================
-// HELPERS (pure JS)
+// HELPERS
 // =======================
 
+// client type from ID (RES-, NON-, COM-)
 function getClientType(clientId) {
   if (!clientId) return "other";
   if (clientId.startsWith("RES-")) return "resident";
@@ -97,12 +102,99 @@ function getClientType(clientId) {
   return "other";
 }
 
+// "منذ 5 دقايق / 2 ساعة"
 function timeSince(dateIso) {
   if (!dateIso) return "-";
   const created = new Date(dateIso);
-  const mins = Math.floor((Date.now() - created.getTime()) / 60000);
+  const diffMs = Date.now() - created.getTime();
+  const mins = Math.floor(diffMs / 60000);
   if (mins < 60) return `${mins} دقيقة`;
-  return `${Math.round(mins / 60)} ساعة`;
+  const hrs = Math.round(mins / 60);
+  return `${hrs} ساعة`;
+}
+
+// توحيد شكل بيانات العميل
+function formatClient(rawUser) {
+  if (!rawUser) return null;
+
+  // اسم العميل: حاول نبني اسم واحد نظيف
+  const fullName =
+    rawUser.name ||
+    rawUser.nameEn ||
+    rawUser.nameEn ||
+    [
+      rawUser.firstName,
+      rawUser.middleName,
+      rawUser.lastName,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .trim() ||
+    rawUser.customerId ||
+    rawUser.userId ||
+    "بدون اسم";
+
+  // المرفقات: انت حالياً مخزن eidFront/eidBack/passport كماب،
+  // أنا هجمعهم في array علشان الكارت يعرضهم.
+  const docs = [];
+  if (rawUser.eidFront?.url) {
+    docs.push({
+      type: "بطاقة الهوية - الأمام",
+      url: rawUser.eidFront.url,
+    });
+  }
+  if (rawUser.eidBack?.url) {
+    docs.push({
+      type: "بطاقة الهوية - الخلف",
+      url: rawUser.eidBack.url,
+    });
+  }
+  if (rawUser.passport?.url) {
+    docs.push({
+      type: "جواز السفر",
+      url: rawUser.passport.url,
+    });
+  }
+
+  return {
+    userId: rawUser.userId || rawUser.customerId,
+    profilePic: rawUser.profilePic || "",
+    name: fullName,
+    email: rawUser.email || "",
+    phone: rawUser.phone || "",
+    documents: docs,
+  };
+}
+
+// توحيد شكل بيانات الطلب
+function formatOrder(rawReq) {
+  return {
+    requestId: rawReq.requestId || rawReq.id,
+    trackingNumber: rawReq.trackingNumber || rawReq.requestId,
+    clientId: rawReq.clientId || rawReq.customerId,
+    serviceId: rawReq.serviceId || "",
+    serviceName: rawReq.serviceName || rawReq.serviceId || "",
+    status: rawReq.status || "new",
+    createdAt: rawReq.createdAt || rawReq.lastUpdated || "",
+    assignedTo: rawReq.assignedTo || "",
+    assignedToName: rawReq.assignedToName || "",
+    paidAmount:
+      typeof rawReq.paidAmount === "number" ? rawReq.paidAmount : null,
+    statusHistory: Array.isArray(rawReq.statusHistory)
+      ? rawReq.statusHistory
+      : [],
+    attachments:
+      Array.isArray(rawReq.attachments) && rawReq.attachments.length > 0
+        ? rawReq.attachments
+        : rawReq.fileUrl
+        ? [
+            {
+              name: rawReq.fileName || "مرفق",
+              url: rawReq.fileUrl,
+            },
+          ]
+        : [],
+  };
 }
 
 // =======================
@@ -110,19 +202,22 @@ function timeSince(dateIso) {
 // =======================
 
 function OrdersSectionInner({ lang = "ar" }) {
-  // ---------- DATA STATE ----------
-  const [orders, setOrders] = useState([]);
-  const [clients, setClients] = useState({});
+  // ---------- STATE ----------
+  const [ordersRaw, setOrdersRaw] = useState([]); // before normalize
+  const [orders, setOrders] = useState([]); // after normalize
+
+  const [clientsRaw, setClientsRaw] = useState({}); // before normalize
+  const [clients, setClients] = useState({}); // after normalize
+
   const [employees, setEmployees] = useState([]);
   const [services, setServices] = useState({});
 
-  // ---------- UI STATE ----------
-  const [activeTab, setActiveTab] = useState("all"); // resident / nonResident / company / other / all
+  // UI state
+  const [activeTab, setActiveTab] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [searchValue, setSearchValue] = useState("");
 
   const [selectedOrder, setSelectedOrder] = useState(null);
-
   const [showClientCard, setShowClientCard] = useState(null);
 
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -130,8 +225,8 @@ function OrdersSectionInner({ lang = "ar" }) {
 
   const [showNewSidebar, setShowNewSidebar] = useState(false);
 
+  // pendingStatus { order, newStatus, note }
   const [pendingStatus, setPendingStatus] = useState(null);
-  // shape: { order, newStatus, note }
 
   const [showNotifModal, setShowNotifModal] = useState(false);
   const [notifContent, setNotifContent] = useState("");
@@ -139,45 +234,46 @@ function OrdersSectionInner({ lang = "ar" }) {
   const [showChat, setShowChat] = useState(false);
   const [chatPreview, setChatPreview] = useState({});
 
+  // sound
   const [playNotifSound, setPlayNotifSound] = useState(false);
   const notifAudioRef = useRef(null);
 
   // ---------- FIRESTORE LISTENERS ----------
 
-  // الطلبات
+  // requests
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "requests"), (snap) => {
       const list = [];
       snap.forEach((docSnap) => {
         list.push({ ...docSnap.data(), requestId: docSnap.id });
       });
-      setOrders(list);
+      setOrdersRaw(list);
     });
     return () => unsub();
   }, []);
 
-  // المستخدمين (عملاء + موظفين)
+  // users (عملاء وموظفين)
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "users"), (snap) => {
-      const clientMap = {};
+      const rawMap = {};
       const empArray = [];
 
       snap.forEach((docSnap) => {
         const u = { ...docSnap.data(), userId: docSnap.id };
-        clientMap[u.userId] = u;
+        rawMap[u.userId] = u;
         if (u.role === "employee" || u.role === "admin") {
           empArray.push(u);
         }
       });
 
-      setClients(clientMap);
+      setClientsRaw(rawMap);
       setEmployees(empArray);
     });
 
     return () => unsub();
   }, []);
 
-  // الخدمات
+  // services
   useEffect(() => {
     const unsub = onSnapshot(
       collection(db, "servicesByClientType"),
@@ -186,7 +282,11 @@ function OrdersSectionInner({ lang = "ar" }) {
         for (const docSnap of snap.docs) {
           const data = docSnap.data();
           Object.entries(data).forEach(([serviceId, svc]) => {
-            flat[serviceId] = { ...svc, type: docSnap.id, id: serviceId };
+            flat[serviceId] = {
+              ...svc,
+              type: docSnap.id,
+              id: serviceId,
+            };
           });
         }
         setServices(flat);
@@ -195,11 +295,25 @@ function OrdersSectionInner({ lang = "ar" }) {
     return () => unsub();
   }, []);
 
-  // معاينة الشات / صوت جديد (جاهز للتوصيل لما تعمل messages)
+  // rebuild normalized data whenever raw changes
   useEffect(() => {
-    // لو عايز تشغل صوت لما يجيلك طلب جديد:
+    // normalize orders
+    const formattedOrders = ordersRaw.map(formatOrder);
+
+    // normalize clients
+    const formattedClientsMap = {};
+    Object.keys(clientsRaw).forEach((id) => {
+      formattedClientsMap[id] = formatClient(clientsRaw[id]);
+    });
+
+    setOrders(formattedOrders);
+    setClients(formattedClientsMap);
+  }, [ordersRaw, clientsRaw]);
+
+  // chat preview / صوت جديد جاهز للمستقبل
+  useEffect(() => {
+    // مثال: لو عايز صوت لما عدد الطلبات يزيد
     // setPlayNotifSound(true);
-    // ولو عايز تحفظ آخر رسالة في chatPreview[requestId] اعمل listener للمحادثات
   }, [orders.length]);
 
   useEffect(() => {
@@ -218,21 +332,23 @@ function OrdersSectionInner({ lang = "ar" }) {
     statusCounts[s] = (statusCounts[s] || 0) + 1;
   });
 
-  // طلبات جديدة للسايدبار
+  // الطلبات الجديدة (status=new)
   const newOrders = orders
     .filter((o) => (o.status || "new") === "new")
     .sort((a, b) => ((a.createdAt || "") > (b.createdAt || "") ? 1 : -1));
 
-  // فلترة الجدول الرئيسي
+  // فلترة الجدول
   let filteredOrders = orders.filter((o) => {
     const thisClientType = getClientType(o.clientId);
-    if (activeTab !== "all" && thisClientType !== activeTab) return false;
 
+    if (activeTab !== "all" && thisClientType !== activeTab) return false;
     if (statusFilter !== "all" && (o.status || "new") !== statusFilter)
       return false;
 
     const client = clients[o.clientId] || {};
-    const svc = services[o.serviceId] || {};
+    const svcFromDB = services[o.serviceId] || {};
+    const serviceDisplay =
+      o.serviceName || svcFromDB.name || svcFromDB.name_en || o.serviceId;
 
     const searchable = [
       o.trackingNumber,
@@ -242,8 +358,7 @@ function OrdersSectionInner({ lang = "ar" }) {
       client.userId,
       client.email,
       client.phone,
-      svc.name,
-      svc.name_en,
+      serviceDisplay,
       o.status,
     ]
       .filter(Boolean)
@@ -257,20 +372,20 @@ function OrdersSectionInner({ lang = "ar" }) {
     (a.createdAt || "") > (b.createdAt || "") ? 1 : -1
   );
 
-  // ---------- ACTIONS ----------
+  // ---------- ACTIONS (firestore writes) ----------
 
-  // إشعار تلقائي بعد تغيير الحالة
+  // اشعار تلقائي بعد تغيير الحالة
   async function sendAutoNotification(order, newStatus) {
     const client = clients[order.clientId];
     if (!client) return;
 
-    const statusMsg = `تم تحديث حالة طلبك (${order.trackingNumber || order.requestId}) إلى: ${
+    const msg = `تم تحديث حالة طلبك (${order.trackingNumber || order.requestId}) إلى: ${
       STATUS_LABEL[newStatus] || newStatus
     }`;
 
     const notifData = {
       title: "تحديث حالة طلبك",
-      body: statusMsg,
+      body: msg,
       type: "status",
       notificationId: `notif-${Date.now()}`,
       relatedRequest: order.requestId,
@@ -301,27 +416,24 @@ function OrdersSectionInner({ lang = "ar" }) {
       },
     ];
 
-    // تحديث الطلب في Firestore
     await updateDoc(doc(db, "requests", order.requestId), {
       status: newStatus,
       statusHistory: updatedHistory,
     });
 
-    // تحديث الواجهة المحلية لو الـ modal لسه مفتوح على نفس الطلب
+    // sync محلي في الـ modal
     setSelectedOrder((prev) =>
       prev && prev.requestId === order.requestId
         ? { ...prev, status: newStatus, statusHistory: updatedHistory }
         : prev
     );
 
-    // إرسال إشعار للعميل
     await sendAutoNotification(order, newStatus);
 
-    // إغلاق مودال التأكيد
     setPendingStatus(null);
   }
 
-  // اسناد الطلب لموظف آخر
+  // تصدير الطلب لموظف تاني
   async function handleAssign(order, empId) {
     const employee = employees.find((e) => e.userId === empId);
     if (!employee) return;
@@ -332,7 +444,6 @@ function OrdersSectionInner({ lang = "ar" }) {
       lastUpdated: new Date().toISOString(),
     });
 
-    // تحديث الـ UI
     setShowAssignModal(false);
     setSelectedOrder((prev) =>
       prev && prev.requestId === order.requestId
@@ -341,7 +452,7 @@ function OrdersSectionInner({ lang = "ar" }) {
     );
   }
 
-  // إشعار يدوي مخصص
+  // اشعار يدوي مخصص
   async function sendCustomNotification(order, content) {
     if (!content || !order) return;
     const client = clients[order.clientId];
@@ -364,55 +475,53 @@ function OrdersSectionInner({ lang = "ar" }) {
     setNotifContent("");
   }
 
-  // ---------- SMALL SUB UIs ----------
+  // ---------- SMALL SUB COMPONENTS ----------
 
   function ClientCard({ client }) {
     if (!client) return null;
+
     return (
-      <div className="p-5 rounded-2xl bg-white shadow-xl border border-emerald-200/60 w-full max-w-lg relative">
+      <div className="p-5 rounded-2xl bg-white shadow-xl border border-gray-200 w-full max-w-lg relative">
         <button
           className="absolute top-2 left-2 text-2xl text-gray-400 hover:text-gray-900 font-bold cursor-pointer"
+          style={{ cursor: "pointer" }}
           onClick={() => setShowClientCard(null)}
         >
           <MdClose />
         </button>
 
-        <div className="flex flex-col items-center">
+        <div className="flex flex-col items-center text-center">
           <img
             src={client.profilePic || "/default-avatar.png"}
             alt={client.name}
-            className="w-24 h-24 rounded-full border-4 border-emerald-100 shadow mb-2 object-cover"
+            className="w-24 h-24 rounded-full border-4 border-gray-100 shadow mb-2 object-cover"
           />
-          <div
-            className="text-xl font-extrabold text-emerald-800 drop-shadow"
-            style={{
-              textShadow:
-                "0 1px 0 #fff, 0 1px 2px rgba(0,0,0,0.4)",
-            }}
-          >
+          <div className="text-xl font-extrabold text-gray-900">
             {client.name}
           </div>
-          <div className="text-gray-700 font-mono font-semibold">
+          <div className="text-gray-500 font-mono font-semibold text-xs">
             {client.userId}
           </div>
-          <div className="mt-2 mb-1 flex flex-wrap justify-center gap-2 text-sm font-semibold">
+
+          <div className="mt-3 mb-1 flex flex-wrap justify-center gap-2 text-[0.8rem] font-semibold">
             {client.email && (
-              <span className="bg-emerald-50 text-emerald-800 px-2 py-1 rounded border border-emerald-200/70">
+              <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded border border-gray-200">
                 {client.email}
               </span>
             )}
             {client.phone && (
-              <span className="bg-emerald-50 text-emerald-800 px-2 py-1 rounded border border-emerald-200/70">
+              <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded border border-gray-200">
                 {client.phone}
               </span>
             )}
           </div>
         </div>
 
-        <div className="mt-3 w-full">
-          <div className="font-bold text-gray-800 mb-1 text-sm">
+        <div className="mt-4 w-full text-left">
+          <div className="font-bold text-gray-800 mb-2 text-sm">
             مرفقات العميل:
           </div>
+
           {client.documents && client.documents.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {client.documents.map((docItem, i) => (
@@ -421,14 +530,15 @@ function OrdersSectionInner({ lang = "ar" }) {
                   href={docItem.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="bg-gray-50 px-3 py-1 rounded text-emerald-800 font-bold text-xs hover:bg-emerald-50 border border-emerald-200/70 shadow-sm cursor-pointer"
+                  className="bg-white px-3 py-1 rounded text-indigo-700 font-bold text-xs hover:bg-indigo-50 border border-indigo-200 shadow-sm"
+                  style={{ cursor: "pointer" }}
                 >
                   {docItem.type}
                 </a>
               ))}
             </div>
           ) : (
-            <div className="text-gray-400 text-xs">
+            <div className="text-gray-400 text-xs font-semibold">
               لا يوجد مرفقات
             </div>
           )}
@@ -441,17 +551,25 @@ function OrdersSectionInner({ lang = "ar" }) {
     if (!order) return null;
 
     const client = clients[order.clientId];
-    const service = services[order.serviceId];
+    const clientFull = formatClient(clientsRaw[order.clientId] || {});
     const assignedEmp = employees.find(
       (e) => e.userId === order.assignedTo
     );
 
+    // إسم الخدمة لعرضه بشكل نظيف
+    const svcFromDB = services[order.serviceId] || {};
+    const serviceDisplay =
+      order.serviceName ||
+      svcFromDB.name ||
+      svcFromDB.name_en ||
+      order.serviceId;
+
     const createdAtLocal = order.createdAt
       ? new Date(order.createdAt).toLocaleString("ar-EG")
       : "-";
-    const sinceText = timeSince(order.createdAt);
+    const sinceTextValue = timeSince(order.createdAt);
 
-    // آخر نوت لنفس الحالة الحالية
+    // آخر ملاحظة لنفس الحالة الحالية
     let currentNote = null;
     if (Array.isArray(order.statusHistory)) {
       const lastWithThisStatus = [...order.statusHistory]
@@ -462,37 +580,35 @@ function OrdersSectionInner({ lang = "ar" }) {
       currentNote = lastWithThisStatus?.note || null;
     }
 
-    const whatsappLink = client?.phone
-      ? `https://wa.me/${client.phone.replace(/^0/, "971")}`
+    // روابط التواصل
+    const whatsappLink = clientFull?.phone
+      ? `https://wa.me/${clientFull.phone.replace(/^0/, "971")}`
       : null;
-    const mailtoLink = client?.email
-      ? `mailto:${client.email}`
+    const mailtoLink = clientFull?.email
+      ? `mailto:${clientFull.email}`
       : null;
 
     return (
       <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-        <div
-          className="
-            bg-white rounded-2xl shadow-2xl border border-emerald-200/60
-            max-w-[800px] w-full flex flex-col md:flex-row gap-4 md:gap-6
-            overflow-auto max-h-[90vh]
-          "
-        >
-          {/* LEFT SIDE: Client */}
-          <aside
-            className="
-              flex-none bg-white p-4 md:p-6 border-b md:border-b-0 md:border-r
-              md:min-w-[280px] md:max-w-[320px] flex items-center justify-center
-              rounded-t-2xl md:rounded-l-2xl md:rounded-tr-none
-            "
-          >
-            <ClientCard client={client} />
+        <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 max-w-[900px] w-full flex flex-col md:flex-row gap-4 md:gap-6 overflow-auto max-h-[90vh]">
+          {/* LEFT SIDE: Client card */}
+          <aside className="flex-none bg-gray-50 p-4 md:p-6 border-b md:border-b-0 md:border-r md:min-w-[280px] md:max-w-[320px] flex items-center justify-center rounded-t-2xl md:rounded-l-2xl md:rounded-tr-none">
+            <ClientCard client={clientFull} />
           </aside>
 
-          {/* RIGHT SIDE: Order info */}
-          <section className="flex-1 flex flex-col gap-4 p-4 md:p-6 text-[0.95rem] text-gray-900 font-semibold">
-            {/* Header */}
-            <div className="flex items-start justify-between mb-2">
+          {/* RIGHT SIDE: order info */}
+          <section className="flex-1 flex flex-col gap-4 p-4 md:p-6 text-[0.95rem] text-gray-900 font-semibold relative">
+            {/* close */}
+            <button
+              className="absolute top-3 left-3 text-2xl text-gray-400 hover:text-gray-900 font-bold cursor-pointer"
+              style={{ cursor: "pointer" }}
+              onClick={() => setSelectedOrder(null)}
+            >
+              <MdClose />
+            </button>
+
+            {/* STATUS + SERVICE */}
+            <div className="flex items-start justify-between mb-2 pr-8">
               <div
                 className={
                   "inline-flex items-center gap-1 px-2 py-1 rounded border font-bold text-xs " +
@@ -503,22 +619,15 @@ function OrdersSectionInner({ lang = "ar" }) {
                 {STATUS_ICONS[order.status] || "❓"}{" "}
                 {STATUS_LABEL[order.status] || order.status}
               </div>
-
-              <button
-                className="text-2xl text-gray-400 hover:text-gray-900 font-bold cursor-pointer"
-                onClick={() => setSelectedOrder(null)}
-              >
-                <MdClose />
-              </button>
             </div>
 
             {/* Service name */}
-            <div className="font-extrabold text-emerald-800 text-lg mb-2 leading-snug">
-              {service?.name || service?.name_en || order.serviceId}
+            <div className="font-extrabold text-gray-900 text-lg mb-1 leading-snug">
+              {serviceDisplay}
             </div>
 
             {/* Tracking number */}
-            <div>
+            <div className="text-sm">
               <span className="font-bold text-gray-700">
                 رقم الطلب:
               </span>{" "}
@@ -528,49 +637,32 @@ function OrdersSectionInner({ lang = "ar" }) {
             </div>
 
             {/* Attachments */}
-            {(order.fileUrl ||
-              (Array.isArray(order.attachments) &&
-                order.attachments.length > 0)) && (
+            {order.attachments && order.attachments.length > 0 && (
               <div>
-                <div className="font-bold text-gray-700">
-                  المرفقات:
+                <div className="font-bold text-gray-700 mb-1">
+                  مرفقات الطلب:
                 </div>
                 <ul className="list-disc ml-6 text-sm font-semibold text-indigo-700">
-                  {Array.isArray(order.attachments) &&
-                  order.attachments.length > 0 ? (
-                    order.attachments.map((att, i) => (
-                      <li key={i}>
-                        <a
-                          href={att.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="underline hover:text-indigo-900"
-                          download={att.name}
-                        >
-                          {att.name || `مرفق ${i + 1}`}
-                        </a>
-                      </li>
-                    ))
-                  ) : (
-                    <li>
+                  {order.attachments.map((att, i) => (
+                    <li key={i}>
                       <a
-                        href={order.fileUrl}
+                        href={att.url}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="underline hover:text-indigo-900"
-                        download={order.fileName}
+                        style={{ cursor: "pointer" }}
+                        download={att.name}
                       >
-                        {order.fileName ||
-                          "تحميل المستند"}
+                        {att.name || `مرفق ${i + 1}`}
                       </a>
                     </li>
-                  )}
+                  ))}
                 </ul>
               </div>
             )}
 
             {/* Assigned employee */}
-            <div>
+            <div className="text-sm">
               <span className="font-bold text-gray-700">
                 الموظف الحالي:
               </span>{" "}
@@ -583,53 +675,49 @@ function OrdersSectionInner({ lang = "ar" }) {
             </div>
 
             {/* Paid amount */}
-            <div>
+            <div className="text-sm">
               <span className="font-bold text-gray-700">
                 المبلغ:
               </span>{" "}
               <span className="text-green-700 font-bold">
                 {order.paidAmount
-                  ? `${order.paidAmount} درهم`
+                  ? `${order.paidAmount} د.إ`
                   : "-"}
               </span>
             </div>
 
             {/* Time */}
-            <div className="text-sm text-gray-800">
+            <div className="text-xs text-gray-700">
               <span className="font-bold text-gray-700">
                 وقت الطلب:
               </span>{" "}
               {createdAtLocal}{" "}
               <span className="text-gray-500 font-normal">
-                ({sinceText} مضت)
+                ({sinceTextValue} مضت)
               </span>
             </div>
 
-            {/* Last note */}
+            {/* Last employee note for current status */}
             {currentNote && (
-              <div className="bg-yellow-50 border-l-4 border-yellow-400 p-2 rounded text-yellow-700 font-semibold text-sm">
-                <div className="font-bold text-yellow-800">
-                  ملاحظة الموظف:
+              <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 rounded text-yellow-700 font-semibold text-sm">
+                <div className="font-bold text-yellow-800 mb-1">
+                  ملاحظة الموظف الحالية:
                 </div>
                 <div>{currentNote}</div>
               </div>
             )}
 
             {/* Contact actions */}
-            <div className="flex flex-wrap gap-2 items-center mt-2">
+            <div className="flex flex-wrap gap-2 items-center mt-2 text-sm">
               <span className="font-bold text-gray-800">
                 تواصل مع العميل:
               </span>
 
               <button
-                className="flex items-center gap-1 bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-3 py-1 rounded shadow cursor-pointer text-sm"
+                className="flex items-center gap-1 bg-gray-900 hover:bg-black text-white font-bold px-3 py-1.5 rounded-lg shadow cursor-pointer text-xs"
+                style={{ cursor: "pointer" }}
                 onClick={() => setShowChat(!showChat)}
-                disabled={!client?.userId}
-                style={{
-                  cursor: client?.userId
-                    ? "pointer"
-                    : "not-allowed",
-                }}
+                disabled={!clientFull?.userId}
               >
                 <MdOutlineChat /> شات داخلي
               </button>
@@ -639,7 +727,8 @@ function OrdersSectionInner({ lang = "ar" }) {
                   href={whatsappLink}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white font-bold px-3 py-1 rounded shadow cursor-pointer text-sm"
+                  className="flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white font-bold px-3 py-1.5 rounded-lg shadow cursor-pointer text-xs"
+                  style={{ cursor: "pointer" }}
                 >
                   <MdWhatsapp /> واتساب
                 </a>
@@ -650,14 +739,16 @@ function OrdersSectionInner({ lang = "ar" }) {
                   href={mailtoLink}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1 bg-blue-700 hover:bg-blue-800 text-white font-bold px-3 py-1 rounded shadow cursor-pointer text-sm"
+                  className="flex items-center gap-1 bg-blue-700 hover:bg-blue-800 text-white font-bold px-3 py-1.5 rounded-lg shadow cursor-pointer text-xs"
+                  style={{ cursor: "pointer" }}
                 >
                   <MdEmail /> إرسال إيميل
                 </a>
               )}
 
               <button
-                className="flex items-center gap-1 bg-yellow-500 hover:bg-yellow-600 text-white font-bold px-3 py-1 rounded shadow cursor-pointer text-sm"
+                className="flex items-center gap-1 bg-yellow-500 hover:bg-yellow-600 text-white font-bold px-3 py-1.5 rounded-lg shadow cursor-pointer text-xs"
+                style={{ cursor: "pointer" }}
                 onClick={() => setShowNotifModal(true)}
               >
                 <MdNotificationsActive /> إشعار مخصص
@@ -665,12 +756,12 @@ function OrdersSectionInner({ lang = "ar" }) {
             </div>
 
             {/* Chat box */}
-            {showChat && client?.userId && (
+            {showChat && clientFull?.userId && (
               <div className="mt-4 border rounded-xl bg-gray-50 p-2 shadow-inner">
                 <ChatWidgetFull
                   userId={currentEmployee.userId}
                   userName={currentEmployee.name}
-                  roomId={client.userId}
+                  roomId={clientFull.userId}
                 />
               </div>
             )}
@@ -688,16 +779,17 @@ function OrdersSectionInner({ lang = "ar" }) {
                   note,
                 });
               }}
-              className="flex flex-col gap-2 mt-4"
+              className="flex flex-col gap-2 mt-6 border-t border-gray-200 pt-4"
             >
-              <label className="font-bold text-gray-800">
+              <label className="font-bold text-gray-800 text-sm">
                 تغيير الحالة:
               </label>
 
               <select
                 name="status"
                 defaultValue={order.status}
-                className="border rounded px-2 py-2 cursor-pointer focus:ring-2 focus:ring-emerald-500 text-sm font-bold text-gray-800"
+                className="border rounded-lg px-2 py-2 cursor-pointer focus:ring-2 focus:ring-gray-900 text-sm font-bold text-gray-800"
+                style={{ cursor: "pointer" }}
               >
                 {Object.keys(STATUS_LABEL).map((key) => (
                   <option value={key} key={key}>
@@ -709,13 +801,14 @@ function OrdersSectionInner({ lang = "ar" }) {
               <input
                 type="text"
                 name="note"
-                className="border rounded px-2 py-2 text-sm text-gray-800"
+                className="border rounded-lg px-2 py-2 text-sm text-gray-800"
                 placeholder="ملاحظة الموظف (اختياري)"
               />
 
               <button
                 type="submit"
-                className="flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-emerald-400 hover:from-emerald-700 hover:to-emerald-500 text-white px-5 py-2 rounded font-bold shadow text-sm cursor-pointer transition-all"
+                className="flex items-center justify-center gap-2 bg-gray-900 hover:bg-black text-white px-4 py-2 rounded-lg font-bold shadow text-sm cursor-pointer transition-all"
+                style={{ cursor: "pointer" }}
               >
                 <MdNotificationsActive />
                 حفظ الحالة وإشعار العميل
@@ -725,10 +818,11 @@ function OrdersSectionInner({ lang = "ar" }) {
             {/* Assign to employee */}
             <div className="mt-4">
               <button
-                className="flex items-center gap-2 bg-gradient-to-r from-indigo-600 to-indigo-400 hover:from-indigo-700 hover:to-indigo-500 text-white px-5 py-2 rounded font-bold shadow text-sm cursor-pointer transition-all"
+                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold shadow text-sm cursor-pointer transition-all"
+                style={{ cursor: "pointer" }}
                 onClick={() => setShowAssignModal(true)}
               >
-                <FaUserTie /> تصدير الطلب لموظف آخر
+                <FaUserTie /> تحويل الطلب لموظف آخر
               </button>
             </div>
           </section>
@@ -736,22 +830,24 @@ function OrdersSectionInner({ lang = "ar" }) {
 
         {/* Assign Modal */}
         {showAssignModal && (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60]">
-            <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full relative border border-emerald-200">
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] p-4">
+            <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full relative border border-gray-200">
               <button
-                className="absolute top-2 left-2 text-2xl font-bold text-gray-700 hover:text-emerald-800 transition"
+                className="absolute top-2 left-2 text-2xl font-bold text-gray-700 hover:text-gray-900 transition"
+                style={{ cursor: "pointer" }}
                 onClick={() => setShowAssignModal(false)}
               >
                 ×
               </button>
 
-              <div className="font-bold mb-3 text-emerald-800 flex items-center gap-2 text-lg">
+              <div className="font-bold mb-3 text-gray-900 flex items-center gap-2 text-lg">
                 <FaUserTie className="text-indigo-600" />
                 اختر الموظف
               </div>
 
               <select
-                className="border-2 border-emerald-200 rounded w-full px-3 py-2 mb-3 cursor-pointer text-gray-900 font-bold bg-white focus:border-emerald-500 focus:ring-2 focus:ring-emerald-300"
+                className="border-2 border-gray-300 rounded-lg w-full px-3 py-2 mb-3 cursor-pointer text-gray-900 font-bold bg-white focus:border-gray-900 focus:ring-2 focus:ring-gray-900/20"
+                style={{ cursor: "pointer" }}
                 value={assignTo}
                 onChange={(e) => setAssignTo(e.target.value)}
               >
@@ -764,7 +860,8 @@ function OrdersSectionInner({ lang = "ar" }) {
               </select>
 
               <button
-                className="bg-indigo-700 hover:bg-indigo-800 text-white px-4 py-2 rounded font-bold w-full cursor-pointer mb-2 transition"
+                className="bg-indigo-700 hover:bg-indigo-800 text-white px-4 py-2 rounded-lg font-bold w-full cursor-pointer mb-2 transition"
+                style={{ cursor: "pointer" }}
                 disabled={!assignTo}
                 onClick={() => {
                   handleAssign(order, assignTo);
@@ -775,6 +872,7 @@ function OrdersSectionInner({ lang = "ar" }) {
 
               <button
                 className="absolute top-2 right-2 text-2xl font-bold text-gray-400 hover:text-red-500 cursor-pointer transition"
+                style={{ cursor: "pointer" }}
                 onClick={() => setShowAssignModal(false)}
               >
                 <MdClose />
@@ -785,10 +883,11 @@ function OrdersSectionInner({ lang = "ar" }) {
 
         {/* Custom notification modal */}
         {showNotifModal && (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60]">
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] p-4">
             <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full relative border border-yellow-200">
               <button
                 className="absolute top-2 left-2 text-2xl cursor-pointer text-gray-600 hover:text-gray-900"
+                style={{ cursor: "pointer" }}
                 onClick={() => setShowNotifModal(false)}
               >
                 ×
@@ -800,17 +899,16 @@ function OrdersSectionInner({ lang = "ar" }) {
               </div>
 
               <textarea
-                className="border rounded w-full px-3 py-2 mb-3 text-sm text-gray-800 focus:ring-2 focus:ring-yellow-400"
+                className="border rounded-lg w-full px-3 py-2 mb-3 text-sm text-gray-800 focus:ring-2 focus:ring-yellow-400"
                 rows={3}
                 placeholder="محتوى الإشعار..."
                 value={notifContent}
-                onChange={(e) =>
-                  setNotifContent(e.target.value)
-                }
+                onChange={(e) => setNotifContent(e.target.value)}
               />
 
               <button
-                className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded font-bold w-full cursor-pointer transition text-sm"
+                className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg font-bold w-full cursor-pointer transition text-sm"
+                style={{ cursor: "pointer" }}
                 disabled={!notifContent}
                 onClick={() =>
                   sendCustomNotification(order, notifContent)
@@ -821,6 +919,7 @@ function OrdersSectionInner({ lang = "ar" }) {
 
               <button
                 className="absolute top-2 right-2 text-gray-400 hover:text-red-500 text-2xl font-bold cursor-pointer transition"
+                style={{ cursor: "pointer" }}
                 onClick={() => setShowNotifModal(false)}
               >
                 <MdClose />
@@ -837,19 +936,19 @@ function OrdersSectionInner({ lang = "ar" }) {
     return (
       <aside
         className={[
-          "fixed top-0 right-0 h-full z-50 bg-white border-l border-emerald-200/60",
-          "shadow-xl w-[330px] max-w-full transition-transform duration-300",
+          "fixed top-0 right-0 h-full z-50 bg-white border-l border-gray-200 shadow-xl w-[330px] max-w-full transition-transform duration-300",
           showNewSidebar ? "translate-x-0" : "translate-x-full",
         ].join(" ")}
       >
         {/* Header */}
-        <div className="flex justify-between items-center p-4 border-b border-emerald-200/60 bg-emerald-50/60">
-          <div className="text-lg font-bold text-emerald-900 flex items-center gap-2">
-            <MdNotificationsActive className="text-emerald-700" />
+        <div className="flex justify-between items-center p-4 border-b border-gray-200 bg-gray-50/70">
+          <div className="text-lg font-bold text-gray-900 flex items-center gap-2">
+            <MdNotificationsActive className="text-yellow-600" />
             الطلبات الجديدة
           </div>
           <button
             className="text-2xl text-gray-400 hover:text-gray-700 cursor-pointer"
+            style={{ cursor: "pointer" }}
             onClick={() => setShowNewSidebar(false)}
           >
             ×
@@ -866,24 +965,30 @@ function OrdersSectionInner({ lang = "ar" }) {
 
           {newOrders.map((ord) => {
             const client = clients[ord.clientId];
-            const service = services[ord.serviceId];
-            const sinceText = timeSince(ord.createdAt);
+            const svcFromDB = services[ord.serviceId] || {};
+            const serviceDisplay =
+              ord.serviceName ||
+              svcFromDB.name ||
+              svcFromDB.name_en ||
+              ord.serviceId;
+            const sinceTextValue = timeSince(ord.createdAt);
             const msgPreview = chatPreview[ord.requestId];
 
             return (
               <div
                 key={ord.requestId}
-                className="bg-emerald-50 mb-3 rounded-lg p-3 shadow hover:bg-emerald-100 cursor-pointer border border-emerald-200/60"
+                className="bg-white mb-3 rounded-xl p-3 shadow border border-gray-200 hover:bg-gray-50 cursor-pointer transition"
+                style={{ cursor: "pointer" }}
                 onClick={() => {
                   setSelectedOrder(ord);
                   setShowNewSidebar(false);
                 }}
               >
-                <div className="font-bold text-emerald-900 text-sm">
-                  {service?.name || ord.serviceId}
+                <div className="font-bold text-gray-900 text-sm">
+                  {serviceDisplay}
                 </div>
 
-                <div className="text-[0.8rem] text-gray-800 font-bold">
+                <div className="text-[0.8rem] text-gray-700 font-bold">
                   {client?.name || ord.clientId}
                 </div>
 
@@ -893,12 +998,12 @@ function OrdersSectionInner({ lang = "ar" }) {
 
                 <div className="text-[0.7rem] mt-1 text-gray-600 font-bold">
                   <span className="font-bold">منذ: </span>
-                  {sinceText}
+                  {sinceTextValue}
                 </div>
 
                 {msgPreview && (
-                  <div className="mt-2 flex items-center gap-1 text-[0.7rem] bg-white rounded px-2 py-1 border border-emerald-100 shadow-sm text-gray-800 font-semibold">
-                    <MdOutlineChat className="text-emerald-600" />
+                  <div className="mt-2 flex items-center gap-1 text-[0.7rem] bg-gray-100 rounded px-2 py-1 border border-gray-200 shadow-sm text-gray-800 font-semibold">
+                    <MdOutlineChat className="text-gray-700" />
                     <span>{msgPreview.text}</span>
                     {msgPreview.senderName && (
                       <span className="text-gray-400 font-mono ml-1">
@@ -912,7 +1017,7 @@ function OrdersSectionInner({ lang = "ar" }) {
           })}
         </div>
 
-        {/* صوت الإشعار */}
+        {/* sound ref */}
         <audio
           ref={notifAudioRef}
           src="/sounds/new-order.mp3"
@@ -922,9 +1027,9 @@ function OrdersSectionInner({ lang = "ar" }) {
     );
   }
 
-  // ---------- MAIN RENDER ROOT ----------
+  // ---------- MAIN RENDER ----------
   return (
-    <div className="relative p-4 md:p-8 bg-gradient-to-b from-[#f8fafc] to-[#eef5f2] text-gray-900">
+    <div className="relative p-4 md:p-8 bg-gradient-to-b from-[#f8f9fa] to-[#f1f5f9] text-gray-900 font-sans">
       {/* FILTER BAR */}
       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-6">
         {/* Tabs by client type */}
@@ -933,11 +1038,12 @@ function OrdersSectionInner({ lang = "ar" }) {
             <button
               key={t.key}
               className={[
-                "flex items-center gap-2 px-4 py-2 font-bold rounded-lg border-2 text-sm transition cursor-pointer select-none",
+                "flex items-center gap-2 px-4 py-2 font-bold rounded-xl border text-sm transition select-none",
                 activeTab === t.key
-                  ? "border-emerald-600 bg-white text-emerald-900 shadow"
-                  : "border-transparent bg-gray-100 text-gray-600 hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-300",
+                  ? "border-gray-900 bg-white text-gray-900 shadow"
+                  : "border-transparent bg-gray-100 text-gray-600 hover:bg-white hover:text-gray-900 hover:border-gray-300 shadow-sm",
               ].join(" ")}
+              style={{ cursor: "pointer" }}
               onClick={() => setActiveTab(t.key)}
             >
               {t.icon}
@@ -950,11 +1056,12 @@ function OrdersSectionInner({ lang = "ar" }) {
         <div className="flex gap-2 flex-wrap">
           <button
             className={[
-              "rounded px-3 py-1 font-bold shadow text-xs flex items-center gap-1 cursor-pointer border-2",
+              "rounded-xl px-3 py-1.5 font-bold shadow text-xs flex items-center gap-1 border",
               statusFilter === "all"
-                ? "bg-emerald-700 text-white border-emerald-700"
-                : "bg-white text-emerald-900 border-emerald-200 hover:bg-emerald-50",
+                ? "bg-gray-900 text-white border-gray-900"
+                : "bg-white text-gray-900 border-gray-300 hover:bg-gray-100",
             ].join(" ")}
+            style={{ cursor: "pointer" }}
             onClick={() => setStatusFilter("all")}
           >
             <span>الكل</span>
@@ -965,11 +1072,12 @@ function OrdersSectionInner({ lang = "ar" }) {
             <button
               key={key}
               className={[
-                "rounded px-3 py-1 font-bold shadow text-xs flex items-center gap-1 cursor-pointer border-2",
+                "rounded-xl px-3 py-1.5 font-bold shadow text-[0.7rem] flex items-center gap-1 border",
                 statusFilter === key
-                  ? "bg-emerald-700 text-white border-emerald-700"
-                  : "bg-white text-emerald-900 border-emerald-200 hover:bg-emerald-50",
+                  ? "bg-gray-900 text-white border-gray-900"
+                  : "bg-white text-gray-900 border-gray-300 hover:bg-gray-100",
               ].join(" ")}
+              style={{ cursor: "pointer" }}
               onClick={() => setStatusFilter(key)}
             >
               <span>{STATUS_ICONS[key]}</span>
@@ -983,7 +1091,7 @@ function OrdersSectionInner({ lang = "ar" }) {
       {/* SEARCH + NEW ORDERS BUTTONS */}
       <div className="flex flex-col md:flex-row md:items-center gap-3 mb-4">
         <input
-          className="border border-gray-300 rounded px-3 py-2 flex-1 text-sm text-gray-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-300 shadow-sm bg-white"
+          className="border border-gray-300 rounded-xl px-3 py-2 flex-1 text-sm text-gray-800 focus:border-gray-900 focus:ring-2 focus:ring-gray-900/20 shadow-sm bg-white"
           placeholder="بحث برقم الطلب / العميل / الخدمة / الحالة..."
           value={searchValue}
           onChange={(e) => setSearchValue(e.target.value)}
@@ -991,7 +1099,8 @@ function OrdersSectionInner({ lang = "ar" }) {
 
         <div className="flex items-center gap-2 flex-wrap">
           <button
-            className="flex items-center gap-2 bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded font-bold shadow text-sm cursor-pointer transition border border-yellow-600"
+            className="flex items-center gap-2 bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-xl font-bold shadow text-sm cursor-pointer transition border border-yellow-600"
+            style={{ cursor: "pointer" }}
             onClick={() => setShowNewSidebar(true)}
           >
             <MdNotificationsActive />
@@ -1000,7 +1109,8 @@ function OrdersSectionInner({ lang = "ar" }) {
           </button>
 
           <button
-            className="flex items-center gap-2 bg-white border border-yellow-300 hover:bg-yellow-50 text-yellow-700 px-3 py-2 rounded font-bold shadow text-sm cursor-pointer transition"
+            className="flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-100 text-gray-700 px-3 py-2 rounded-xl font-bold shadow text-sm cursor-pointer transition"
+            style={{ cursor: "pointer" }}
             onClick={() => {
               if (notifAudioRef.current) notifAudioRef.current.play();
             }}
@@ -1012,44 +1122,68 @@ function OrdersSectionInner({ lang = "ar" }) {
       </div>
 
       {/* MAIN TABLE */}
-      <div className="overflow-x-auto rounded-xl shadow bg-white/95 border border-emerald-100">
+      <div className="overflow-x-auto rounded-2xl shadow bg-white border border-gray-200">
         <table className="min-w-full text-center text-sm">
           <thead>
-            <tr className="bg-emerald-50/80 text-emerald-900 font-bold">
-              <th className="py-2 px-3 whitespace-nowrap">رقم الطلب</th>
-              <th className="py-2 px-3 whitespace-nowrap">الخدمة</th>
-              <th className="py-2 px-3 whitespace-nowrap">العميل</th>
-              <th className="py-2 px-3 whitespace-nowrap">الحالة</th>
-              <th className="py-2 px-3 whitespace-nowrap">الموظف</th>
-              <th className="py-2 px-3 whitespace-nowrap">منذ</th>
+            <tr className="bg-gray-50 text-gray-900 font-bold text-xs uppercase tracking-wide">
+              <th className="py-3 px-3 whitespace-nowrap text-gray-700">
+                رقم الطلب
+              </th>
+              <th className="py-3 px-3 whitespace-nowrap text-gray-700">
+                الخدمة
+              </th>
+              <th className="py-3 px-3 whitespace-nowrap text-gray-700">
+                العميل
+              </th>
+              <th className="py-3 px-3 whitespace-nowrap text-gray-700">
+                الحالة
+              </th>
+              <th className="py-3 px-3 whitespace-nowrap text-gray-700">
+                الموظف
+              </th>
+              <th className="py-3 px-3 whitespace-nowrap text-gray-700">
+                منذ
+              </th>
             </tr>
           </thead>
+
           <tbody className="text-gray-800 font-semibold">
             {filteredOrders.map((o) => {
               const client = clients[o.clientId];
-              const service = services[o.serviceId];
               const assignedEmp = employees.find(
                 (e) => e.userId === o.assignedTo
               );
-              const sinceText = timeSince(o.createdAt);
+              const svcFromDB = services[o.serviceId] || {};
+              const serviceDisplay =
+                o.serviceName ||
+                svcFromDB.name ||
+                svcFromDB.name_en ||
+                o.serviceId;
+
+              const sinceTextValue = timeSince(o.createdAt);
 
               return (
                 <tr
                   key={o.requestId}
-                  className="hover:bg-emerald-50 transition border-b cursor-pointer"
+                  className="hover:bg-gray-50 transition border-b cursor-pointer"
+                  style={{ cursor: "pointer" }}
                   onClick={() => setSelectedOrder(o)}
                 >
+                  {/* رقم الطلب */}
                   <td className="py-2 px-3 font-mono font-bold text-indigo-800 text-xs md:text-sm">
                     {o.trackingNumber || o.requestId}
                   </td>
 
-                  <td className="py-2 px-3 text-emerald-900 font-extrabold text-xs md:text-sm">
-                    {service?.name || o.serviceId}
+                  {/* الخدمة */}
+                  <td className="py-2 px-3 text-gray-900 font-extrabold text-xs md:text-sm">
+                    {serviceDisplay || "—"}
                   </td>
 
+                  {/* العميل */}
                   <td className="py-2 px-3">
                     <button
-                      className="text-emerald-700 hover:text-emerald-900 underline font-bold text-xs md:text-sm"
+                      className="text-gray-800 hover:text-gray-900 underline font-bold text-xs md:text-sm"
+                      style={{ cursor: "pointer" }}
                       onClick={(e) => {
                         e.stopPropagation();
                         setShowClientCard(client);
@@ -1059,6 +1193,7 @@ function OrdersSectionInner({ lang = "ar" }) {
                     </button>
                   </td>
 
+                  {/* الحالة */}
                   <td className="py-2 px-3">
                     <span
                       className={[
@@ -1067,23 +1202,23 @@ function OrdersSectionInner({ lang = "ar" }) {
                           "bg-gray-100 text-gray-900 border-gray-400",
                       ].join(" ")}
                     >
-                      <span>
-                        {STATUS_ICONS[o.status] || "❓"}
-                      </span>
+                      <span>{STATUS_ICONS[o.status] || "❓"}</span>
                       <span>
                         {STATUS_LABEL[o.status] || o.status}
                       </span>
                     </span>
                   </td>
 
+                  {/* الموظف */}
                   <td className="py-2 px-3 text-indigo-700 font-bold text-xs md:text-sm">
                     {assignedEmp
                       ? assignedEmp.name
-                      : o.assignedTo || "-"}
+                      : o.assignedTo || "—"}
                   </td>
 
+                  {/* الوقت */}
                   <td className="py-2 px-3 text-[0.7rem] md:text-xs text-gray-700">
-                    {sinceText}
+                    {sinceTextValue}
                   </td>
                 </tr>
               );
@@ -1104,11 +1239,9 @@ function OrdersSectionInner({ lang = "ar" }) {
       </div>
 
       {/* تفاصيل الطلب */}
-      {selectedOrder && (
-        <OrderDetailsModal order={selectedOrder} />
-      )}
+      {selectedOrder && <OrderDetailsModal order={selectedOrder} />}
 
-      {/* كارت العميل المنفصل (لو انت فاتحه لوحده مش من جوه الطلب) */}
+      {/* كارت العميل لوحده */}
       {showClientCard && !selectedOrder && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <ClientCard client={showClientCard} />
@@ -1118,18 +1251,19 @@ function OrdersSectionInner({ lang = "ar" }) {
       {/* سايدبار الطلبات الجديدة */}
       <NewOrdersSidebar />
 
-      {/* تأكيد تثبيت الحالة وإرسال الإشعار */}
+      {/* تأكيد تغيير الحالة + إرسال الإشعار */}
       {pendingStatus && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full relative flex flex-col items-center border border-emerald-200/60">
+          <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full relative flex flex-col items-center border border-gray-200">
             <button
               className="absolute top-2 left-2 text-2xl cursor-pointer text-gray-700 hover:text-gray-900"
+              style={{ cursor: "pointer" }}
               onClick={() => setPendingStatus(null)}
             >
               ×
             </button>
 
-            <div className="text-lg font-bold text-emerald-800 mb-3 flex items-center gap-2 text-center">
+            <div className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2 text-center">
               <span
                 className={[
                   "inline-flex items-center gap-1 px-2 py-1 rounded border font-bold text-xs",
@@ -1156,13 +1290,15 @@ function OrdersSectionInner({ lang = "ar" }) {
 
             <div className="flex gap-3 w-full">
               <button
-                className="bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 rounded font-bold w-full cursor-pointer transition"
+                className="bg-gray-900 hover:bg-black text-white px-4 py-2 rounded-lg font-bold w-full cursor-pointer transition"
+                style={{ cursor: "pointer" }}
                 onClick={confirmChangeStatus}
               >
                 تأكيد
               </button>
               <button
-                className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-2 rounded font-bold w-full cursor-pointer transition"
+                className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-2 rounded-lg font-bold w-full cursor-pointer transition"
+                style={{ cursor: "pointer" }}
                 onClick={() => setPendingStatus(null)}
               >
                 إلغاء
