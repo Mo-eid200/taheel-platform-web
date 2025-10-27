@@ -617,86 +617,83 @@ function ClientCard({ client }) {
 }
 
 
-  function OrderDetailsModal({ order }) {
-    if (!order) return null;
+function OrderDetailsModal({ order }) {
+  if (!order) return null;
 
-    const client = clients[order.clientId];
-    const clientFull = formatClient(clientsRaw[order.clientId] || {});
-    const assignedEmp = employees.find(
-      (e) => e.userId === order.assignedTo
-    );
+  // بيانات العميل
+  const rawClient = clientsRaw[order.clientId] || {};
+  const client = formatClient(rawClient); // فيه coreDocuments
+  const assignedEmp = employees.find(
+    (e) => e.userId === order.assignedTo
+  );
 
-    // إسم الخدمة لعرضه بشكل نظيف
-    const svcFromDB = services[order.serviceId] || {};
-    const serviceDisplay =
-      order.serviceName ||
-      svcFromDB.name ||
-      svcFromDB.name_en ||
-      order.serviceId;
+  // اسم الخدمة
+  const svcFromDB = services[order.serviceId] || {};
+  const serviceDisplay =
+    order.serviceName ||
+    svcFromDB.name ||
+    svcFromDB.name_en ||
+    order.serviceId;
 
-    const createdAtLocal = order.createdAt
-      ? new Date(order.createdAt).toLocaleString("ar-EG")
-      : "-";
-    const sinceTextValue = timeSince(order.createdAt);
+  // توقيت
+  const createdAtLocal = order.createdAt
+    ? new Date(order.createdAt).toLocaleString("ar-EG")
+    : "-";
+  const sinceTextValue = timeSince(order.createdAt);
 
-    // آخر ملاحظة لنفس الحالة الحالية
-    let currentNote = null;
-    if (Array.isArray(order.statusHistory)) {
-      const lastWithThisStatus = [...order.statusHistory]
-        .reverse()
-        .find(
-          (h) => h.status === order.status && h.note
-        );
-      currentNote = lastWithThisStatus?.note || null;
-    }
+  // آخر note لنفس الحالة
+  let currentNote = null;
+  if (Array.isArray(order.statusHistory)) {
+    const lastWithThisStatus = [...order.statusHistory]
+      .reverse()
+      .find((h) => h.status === order.status && h.note);
+    currentNote = lastWithThisStatus?.note || null;
+  }
 
-    // روابط التواصل
-    const whatsappLink = clientFull?.phone
-      ? `https://wa.me/${clientFull.phone.replace(/^0/, "971")}`
-      : null;
-    const mailtoLink = clientFull?.email
-      ? `mailto:${clientFull.email}`
-      : null;
+  // روابط تواصل
+  const whatsappLink = client?.phone
+    ? `https://wa.me/${client.phone.replace(/^0/, "971")}`
+    : null;
+  const mailtoLink = client?.email
+    ? `mailto:${client.email}`
+    : null;
 
-    return (
-      <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 max-w-[900px] w-full flex flex-col md:flex-row gap-4 md:gap-6 overflow-auto max-h-[90vh]">
-          {/* LEFT SIDE: Client card */}
-          <aside className="flex-none bg-gray-50 p-4 md:p-6 border-b md:border-b-0 md:border-r md:min-w-[280px] md:max-w-[320px] flex items-center justify-center rounded-t-2xl md:rounded-l-2xl md:rounded-tr-none">
-            <ClientCard client={clientFull} />
-          </aside>
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 max-w-[1000px] w-full flex flex-col lg:flex-row gap-4 lg:gap-6 overflow-auto max-h-[90vh] relative">
+        {/* close button */}
+        <button
+          className="absolute top-3 left-3 text-2xl text-gray-400 hover:text-gray-900 font-bold cursor-pointer"
+          style={{ cursor: "pointer" }}
+          onClick={() => setSelectedOrder(null)}
+        >
+          <MdClose />
+        </button>
 
-          {/* RIGHT SIDE: order info */}
-          <section className="flex-1 flex flex-col gap-4 p-4 md:p-6 text-[0.95rem] text-gray-900 font-semibold relative">
-            {/* close */}
-            <button
-              className="absolute top-3 left-3 text-2xl text-gray-400 hover:text-gray-900 font-bold cursor-pointer"
-              style={{ cursor: "pointer" }}
-              onClick={() => setSelectedOrder(null)}
+        {/* LEFT SIDE (Client card + core docs) */}
+        <aside className="flex-none bg-gray-50 p-4 lg:p-6 border-b lg:border-b-0 lg:border-r lg:min-w-[300px] lg:max-w-[320px] flex items-start justify-center rounded-t-2xl lg:rounded-l-2xl lg:rounded-tr-none">
+          <ClientCard client={client} />
+        </aside>
+
+        {/* RIGHT SIDE */}
+        <section className="flex-1 flex flex-col gap-4 p-4 lg:p-6 text-[0.95rem] text-gray-900 font-semibold">
+          {/* STATUS */}
+          <div className="flex flex-col gap-2 mb-2 pr-8">
+            <div
+              className={
+                "inline-flex items-center gap-1 px-2 py-1 rounded border font-bold text-xs w-fit " +
+                (STATUS_BADGE_STYLE[order.status] ||
+                  "bg-gray-100 text-gray-900 border-gray-400")
+              }
             >
-              <MdClose />
-            </button>
-
-            {/* STATUS + SERVICE */}
-            <div className="flex items-start justify-between mb-2 pr-8">
-              <div
-                className={
-                  "inline-flex items-center gap-1 px-2 py-1 rounded border font-bold text-xs " +
-                  (STATUS_BADGE_STYLE[order.status] ||
-                    "bg-gray-100 text-gray-900 border-gray-400")
-                }
-              >
-                {STATUS_ICONS[order.status] || "❓"}{" "}
-                {STATUS_LABEL[order.status] || order.status}
-              </div>
+              {STATUS_ICONS[order.status] || "❓"}{" "}
+              {STATUS_LABEL[order.status] || order.status}
             </div>
 
-            {/* Service name */}
-            <div className="font-extrabold text-gray-900 text-lg mb-1 leading-snug">
+            <div className="font-extrabold text-gray-900 text-lg leading-snug">
               {serviceDisplay}
             </div>
 
-            {/* Tracking number */}
             <div className="text-sm">
               <span className="font-bold text-gray-700">
                 رقم الطلب:
@@ -706,32 +703,16 @@ function ClientCard({ client }) {
               </span>
             </div>
 
-            {/* Attachments */}
-            {order.attachments && order.attachments.length > 0 && (
-              <div>
-                <div className="font-bold text-gray-700 mb-1">
-                  مرفقات الطلب:
-                </div>
-                <ul className="list-disc ml-6 text-sm font-semibold text-indigo-700">
-                  {order.attachments.map((att, i) => (
-                    <li key={i}>
-                      <a
-                        href={att.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="underline hover:text-indigo-900"
-                        style={{ cursor: "pointer" }}
-                        download={att.name}
-                      >
-                        {att.name || `مرفق ${i + 1}`}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            <div className="text-xs text-gray-700">
+              <span className="font-bold text-gray-700">
+                وقت الطلب:
+              </span>{" "}
+              {createdAtLocal}{" "}
+              <span className="text-gray-500 font-normal">
+                ({sinceTextValue} مضت)
+              </span>
+            </div>
 
-            {/* Assigned employee */}
             <div className="text-sm">
               <span className="font-bold text-gray-700">
                 الموظف الحالي:
@@ -744,7 +725,6 @@ function ClientCard({ client }) {
               </span>
             </div>
 
-            {/* Paid amount */}
             <div className="text-sm">
               <span className="font-bold text-gray-700">
                 المبلغ:
@@ -755,148 +735,236 @@ function ClientCard({ client }) {
                   : "-"}
               </span>
             </div>
+          </div>
 
-            {/* Time */}
-            <div className="text-xs text-gray-700">
-              <span className="font-bold text-gray-700">
-                وقت الطلب:
-              </span>{" "}
-              {createdAtLocal}{" "}
-              <span className="text-gray-500 font-normal">
-                ({sinceTextValue} مضت)
+          {/* CURRENT STATUS NOTE */}
+          {currentNote && (
+            <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 rounded text-yellow-700 font-semibold text-sm">
+              <div className="font-bold text-yellow-800 mb-1">
+                ملاحظة الموظف الحالية:
+              </div>
+              <div>{currentNote}</div>
+            </div>
+          )}
+
+          {/* SECTION: مستندات الحساب الأساسية */}
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+            <div className="font-bold text-gray-800 mb-3 text-sm flex items-center justify-between">
+              <span>مستندات الحساب الأساسية</span>
+              <span className="text-[0.7rem] text-gray-500 font-normal">
+                (هوية / باسبور / أوراق شركة)
               </span>
             </div>
 
-            {/* Last employee note for current status */}
-            {currentNote && (
-              <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 rounded text-yellow-700 font-semibold text-sm">
-                <div className="font-bold text-yellow-800 mb-1">
-                  ملاحظة الموظف الحالية:
-                </div>
-                <div>{currentNote}</div>
-              </div>
-            )}
-
-            {/* Contact actions */}
-            <div className="flex flex-wrap gap-2 items-center mt-2 text-sm">
-              <span className="font-bold text-gray-800">
-                تواصل مع العميل:
-              </span>
-
-              <button
-                className="flex items-center gap-1 bg-gray-900 hover:bg-black text-white font-bold px-3 py-1.5 rounded-lg shadow cursor-pointer text-xs"
-                style={{ cursor: "pointer" }}
-                onClick={() => setShowChat(!showChat)}
-                disabled={!clientFull?.userId}
-              >
-                <MdOutlineChat /> شات داخلي
-              </button>
-
-              {whatsappLink && (
-                <a
-                  href={whatsappLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white font-bold px-3 py-1.5 rounded-lg shadow cursor-pointer text-xs"
-                  style={{ cursor: "pointer" }}
-                >
-                  <MdWhatsapp /> واتساب
-                </a>
-              )}
-
-              {mailtoLink && (
-                <a
-                  href={mailtoLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 bg-blue-700 hover:bg-blue-800 text-white font-bold px-3 py-1.5 rounded-lg shadow cursor-pointer text-xs"
-                  style={{ cursor: "pointer" }}
-                >
-                  <MdEmail /> إرسال إيميل
-                </a>
-              )}
-
-              <button
-                className="flex items-center gap-1 bg-yellow-500 hover:bg-yellow-600 text-white font-bold px-3 py-1.5 rounded-lg shadow cursor-pointer text-xs"
-                style={{ cursor: "pointer" }}
-                onClick={() => setShowNotifModal(true)}
-              >
-                <MdNotificationsActive /> إشعار مخصص
-              </button>
-            </div>
-
-            {/* Chat box */}
-            {showChat && clientFull?.userId && (
-              <div className="mt-4 border rounded-xl bg-gray-50 p-2 shadow-inner">
-                <ChatWidgetFull
-                  userId={currentEmployee.userId}
-                  userName={currentEmployee.name}
-                  roomId={clientFull.userId}
-                />
-              </div>
-            )}
-
-            {/* Change status form */}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const form = e.target;
-                const newStatus = form.status.value;
-                const note = form.note.value;
-                setPendingStatus({
-                  order,
-                  newStatus,
-                  note,
-                });
-              }}
-              className="flex flex-col gap-2 mt-6 border-t border-gray-200 pt-4"
-            >
-              <label className="font-bold text-gray-800 text-sm">
-                تغيير الحالة:
-              </label>
-
-              <select
-                name="status"
-                defaultValue={order.status}
-                className="border rounded-lg px-2 py-2 cursor-pointer focus:ring-2 focus:ring-gray-900 text-sm font-bold text-gray-800"
-                style={{ cursor: "pointer" }}
-              >
-                {Object.keys(STATUS_LABEL).map((key) => (
-                  <option value={key} key={key}>
-                    {STATUS_ICONS[key]} {STATUS_LABEL[key]}
-                  </option>
+            {client?.coreDocuments && client.coreDocuments.length > 0 ? (
+              <ul className="flex flex-col gap-2 text-sm">
+                {client.coreDocuments.map((docItem, i) => (
+                  <li
+                    key={i}
+                    className="flex items-start justify-between bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs"
+                  >
+                    <div className="text-gray-800 font-semibold leading-snug">
+                      {docItem.label}
+                    </div>
+                    <a
+                      href={docItem.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline text-indigo-600 font-bold"
+                      style={{ cursor: "pointer" }}
+                    >
+                      عرض
+                    </a>
+                  </li>
                 ))}
-              </select>
+              </ul>
+            ) : (
+              <div className="text-gray-400 text-xs font-semibold">
+                لا يوجد مستندات أساسية مسجلة
+              </div>
+            )}
+          </div>
 
-              <input
-                type="text"
-                name="note"
-                className="border rounded-lg px-2 py-2 text-sm text-gray-800"
-                placeholder="ملاحظة الموظف (اختياري)"
-              />
-
-              <button
-                type="submit"
-                className="flex items-center justify-center gap-2 bg-gray-900 hover:bg-black text-white px-4 py-2 rounded-lg font-bold shadow text-sm cursor-pointer transition-all"
-                style={{ cursor: "pointer" }}
-              >
-                <MdNotificationsActive />
-                حفظ الحالة وإشعار العميل
-              </button>
-            </form>
-
-            {/* Assign to employee */}
-            <div className="mt-4">
-              <button
-                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold shadow text-sm cursor-pointer transition-all"
-                style={{ cursor: "pointer" }}
-                onClick={() => setShowAssignModal(true)}
-              >
-                <FaUserTie /> تحويل الطلب لموظف آخر
-              </button>
+          {/* SECTION: مرفقات الطلب الحالية */}
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+            <div className="font-bold text-gray-800 mb-3 text-sm flex items-center justify-between">
+              <span>مرفقات هذا الطلب</span>
+              <span className="text-[0.7rem] text-gray-500 font-normal">
+                (مرفوع من العميل لهذا الطلب بالذات)
+              </span>
             </div>
-          </section>
-        </div>
+
+            {order.orderAttachments && order.orderAttachments.length > 0 ? (
+              <ul className="flex flex-col gap-2 text-sm">
+                {order.orderAttachments.map((att, i) => (
+                  <li
+                    key={i}
+                    className="flex items-start justify-between bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs"
+                  >
+                    <div className="text-gray-800 font-semibold leading-snug break-all">
+                      {att.name || `مرفق ${i + 1}`}
+                    </div>
+                    <a
+                      href={att.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline text-indigo-600 font-bold"
+                      style={{ cursor: "pointer" }}
+                      download={att.name}
+                    >
+                      تنزيل
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="text-gray-400 text-xs font-semibold">
+                لا يوجد مرفقات مضافة على هذا الطلب حتى الآن
+              </div>
+            )}
+          </div>
+
+          {/* SECTION: المستندات المطلوبة من العميل */}
+          {order.requiredDocuments && order.requiredDocuments.length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+              <div className="font-bold text-gray-800 mb-3 text-sm flex items-center justify-between">
+                <span>المستندات المطلوبة من العميل</span>
+                <span className="text-[0.7rem] text-gray-500 font-normal">
+                  (لازم يرفعهم عشان نكمل)
+                </span>
+              </div>
+
+              <ul className="list-disc ml-5 text-xs text-gray-800 font-semibold leading-relaxed">
+                {order.requiredDocuments.map((reqItem, i) => (
+                  <li key={i} className="mb-1">
+                    {typeof reqItem === "string"
+                      ? reqItem
+                      : reqItem?.label || reqItem?.name || "مستند مطلوب"}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* CONTACT + ACTIONS */}
+          <div className="flex flex-wrap gap-2 items-center mt-2 text-sm">
+            <span className="font-bold text-gray-800">
+              تواصل مع العميل:
+            </span>
+
+            <button
+              className="flex items-center gap-1 bg-gray-900 hover:bg-black text-white font-bold px-3 py-1.5 rounded-lg shadow cursor-pointer text-xs"
+              style={{ cursor: "pointer" }}
+              onClick={() => setShowChat(!showChat)}
+              disabled={!client?.userId}
+            >
+              <MdOutlineChat /> شات داخلي
+            </button>
+
+            {whatsappLink && (
+              <a
+                href={whatsappLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white font-bold px-3 py-1.5 rounded-lg shadow cursor-pointer text-xs"
+                style={{ cursor: "pointer" }}
+              >
+                <MdWhatsapp /> واتساب
+              </a>
+            )}
+
+            {mailtoLink && (
+              <a
+                href={mailtoLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 bg-blue-700 hover:bg-blue-800 text-white font-bold px-3 py-1.5 rounded-lg shadow cursor-pointer text-xs"
+                style={{ cursor: "pointer" }}
+              >
+                <MdEmail /> إرسال إيميل
+              </a>
+            )}
+
+            <button
+              className="flex items-center gap-1 bg-yellow-500 hover:bg-yellow-600 text-white font-bold px-3 py-1.5 rounded-lg shadow cursor-pointer text-xs"
+              style={{ cursor: "pointer" }}
+              onClick={() => setShowNotifModal(true)}
+            >
+              <MdNotificationsActive /> إشعار مخصص
+            </button>
+          </div>
+
+          {/* Chat box */}
+          {showChat && client?.userId && (
+            <div className="mt-4 border rounded-xl bg-gray-50 p-2 shadow-inner">
+              <ChatWidgetFull
+                userId={currentEmployee.userId}
+                userName={currentEmployee.name}
+                roomId={client.userId}
+              />
+            </div>
+          )}
+
+          {/* Change status form */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const form = e.target;
+              const newStatus = form.status.value;
+              const note = form.note.value;
+              setPendingStatus({
+                order,
+                newStatus,
+                note,
+              });
+            }}
+            className="flex flex-col gap-2 mt-6 border-t border-gray-200 pt-4"
+          >
+            <label className="font-bold text-gray-800 text-sm">
+              تغيير الحالة:
+            </label>
+
+            <select
+              name="status"
+              defaultValue={order.status}
+              className="border rounded-lg px-2 py-2 cursor-pointer focus:ring-2 focus:ring-gray-900 text-sm font-bold text-gray-800"
+              style={{ cursor: "pointer" }}
+            >
+              {Object.keys(STATUS_LABEL).map((key) => (
+                <option value={key} key={key}>
+                  {STATUS_ICONS[key]} {STATUS_LABEL[key]}
+                </option>
+              ))}
+            </select>
+
+            <input
+              type="text"
+              name="note"
+              className="border rounded-lg px-2 py-2 text-sm text-gray-800"
+              placeholder="ملاحظة الموظف (اختياري)"
+            />
+
+            <button
+              type="submit"
+              className="flex items-center justify-center gap-2 bg-gray-900 hover:bg-black text-white px-4 py-2 rounded-lg font-bold shadow text-sm cursor-pointer transition-all"
+              style={{ cursor: "pointer" }}
+            >
+              <MdNotificationsActive />
+              حفظ الحالة وإشعار العميل
+            </button>
+          </form>
+
+          {/* Assign to employee */}
+          <div className="mt-4">
+            <button
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold shadow text-sm cursor-pointer transition-all"
+              style={{ cursor: "pointer" }}
+              onClick={() => setShowAssignModal(true)}
+            >
+              <FaUserTie /> تحويل الطلب لموظف آخر
+            </button>
+          </div>
+        </section>
 
         {/* Assign Modal */}
         {showAssignModal && (
@@ -998,332 +1066,10 @@ function ClientCard({ client }) {
           </div>
         )}
       </div>
-    );
-  }
 
-  // سايدبار الطلبات الجديدة
-  function NewOrdersSidebar() {
-    return (
-      <aside
-        className={[
-          "fixed top-0 right-0 h-full z-50 bg-white border-l border-gray-200 shadow-xl w-[330px] max-w-full transition-transform duration-300",
-          showNewSidebar ? "translate-x-0" : "translate-x-full",
-        ].join(" ")}
-      >
-        {/* Header */}
-        <div className="flex justify-between items-center p-4 border-b border-gray-200 bg-gray-50/70">
-          <div className="text-lg font-bold text-gray-900 flex items-center gap-2">
-            <MdNotificationsActive className="text-yellow-600" />
-            الطلبات الجديدة
-          </div>
-          <button
-            className="text-2xl text-gray-400 hover:text-gray-700 cursor-pointer"
-            style={{ cursor: "pointer" }}
-            onClick={() => setShowNewSidebar(false)}
-          >
-            ×
-          </button>
-        </div>
-
-        {/* List */}
-        <div className="p-3 overflow-y-auto h-[calc(100%-60px)]">
-          {newOrders.length === 0 && (
-            <div className="text-center text-gray-400 mt-6 text-sm font-semibold">
-              لا يوجد طلبات جديدة
-            </div>
-          )}
-
-          {newOrders.map((ord) => {
-            const client = clients[ord.clientId];
-            const svcFromDB = services[ord.serviceId] || {};
-            const serviceDisplay =
-              ord.serviceName ||
-              svcFromDB.name ||
-              svcFromDB.name_en ||
-              ord.serviceId;
-            const sinceTextValue = timeSince(ord.createdAt);
-            const msgPreview = chatPreview[ord.requestId];
-
-            return (
-              <div
-                key={ord.requestId}
-                className="bg-white mb-3 rounded-xl p-3 shadow border border-gray-200 hover:bg-gray-50 cursor-pointer transition"
-                style={{ cursor: "pointer" }}
-                onClick={() => {
-                  setSelectedOrder(ord);
-                  setShowNewSidebar(false);
-                }}
-              >
-                <div className="font-bold text-gray-900 text-sm">
-                  {serviceDisplay}
-                </div>
-
-                <div className="text-[0.8rem] text-gray-700 font-bold">
-                  {client?.name || ord.clientId}
-                </div>
-
-                <div className="text-[0.7rem] text-gray-500 font-mono font-bold">
-                  {ord.trackingNumber || ord.requestId}
-                </div>
-
-                <div className="text-[0.7rem] mt-1 text-gray-600 font-bold">
-                  <span className="font-bold">منذ: </span>
-                  {sinceTextValue}
-                </div>
-
-                {msgPreview && (
-                  <div className="mt-2 flex items-center gap-1 text-[0.7rem] bg-gray-100 rounded px-2 py-1 border border-gray-200 shadow-sm text-gray-800 font-semibold">
-                    <MdOutlineChat className="text-gray-700" />
-                    <span>{msgPreview.text}</span>
-                    {msgPreview.senderName && (
-                      <span className="text-gray-400 font-mono ml-1">
-                        ({msgPreview.senderName})
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* sound ref */}
-        <audio
-          ref={notifAudioRef}
-          src="/sounds/new-order.mp3"
-          preload="auto"
-        />
-      </aside>
-    );
-  }
-
-  // ---------- MAIN RENDER ----------
-  return (
-    <div className="relative p-4 md:p-8 bg-gradient-to-b from-[#f8f9fa] to-[#f1f5f9] text-gray-900 font-sans">
-      {/* FILTER BAR */}
-      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-6">
-        {/* Tabs by client type */}
-        <div className="flex gap-2 flex-wrap">
-          {TYPE_TABS.map((t) => (
-            <button
-              key={t.key}
-              className={[
-                "flex items-center gap-2 px-4 py-2 font-bold rounded-xl border text-sm transition select-none",
-                activeTab === t.key
-                  ? "border-gray-900 bg-white text-gray-900 shadow"
-                  : "border-transparent bg-gray-100 text-gray-600 hover:bg-white hover:text-gray-900 hover:border-gray-300 shadow-sm",
-              ].join(" ")}
-              style={{ cursor: "pointer" }}
-              onClick={() => setActiveTab(t.key)}
-            >
-              {t.icon}
-              <span>{t.label}</span>
-            </button>
-          ))}
-        </div>
-
-        {/* Status filters */}
-        <div className="flex gap-2 flex-wrap">
-          <button
-            className={[
-              "rounded-xl px-3 py-1.5 font-bold shadow text-xs flex items-center gap-1 border",
-              statusFilter === "all"
-                ? "bg-gray-900 text-white border-gray-900"
-                : "bg-white text-gray-900 border-gray-300 hover:bg-gray-100",
-            ].join(" ")}
-            style={{ cursor: "pointer" }}
-            onClick={() => setStatusFilter("all")}
-          >
-            <span>الكل</span>
-            <span className="font-mono">{orders.length}</span>
-          </button>
-
-          {Object.keys(STATUS_LABEL).map((key) => (
-            <button
-              key={key}
-              className={[
-                "rounded-xl px-3 py-1.5 font-bold shadow text-[0.7rem] flex items-center gap-1 border",
-                statusFilter === key
-                  ? "bg-gray-900 text-white border-gray-900"
-                  : "bg-white text-gray-900 border-gray-300 hover:bg-gray-100",
-              ].join(" ")}
-              style={{ cursor: "pointer" }}
-              onClick={() => setStatusFilter(key)}
-            >
-              <span>{STATUS_ICONS[key]}</span>
-              <span>{STATUS_LABEL[key]}</span>
-              <span className="font-mono">{statusCounts[key] || 0}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* SEARCH + NEW ORDERS BUTTONS */}
-      <div className="flex flex-col md:flex-row md:items-center gap-3 mb-4">
-        <input
-          className="border border-gray-300 rounded-xl px-3 py-2 flex-1 text-sm text-gray-800 focus:border-gray-900 focus:ring-2 focus:ring-gray-900/20 shadow-sm bg-white"
-          placeholder="بحث برقم الطلب / العميل / الخدمة / الحالة..."
-          value={searchValue}
-          onChange={(e) => setSearchValue(e.target.value)}
-        />
-
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            className="flex items-center gap-2 bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-xl font-bold shadow text-sm cursor-pointer transition border border-yellow-600"
-            style={{ cursor: "pointer" }}
-            onClick={() => setShowNewSidebar(true)}
-          >
-            <MdNotificationsActive />
-            <span>الطلبات الجديدة</span>
-            <span className="font-mono">{newOrders.length}</span>
-          </button>
-
-          <button
-            className="flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-100 text-gray-700 px-3 py-2 rounded-xl font-bold shadow text-sm cursor-pointer transition"
-            style={{ cursor: "pointer" }}
-            onClick={() => {
-              if (notifAudioRef.current) notifAudioRef.current.play();
-            }}
-            title="تشغيل صوت الإشعار"
-          >
-            <MdVolumeUp /> صوت إشعار
-          </button>
-        </div>
-      </div>
-
-      {/* MAIN TABLE */}
-      <div className="overflow-x-auto rounded-2xl shadow bg-white border border-gray-200">
-        <table className="min-w-full text-center text-sm">
-          <thead>
-            <tr className="bg-gray-50 text-gray-900 font-bold text-xs uppercase tracking-wide">
-              <th className="py-3 px-3 whitespace-nowrap text-gray-700">
-                رقم الطلب
-              </th>
-              <th className="py-3 px-3 whitespace-nowrap text-gray-700">
-                الخدمة
-              </th>
-              <th className="py-3 px-3 whitespace-nowrap text-gray-700">
-                العميل
-              </th>
-              <th className="py-3 px-3 whitespace-nowrap text-gray-700">
-                الحالة
-              </th>
-              <th className="py-3 px-3 whitespace-nowrap text-gray-700">
-                الموظف
-              </th>
-              <th className="py-3 px-3 whitespace-nowrap text-gray-700">
-                منذ
-              </th>
-            </tr>
-          </thead>
-
-          <tbody className="text-gray-800 font-semibold">
-            {filteredOrders.map((o) => {
-              const client = clients[o.clientId];
-              const assignedEmp = employees.find(
-                (e) => e.userId === o.assignedTo
-              );
-              const svcFromDB = services[o.serviceId] || {};
-              const serviceDisplay =
-                o.serviceName ||
-                svcFromDB.name ||
-                svcFromDB.name_en ||
-                o.serviceId;
-
-              const sinceTextValue = timeSince(o.createdAt);
-
-              return (
-                <tr
-                  key={o.requestId}
-                  className="hover:bg-gray-50 transition border-b cursor-pointer"
-                  style={{ cursor: "pointer" }}
-                  onClick={() => setSelectedOrder(o)}
-                >
-                  {/* رقم الطلب */}
-                  <td className="py-2 px-3 font-mono font-bold text-indigo-800 text-xs md:text-sm">
-                    {o.trackingNumber || o.requestId}
-                  </td>
-
-                  {/* الخدمة */}
-                  <td className="py-2 px-3 text-gray-900 font-extrabold text-xs md:text-sm">
-                    {serviceDisplay || "—"}
-                  </td>
-
-                  {/* العميل */}
-                  <td className="py-2 px-3">
-                    <button
-                      className="text-gray-800 hover:text-gray-900 underline font-bold text-xs md:text-sm"
-                      style={{ cursor: "pointer" }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setShowClientCard(client);
-                      }}
-                    >
-                      {client?.name || o.clientId}
-                    </button>
-                  </td>
-
-                  {/* الحالة */}
-                  <td className="py-2 px-3">
-                    <span
-                      className={[
-                        "inline-flex items-center gap-1 px-2 py-1 rounded-full text-[0.7rem] md:text-xs font-bold border",
-                        STATUS_BADGE_STYLE[o.status] ||
-                          "bg-gray-100 text-gray-900 border-gray-400",
-                      ].join(" ")}
-                    >
-                      <span>{STATUS_ICONS[o.status] || "❓"}</span>
-                      <span>
-                        {STATUS_LABEL[o.status] || o.status}
-                      </span>
-                    </span>
-                  </td>
-
-                  {/* الموظف */}
-                  <td className="py-2 px-3 text-indigo-700 font-bold text-xs md:text-sm">
-                    {assignedEmp
-                      ? assignedEmp.name
-                      : o.assignedTo || "—"}
-                  </td>
-
-                  {/* الوقت */}
-                  <td className="py-2 px-3 text-[0.7rem] md:text-xs text-gray-700">
-                    {sinceTextValue}
-                  </td>
-                </tr>
-              );
-            })}
-
-            {filteredOrders.length === 0 && (
-              <tr>
-                <td
-                  colSpan={7}
-                  className="py-10 text-gray-400 text-sm font-bold"
-                >
-                  لا يوجد طلبات بهذه البيانات.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* تفاصيل الطلب */}
-      {selectedOrder && <OrderDetailsModal order={selectedOrder} />}
-
-      {/* كارت العميل لوحده */}
-      {showClientCard && !selectedOrder && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <ClientCard client={showClientCard} />
-        </div>
-      )}
-
-      {/* سايدبار الطلبات الجديدة */}
-      <NewOrdersSidebar />
-
-      {/* تأكيد تغيير الحالة + إرسال الإشعار */}
+      {/* pending status confirm modal */}
       {pendingStatus && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[70] p-4">
           <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full relative flex flex-col items-center border border-gray-200">
             <button
               className="absolute top-2 left-2 text-2xl cursor-pointer text-gray-700 hover:text-gray-900"
@@ -1354,8 +1100,8 @@ function ClientCard({ client }) {
             </div>
 
             <div className="mb-4 text-center text-sm text-gray-700 font-semibold">
-              هل أنت متأكد أنك تريد تعيين هذه الحالة
-              للطلب؟ سيتم إرسال إشعار تلقائي للعميل.
+              هل أنت متأكد أنك تريد تعيين هذه الحالة للطلب؟
+              سيتم إرسال إشعار تلقائي للعميل.
             </div>
 
             <div className="flex gap-3 w-full">
@@ -1377,8 +1123,186 @@ function ClientCard({ client }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
 
-      {/* refs المهمين */}
+  // ---------- RENDER ----------
+
+  return (
+    <div className="p-6 bg-gray-50 min-h-screen">
+      {/* Header */}
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">إدارة الطلبات</h1>
+        
+        {/* New orders alert */}
+        {newOrders.length > 0 && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+            <div className="flex items-center gap-2 text-blue-800 font-bold">
+              <MdNotificationsActive className="text-xl" />
+              <span>لديك {newOrders.length} طلب جديد يحتاج للمراجعة</span>
+            </div>
+          </div>
+        )}
+
+        {/* Type tabs */}
+        <div className="flex gap-2 mb-4 flex-wrap">
+          {TYPE_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm transition-all cursor-pointer ${
+                activeTab === tab.key
+                  ? "bg-gray-900 text-white"
+                  : "bg-white text-gray-700 hover:bg-gray-100"
+              }`}
+              style={{ cursor: "pointer" }}
+              onClick={() => setActiveTab(tab.key)}
+            >
+              {tab.icon}
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Filters */}
+        <div className="flex gap-4 items-center flex-wrap">
+          <select
+            className="border rounded-lg px-3 py-2 bg-white cursor-pointer text-sm"
+            style={{ cursor: "pointer" }}
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            <option value="all">جميع الحالات</option>
+            {Object.keys(STATUS_LABEL).map((status) => (
+              <option key={status} value={status}>
+                {STATUS_ICONS[status]} {STATUS_LABEL[status]} ({statusCounts[status] || 0})
+              </option>
+            ))}
+          </select>
+
+          <input
+            type="text"
+            placeholder="البحث..."
+            className="border rounded-lg px-3 py-2 text-sm"
+            value={searchValue}
+            onChange={(e) => setSearchValue(e.target.value)}
+          />
+        </div>
+      </div>
+
+      {/* Orders table */}
+      <div className="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-right text-xs font-bold text-gray-600 uppercase">
+                  الطلب
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-bold text-gray-600 uppercase">
+                  العميل
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-bold text-gray-600 uppercase">
+                  الحالة
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-bold text-gray-600 uppercase">
+                  التوقيت
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-bold text-gray-600 uppercase">
+                  الموظف
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-bold text-gray-600 uppercase">
+                  إجراءات
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredOrders.map((order) => {
+                const client = clients[order.clientId] || {};
+                const svcFromDB = services[order.serviceId] || {};
+                const serviceDisplay = order.serviceName || svcFromDB.name || order.serviceId;
+                const assignedEmp = employees.find((e) => e.userId === order.assignedTo);
+
+                return (
+                  <tr key={order.requestId} className="border-t hover:bg-gray-50">
+                    <td className="px-4 py-3">
+                      <div className="text-sm font-bold text-gray-900">
+                        {serviceDisplay}
+                      </div>
+                      <div className="text-xs text-gray-500 font-mono">
+                        {order.trackingNumber || order.requestId}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <img
+                          src={client.profilePic || "/default-avatar.png"}
+                          alt={client.name}
+                          className="w-8 h-8 rounded-full object-cover"
+                        />
+                        <div>
+                          <div className="text-sm font-bold text-gray-900">
+                            {client.name || "بدون اسم"}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            {client.userId}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`px-2 py-1 rounded-full text-xs font-bold border ${
+                          STATUS_BADGE_STYLE[order.status] || "bg-gray-100 text-gray-900 border-gray-400"
+                        }`}
+                      >
+                        {STATUS_ICONS[order.status]} {STATUS_LABEL[order.status] || order.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-gray-600">
+                      {timeSince(order.createdAt)} مضت
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      {assignedEmp ? assignedEmp.name : order.assignedTo || "-"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-2">
+                        <button
+                          className="text-blue-600 hover:text-blue-800 text-sm font-bold cursor-pointer"
+                          style={{ cursor: "pointer" }}
+                          onClick={() => setSelectedOrder(order)}
+                        >
+                          عرض
+                        </button>
+                        {client && (
+                          <button
+                            className="text-gray-600 hover:text-gray-800 text-sm font-bold cursor-pointer"
+                            style={{ cursor: "pointer" }}
+                            onClick={() => setShowClientCard(client)}
+                          >
+                            العميل
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Modals */}
+      {selectedOrder && <OrderDetailsModal order={selectedOrder} />}
+      
+      {showClientCard && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <ClientCard client={showClientCard} />
+        </div>
+      )}
+
+      {/* Audio for notifications */}
       <audio
         ref={notifAudioRef}
         src="/sounds/new-order.mp3"
