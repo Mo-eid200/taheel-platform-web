@@ -68,7 +68,7 @@ const STATUS_BADGE_STYLE = {
   archived: "bg-gray-100 text-gray-700 border-gray-400",
 };
 
-// التابات حسب نوع العميل
+// Tabs by client type
 const TYPE_TABS = [
   { key: "all", label: "الكل", icon: <MdPerson /> },
   { key: "resident", label: "المقيمين", icon: <FaUserCheck /> },
@@ -77,7 +77,7 @@ const TYPE_TABS = [
   { key: "other", label: "أخرى", icon: <FaUserAlt /> },
 ];
 
-// الموظف الحالي (placeholder)
+// الموظف الحالي (placeholder لحد ما نوصل الـ Auth)
 const currentEmployee = {
   userId:
     typeof window !== "undefined" && window.localStorage
@@ -93,7 +93,6 @@ const currentEmployee = {
 // HELPERS
 // =======================
 
-// client type from ID (RES-, NON-, COM-)
 function getClientType(clientId) {
   if (!clientId) return "other";
   if (clientId.startsWith("RES-")) return "resident";
@@ -102,7 +101,6 @@ function getClientType(clientId) {
   return "other";
 }
 
-// "منذ 5 دقايق / 2 ساعة"
 function timeSince(dateIso) {
   if (!dateIso) return "-";
   const created = new Date(dateIso);
@@ -113,19 +111,14 @@ function timeSince(dateIso) {
   return `${hrs} ساعة`;
 }
 
-// توحيد شكل بيانات العميل
+// نسق بيانات العميل + المستندات الأساسية
 function formatClient(rawUser) {
   if (!rawUser) return null;
 
-  // اسم واضح
   const fullName =
     rawUser.name ||
     rawUser.nameEn ||
-    [
-      rawUser.firstName,
-      rawUser.middleName,
-      rawUser.lastName,
-    ]
+    [rawUser.firstName, rawUser.middleName, rawUser.lastName]
       .filter(Boolean)
       .join(" ")
       .trim() ||
@@ -133,38 +126,56 @@ function formatClient(rawUser) {
     rawUser.userId ||
     "بدون اسم";
 
-  // بناء مرفقات أساسية من هيكل documents عندك
   const coreDocs = [];
 
-  if (rawUser.eidFront?.url) {
+  // Emirates ID front
+  if (rawUser.eidFront?.url || rawUser.eidFrontUrl || typeof rawUser.eidFront === "string") {
     coreDocs.push({
       label: "هوية إمارات (الوجه الأمامي)",
       type: "eidFront",
-      url: rawUser.eidFront.url,
-    });
-  }
-  if (rawUser.eidBack?.url) {
-    coreDocs.push({
-      label: "هوية إمارات (الوجه الخلفي)",
-      type: "eidBack",
-      url: rawUser.eidBack.url,
-    });
-  }
-  if (rawUser.passport?.url) {
-    coreDocs.push({
-      label: "جواز السفر",
-      type: "passport",
-      url: rawUser.passport.url,
+      url:
+        rawUser.eidFront?.url ||
+        rawUser.eidFrontUrl ||
+        (typeof rawUser.eidFront === "string" ? rawUser.eidFront : ""),
     });
   }
 
-  // لو عنده بيانات شركة (يعني accountType === "company" أو فيه license)
+  // Emirates ID back
+  if (rawUser.eidBack?.url || rawUser.eidBackUrl || typeof rawUser.eidBack === "string") {
+    coreDocs.push({
+      label: "هوية إمارات (الوجه الخلفي)",
+      type: "eidBack",
+      url:
+        rawUser.eidBack?.url ||
+        rawUser.eidBackUrl ||
+        (typeof rawUser.eidBack === "string" ? rawUser.eidBack : ""),
+    });
+  }
+
+  // Passport
   if (
-    rawUser.accountType === "company" ||
-    rawUser.companyLicenseNumber ||
-    rawUser.companyNameEn ||
-    rawUser.companyNameAr
+    rawUser.passport?.url ||
+    rawUser.passportUrl ||
+    typeof rawUser.passport === "string"
   ) {
+    coreDocs.push({
+      label: "جواز السفر",
+      type: "passport",
+      url:
+        rawUser.passport?.url ||
+        rawUser.passportUrl ||
+        (typeof rawUser.passport === "string" ? rawUser.passport : ""),
+    });
+  }
+
+  // Company docs
+  const isCompany =
+    rawUser.accountType === "company" ||
+    !!rawUser.companyLicenseNumber ||
+    !!rawUser.companyNameEn ||
+    !!rawUser.companyNameAr;
+
+  if (isCompany) {
     if (rawUser.tradeLicenseUrl) {
       coreDocs.push({
         label: "الرخصة التجارية",
@@ -172,8 +183,8 @@ function formatClient(rawUser) {
         url: rawUser.tradeLicenseUrl,
       });
     }
-    // لو عندك مستندات تانية للشركة (مثلاً عقد التأسيس، بطاقة المنشأة...):
-    if (rawUser.companyDocs && Array.isArray(rawUser.companyDocs)) {
+
+    if (Array.isArray(rawUser.companyDocs)) {
       rawUser.companyDocs.forEach((doc, idx) => {
         if (!doc?.url) return;
         coreDocs.push({
@@ -191,16 +202,14 @@ function formatClient(rawUser) {
     name: fullName,
     email: rawUser.email || "",
     phone: rawUser.phone || "",
-    coreDocuments: coreDocs, // 👈 مهم
+    coreDocuments: coreDocs,
   };
 }
 
-
-// توحيد شكل بيانات الطلب
+// نسق بيانات الطلب
 function formatOrder(rawReq) {
-  // جهز مرفقات الطلب نفسه
-  // انت مرات بتخزن attachments كـ array، ومرات بتحط fields زي fileUrl/fileName
   let orderFiles = [];
+
   if (Array.isArray(rawReq.attachments) && rawReq.attachments.length > 0) {
     orderFiles = rawReq.attachments
       .filter((att) => att?.url)
@@ -215,8 +224,6 @@ function formatOrder(rawReq) {
     });
   }
 
-  // جهز لستة المطلوب منه (لو الخدمة طالبة مستندات محددة)
-  // ممكن يكون عندك rawReq.requiredDocuments أو rawReq.service.requiredDocuments
   let requiredDocs = [];
   if (Array.isArray(rawReq.requiredDocuments)) {
     requiredDocs = rawReq.requiredDocuments;
@@ -249,14 +256,10 @@ function formatOrder(rawReq) {
       ? rawReq.statusHistory
       : [],
 
-    // مرفقات الطلب الحالية (عشان الموظف يشيّك اللي العميل رفعه فعلاً)
-    orderAttachments: orderFiles, // 👈 مهم
-
-    // المستندات المطلوبة من العميل (حتى لو لسا ما رفعهاش)
-    requiredDocuments: requiredDocs, // 👈 مهم
+    orderAttachments: orderFiles,
+    requiredDocuments: requiredDocs,
   };
 }
-
 
 // =======================
 // MAIN COMPONENT
@@ -264,11 +267,11 @@ function formatOrder(rawReq) {
 
 function OrdersSectionInner({ lang = "ar" }) {
   // ---------- STATE ----------
-  const [ordersRaw, setOrdersRaw] = useState([]); // before normalize
-  const [orders, setOrders] = useState([]); // after normalize
+  const [ordersRaw, setOrdersRaw] = useState([]);
+  const [orders, setOrders] = useState([]);
 
-  const [clientsRaw, setClientsRaw] = useState({}); // before normalize
-  const [clients, setClients] = useState({}); // after normalize
+  const [clientsRaw, setClientsRaw] = useState({});
+  const [clients, setClients] = useState({});
 
   const [employees, setEmployees] = useState([]);
   const [services, setServices] = useState({});
@@ -278,24 +281,21 @@ function OrdersSectionInner({ lang = "ar" }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [searchValue, setSearchValue] = useState("");
 
-  const [selectedOrder, setSelectedOrder] = useState(null);
-  const [showClientCard, setShowClientCard] = useState(null);
+  const [selectedOrder, setSelectedOrder] = useState(null); // {..} or null
+  const [showClientCard, setShowClientCard] = useState(null); // client formatted obj or null
 
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [assignTo, setAssignTo] = useState("");
 
-  const [showNewSidebar, setShowNewSidebar] = useState(false);
-
-  // pendingStatus { order, newStatus, note }
-  const [pendingStatus, setPendingStatus] = useState(null);
-
   const [showNotifModal, setShowNotifModal] = useState(false);
   const [notifContent, setNotifContent] = useState("");
+
+  const [pendingStatus, setPendingStatus] = useState(null);
+  // pendingStatus = { order, newStatus, note }
 
   const [showChat, setShowChat] = useState(false);
   const [chatPreview, setChatPreview] = useState({});
 
-  // sound
   const [playNotifSound, setPlayNotifSound] = useState(false);
   const notifAudioRef = useRef(null);
 
@@ -313,7 +313,7 @@ function OrdersSectionInner({ lang = "ar" }) {
     return () => unsub();
   }, []);
 
-  // users (عملاء وموظفين)
+  // users
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "users"), (snap) => {
       const rawMap = {};
@@ -356,12 +356,10 @@ function OrdersSectionInner({ lang = "ar" }) {
     return () => unsub();
   }, []);
 
-  // rebuild normalized data whenever raw changes
+  // build normalized data
   useEffect(() => {
-    // normalize orders
     const formattedOrders = ordersRaw.map(formatOrder);
 
-    // normalize clients
     const formattedClientsMap = {};
     Object.keys(clientsRaw).forEach((id) => {
       formattedClientsMap[id] = formatClient(clientsRaw[id]);
@@ -371,9 +369,9 @@ function OrdersSectionInner({ lang = "ar" }) {
     setClients(formattedClientsMap);
   }, [ordersRaw, clientsRaw]);
 
-  // chat preview / صوت جديد جاهز للمستقبل
+  // notification sound hook example
   useEffect(() => {
-    // مثال: لو عايز صوت لما عدد الطلبات يزيد
+    // لو حابب تشغل صوت لما ييجي طلب جديد
     // setPlayNotifSound(true);
   }, [orders.length]);
 
@@ -386,19 +384,18 @@ function OrdersSectionInner({ lang = "ar" }) {
 
   // ---------- DERIVED DATA ----------
 
-  // عداد الحالات
+  // count per status
   const statusCounts = {};
   orders.forEach((o) => {
     const s = o.status || "new";
     statusCounts[s] = (statusCounts[s] || 0) + 1;
   });
 
-  // الطلبات الجديدة (status=new)
   const newOrders = orders
     .filter((o) => (o.status || "new") === "new")
     .sort((a, b) => ((a.createdAt || "") > (b.createdAt || "") ? 1 : -1));
 
-  // فلترة الجدول
+  // filter table
   let filteredOrders = orders.filter((o) => {
     const thisClientType = getClientType(o.clientId);
 
@@ -409,7 +406,10 @@ function OrdersSectionInner({ lang = "ar" }) {
     const client = clients[o.clientId] || {};
     const svcFromDB = services[o.serviceId] || {};
     const serviceDisplay =
-      o.serviceName || svcFromDB.name || svcFromDB.name_en || o.serviceId;
+      o.serviceName ||
+      svcFromDB.name ||
+      svcFromDB.name_en ||
+      o.serviceId;
 
     const searchable = [
       o.trackingNumber,
@@ -433,9 +433,8 @@ function OrdersSectionInner({ lang = "ar" }) {
     (a.createdAt || "") > (b.createdAt || "") ? 1 : -1
   );
 
-  // ---------- ACTIONS (firestore writes) ----------
+  // ---------- ACTIONS ----------
 
-  // اشعار تلقائي بعد تغيير الحالة
   async function sendAutoNotification(order, newStatus) {
     const client = clients[order.clientId];
     if (!client) return;
@@ -458,7 +457,6 @@ function OrdersSectionInner({ lang = "ar" }) {
     await addDoc(collection(db, "notifications"), notifData);
   }
 
-  // حفظ الحالة + history + إشعار
   async function confirmChangeStatus() {
     if (!pendingStatus) return;
     const { order, newStatus, note } = pendingStatus;
@@ -482,7 +480,6 @@ function OrdersSectionInner({ lang = "ar" }) {
       statusHistory: updatedHistory,
     });
 
-    // sync محلي في الـ modal
     setSelectedOrder((prev) =>
       prev && prev.requestId === order.requestId
         ? { ...prev, status: newStatus, statusHistory: updatedHistory }
@@ -494,7 +491,6 @@ function OrdersSectionInner({ lang = "ar" }) {
     setPendingStatus(null);
   }
 
-  // تصدير الطلب لموظف تاني
   async function handleAssign(order, empId) {
     const employee = employees.find((e) => e.userId === empId);
     if (!employee) return;
@@ -513,7 +509,6 @@ function OrdersSectionInner({ lang = "ar" }) {
     );
   }
 
-  // اشعار يدوي مخصص
   async function sendCustomNotification(order, content) {
     if (!content || !order) return;
     const client = clients[order.clientId];
@@ -536,538 +531,736 @@ function OrdersSectionInner({ lang = "ar" }) {
     setNotifContent("");
   }
 
-  // ---------- SMALL SUB COMPONENTS ----------
+  // ---------- SUB COMPONENTS ----------
 
-function ClientCard({ client }) {
-  if (!client) return null;
+  function ClientCard({ client, onClose }) {
+    if (!client) return null;
 
-  return (
-    <div className="p-5 rounded-2xl bg-white shadow-xl border border-gray-200 w-full max-w-lg relative">
-      {/* close */}
-      <button
-        className="absolute top-2 left-2 text-2xl text-gray-400 hover:text-gray-900 font-bold cursor-pointer"
-        style={{ cursor: "pointer" }}
-        onClick={() => setShowClientCard(null)}
-      >
-        <MdClose />
-      </button>
-
-      {/* info */}
-      <div className="flex flex-col items-center text-center">
-        <img
-          src={client.profilePic || "/default-avatar.png"}
-          alt={client.name}
-          className="w-24 h-24 rounded-full border-4 border-gray-100 shadow mb-2 object-cover"
-        />
-        <div className="text-xl font-extrabold text-gray-900">
-          {client.name}
-        </div>
-        <div className="text-gray-500 font-mono font-semibold text-xs">
-          {client.userId}
-        </div>
-
-        <div className="mt-3 mb-1 flex flex-wrap justify-center gap-2 text-[0.8rem] font-semibold">
-          {client.email && (
-            <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded border border-gray-200">
-              {client.email}
-            </span>
-          )}
-          {client.phone && (
-            <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded border border-gray-200">
-              {client.phone}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* core docs */}
-      <div className="mt-4 w-full text-left">
-        <div className="font-bold text-gray-800 mb-2 text-sm">
-          مستندات الحساب الأساسية:
-        </div>
-
-        {client.coreDocuments && client.coreDocuments.length > 0 ? (
-          <div className="flex flex-col gap-2">
-            {client.coreDocuments.map((docItem, i) => (
-              <a
-                key={i}
-                href={docItem.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-start justify-between bg-white px-3 py-2 rounded-lg text-indigo-700 font-bold text-xs hover:bg-indigo-50 border border-indigo-200 shadow-sm"
-                style={{ cursor: "pointer" }}
-              >
-                <span className="text-gray-800 font-semibold leading-snug">
-                  {docItem.label}
-                </span>
-                <span className="underline text-indigo-600 font-mono break-all text-[0.7rem]">
-                  فتح
-                </span>
-              </a>
-            ))}
-          </div>
-        ) : (
-          <div className="text-gray-400 text-xs font-semibold">
-            لا يوجد مستندات أساسية
-          </div>
+    return (
+      <div className="p-5 rounded-2xl bg-white shadow-xl border border-gray-200 w-full max-w-lg relative">
+        {onClose && (
+          <button
+            className="absolute top-2 left-2 text-2xl text-gray-400 hover:text-gray-900 font-bold"
+            style={{ cursor: "pointer" }}
+            onClick={onClose}
+          >
+            <MdClose />
+          </button>
         )}
+
+        <div className="flex flex-col items-center text-center">
+          <img
+            src={client.profilePic || "/default-avatar.png"}
+            alt={client.name}
+            className="w-24 h-24 rounded-full border-4 border-gray-100 shadow mb-2 object-cover"
+          />
+          <div className="text-xl font-extrabold text-gray-900">
+            {client.name}
+          </div>
+          <div className="text-gray-500 font-mono font-semibold text-xs">
+            {client.userId}
+          </div>
+
+          <div className="mt-3 mb-1 flex flex-wrap justify-center gap-2 text-[0.8rem] font-semibold">
+            {client.email && (
+              <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded border border-gray-200">
+                {client.email}
+              </span>
+            )}
+            {client.phone && (
+              <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded border border-gray-200">
+                {client.phone}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* المستندات الأساسية */}
+        <div className="mt-4 w-full text-left">
+          <div className="font-bold text-gray-800 mb-2 text-sm">
+            مستندات الحساب الأساسية:
+          </div>
+
+          {client.coreDocuments && client.coreDocuments.length > 0 ? (
+            <div className="flex flex-col gap-2">
+              {client.coreDocuments.map((docItem, i) => (
+                <a
+                  key={i}
+                  href={docItem.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-start justify-between bg-white px-3 py-2 rounded-lg text-indigo-700 font-bold text-xs hover:bg-indigo-50 border border-indigo-200 shadow-sm"
+                  style={{ cursor: "pointer" }}
+                >
+                  <span className="text-gray-800 font-semibold leading-snug">
+                    {docItem.label}
+                  </span>
+                  <span className="underline text-indigo-600 font-mono break-all text-[0.7rem]">
+                    فتح
+                  </span>
+                </a>
+              ))}
+            </div>
+          ) : (
+            <div className="text-gray-400 text-xs font-semibold">
+              لا يوجد مستندات أساسية
+            </div>
+          )}
+        </div>
       </div>
-    </div>
-  );
-}
-
-
-function OrderDetailsModal({ order }) {
-  if (!order) return null;
-
-  // بيانات العميل
-  const rawClient = clientsRaw[order.clientId] || {};
-  const client = formatClient(rawClient); // فيه coreDocuments
-  const assignedEmp = employees.find(
-    (e) => e.userId === order.assignedTo
-  );
-
-  // اسم الخدمة
-  const svcFromDB = services[order.serviceId] || {};
-  const serviceDisplay =
-    order.serviceName ||
-    svcFromDB.name ||
-    svcFromDB.name_en ||
-    order.serviceId;
-
-  // توقيت
-  const createdAtLocal = order.createdAt
-    ? new Date(order.createdAt).toLocaleString("ar-EG")
-    : "-";
-  const sinceTextValue = timeSince(order.createdAt);
-
-  // آخر note لنفس الحالة
-  let currentNote = null;
-  if (Array.isArray(order.statusHistory)) {
-    const lastWithThisStatus = [...order.statusHistory]
-      .reverse()
-      .find((h) => h.status === order.status && h.note);
-    currentNote = lastWithThisStatus?.note || null;
+    );
   }
 
-  // روابط تواصل
-  const whatsappLink = client?.phone
-    ? `https://wa.me/${client.phone.replace(/^0/, "971")}`
-    : null;
-  const mailtoLink = client?.email
-    ? `mailto:${client.email}`
-    : null;
+  function OrderDetailsModal({ order }) {
+    if (!order) return null;
 
-  return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 max-w-[1000px] w-full flex flex-col lg:flex-row gap-4 lg:gap-6 overflow-auto max-h-[90vh] relative">
-        {/* close button */}
-        <button
-          className="absolute top-3 left-3 text-2xl text-gray-400 hover:text-gray-900 font-bold cursor-pointer"
-          style={{ cursor: "pointer" }}
-          onClick={() => setSelectedOrder(null)}
-        >
-          <MdClose />
-        </button>
+    // العميل الخام من الـ firestore عشان تبقى up-to-date
+    const rawClient = clientsRaw[order.clientId] || {};
+    const formattedClient = formatClient(rawClient);
 
-        {/* LEFT SIDE (Client card + core docs) */}
-        <aside className="flex-none bg-gray-50 p-4 lg:p-6 border-b lg:border-b-0 lg:border-r lg:min-w-[300px] lg:max-w-[320px] flex items-start justify-center rounded-t-2xl lg:rounded-l-2xl lg:rounded-tr-none">
-          <ClientCard client={client} />
-        </aside>
+    const assignedEmp = employees.find(
+      (e) => e.userId === order.assignedTo
+    );
 
-        {/* RIGHT SIDE */}
-        <section className="flex-1 flex flex-col gap-4 p-4 lg:p-6 text-[0.95rem] text-gray-900 font-semibold">
-          {/* STATUS */}
-          <div className="flex flex-col gap-2 mb-2 pr-8">
-            <div
-              className={
-                "inline-flex items-center gap-1 px-2 py-1 rounded border font-bold text-xs w-fit " +
-                (STATUS_BADGE_STYLE[order.status] ||
-                  "bg-gray-100 text-gray-900 border-gray-400")
-              }
-            >
-              {STATUS_ICONS[order.status] || "❓"}{" "}
-              {STATUS_LABEL[order.status] || order.status}
-            </div>
+    // الخدمة
+    const svcFromDB = services[order.serviceId] || {};
+    const serviceDisplay =
+      order.serviceName ||
+      svcFromDB.name ||
+      svcFromDB.name_en ||
+      order.serviceId;
 
-            <div className="font-extrabold text-gray-900 text-lg leading-snug">
-              {serviceDisplay}
-            </div>
+    // وقت الطلب
+    const createdAtLocal = order.createdAt
+      ? new Date(order.createdAt).toLocaleString("ar-EG")
+      : "-";
+    const sinceTextValue = timeSince(order.createdAt);
 
-            <div className="text-sm">
-              <span className="font-bold text-gray-700">
-                رقم الطلب:
-              </span>{" "}
-              <span className="font-mono text-indigo-700 font-bold">
-                {order.trackingNumber || order.requestId}
-              </span>
-            </div>
+    // آخر note لنفس الحالة الحالية
+    let currentNote = null;
+    if (Array.isArray(order.statusHistory)) {
+      const lastWithThisStatus = [...order.statusHistory]
+        .reverse()
+        .find((h) => h.status === order.status && h.note);
+      currentNote = lastWithThisStatus?.note || null;
+    }
 
-            <div className="text-xs text-gray-700">
-              <span className="font-bold text-gray-700">
-                وقت الطلب:
-              </span>{" "}
-              {createdAtLocal}{" "}
-              <span className="text-gray-500 font-normal">
-                ({sinceTextValue} مضت)
-              </span>
-            </div>
+    // روابط تواصل
+    const whatsappLink = formattedClient?.phone
+      ? `https://wa.me/${formattedClient.phone.replace(/^0/, "971")}`
+      : null;
 
-            <div className="text-sm">
-              <span className="font-bold text-gray-700">
-                الموظف الحالي:
-              </span>{" "}
-              <span className="inline-flex items-center gap-1 text-indigo-700 font-bold">
-                <FaUserTie className="text-indigo-600" />
-                {assignedEmp
-                  ? assignedEmp.name
-                  : order.assignedTo || "غير معين"}
-              </span>
-            </div>
+    const mailtoLink = formattedClient?.email
+      ? `mailto:${formattedClient.email}`
+      : null;
 
-            <div className="text-sm">
-              <span className="font-bold text-gray-700">
-                المبلغ:
-              </span>{" "}
-              <span className="text-green-700 font-bold">
-                {order.paidAmount
-                  ? `${order.paidAmount} د.إ`
-                  : "-"}
-              </span>
-            </div>
-          </div>
+    return (
+      <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 max-w-[1000px] w-full flex flex-col lg:flex-row gap-4 lg:gap-6 overflow-auto max-h-[90vh] relative">
+          {/* close */}
+          <button
+            className="absolute top-3 left-3 text-2xl text-gray-400 hover:text-gray-900 font-bold"
+            style={{ cursor: "pointer" }}
+            onClick={() => setSelectedOrder(null)}
+          >
+            <MdClose />
+          </button>
 
-          {/* CURRENT STATUS NOTE */}
-          {currentNote && (
-            <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 rounded text-yellow-700 font-semibold text-sm">
-              <div className="font-bold text-yellow-800 mb-1">
-                ملاحظة الموظف الحالية:
+          {/* العمود الأيمن: بيانات العميل + مستندات أساسية */}
+          <aside className="flex-none bg-gray-50 p-4 lg:p-6 border-b lg:border-b-0 lg:border-r lg:min-w-[300px] lg:max-w-[320px] flex items-start justify-center rounded-t-2xl lg:rounded-l-2xl lg:rounded-tr-none">
+            <ClientCard
+              client={formattedClient}
+              onClose={() => setSelectedOrder(null)}
+            />
+          </aside>
+
+          {/* العمود الأيسر: تفاصيل الطلب */}
+          <section className="flex-1 flex flex-col gap-4 p-4 lg:p-6 text-[0.95rem] text-gray-900 font-semibold">
+            {/* حالة الطلب + معلومات سريعة */}
+            <div className="flex flex-col gap-2 mb-2 pr-8">
+              <div
+                className={
+                  "inline-flex items-center gap-1 px-2 py-1 rounded border font-bold text-xs w-fit " +
+                  (STATUS_BADGE_STYLE[order.status] ||
+                    "bg-gray-100 text-gray-900 border-gray-400")
+                }
+              >
+                {STATUS_ICONS[order.status] || "❓"}{" "}
+                {STATUS_LABEL[order.status] || order.status}
               </div>
-              <div>{currentNote}</div>
-            </div>
-          )}
 
-          {/* SECTION: مستندات الحساب الأساسية */}
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-            <div className="font-bold text-gray-800 mb-3 text-sm flex items-center justify-between">
-              <span>مستندات الحساب الأساسية</span>
-              <span className="text-[0.7rem] text-gray-500 font-normal">
-                (هوية / باسبور / أوراق شركة)
-              </span>
-            </div>
-
-            {client?.coreDocuments && client.coreDocuments.length > 0 ? (
-              <ul className="flex flex-col gap-2 text-sm">
-                {client.coreDocuments.map((docItem, i) => (
-                  <li
-                    key={i}
-                    className="flex items-start justify-between bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs"
-                  >
-                    <div className="text-gray-800 font-semibold leading-snug">
-                      {docItem.label}
-                    </div>
-                    <a
-                      href={docItem.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline text-indigo-600 font-bold"
-                      style={{ cursor: "pointer" }}
-                    >
-                      عرض
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="text-gray-400 text-xs font-semibold">
-                لا يوجد مستندات أساسية مسجلة
+              <div className="font-extrabold text-gray-900 text-lg leading-snug">
+                {serviceDisplay}
               </div>
-            )}
-          </div>
 
-          {/* SECTION: مرفقات الطلب الحالية */}
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-            <div className="font-bold text-gray-800 mb-3 text-sm flex items-center justify-between">
-              <span>مرفقات هذا الطلب</span>
-              <span className="text-[0.7rem] text-gray-500 font-normal">
-                (مرفوع من العميل لهذا الطلب بالذات)
-              </span>
-            </div>
-
-            {order.orderAttachments && order.orderAttachments.length > 0 ? (
-              <ul className="flex flex-col gap-2 text-sm">
-                {order.orderAttachments.map((att, i) => (
-                  <li
-                    key={i}
-                    className="flex items-start justify-between bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs"
-                  >
-                    <div className="text-gray-800 font-semibold leading-snug break-all">
-                      {att.name || `مرفق ${i + 1}`}
-                    </div>
-                    <a
-                      href={att.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline text-indigo-600 font-bold"
-                      style={{ cursor: "pointer" }}
-                      download={att.name}
-                    >
-                      تنزيل
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="text-gray-400 text-xs font-semibold">
-                لا يوجد مرفقات مضافة على هذا الطلب حتى الآن
-              </div>
-            )}
-          </div>
-
-          {/* SECTION: المستندات المطلوبة من العميل */}
-          {order.requiredDocuments && order.requiredDocuments.length > 0 && (
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-              <div className="font-bold text-gray-800 mb-3 text-sm flex items-center justify-between">
-                <span>المستندات المطلوبة من العميل</span>
-                <span className="text-[0.7rem] text-gray-500 font-normal">
-                  (لازم يرفعهم عشان نكمل)
+              <div className="text-sm">
+                <span className="font-bold text-gray-700">
+                  رقم الطلب:
+                </span>{" "}
+                <span className="font-mono text-indigo-700 font-bold">
+                  {order.trackingNumber || order.requestId}
                 </span>
               </div>
 
-              <ul className="list-disc ml-5 text-xs text-gray-800 font-semibold leading-relaxed">
-                {order.requiredDocuments.map((reqItem, i) => (
-                  <li key={i} className="mb-1">
-                    {typeof reqItem === "string"
-                      ? reqItem
-                      : reqItem?.label || reqItem?.name || "مستند مطلوب"}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* CONTACT + ACTIONS */}
-          <div className="flex flex-wrap gap-2 items-center mt-2 text-sm">
-            <span className="font-bold text-gray-800">
-              تواصل مع العميل:
-            </span>
-
-            <button
-              className="flex items-center gap-1 bg-gray-900 hover:bg-black text-white font-bold px-3 py-1.5 rounded-lg shadow cursor-pointer text-xs"
-              style={{ cursor: "pointer" }}
-              onClick={() => setShowChat(!showChat)}
-              disabled={!client?.userId}
-            >
-              <MdOutlineChat /> شات داخلي
-            </button>
-
-            {whatsappLink && (
-              <a
-                href={whatsappLink}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white font-bold px-3 py-1.5 rounded-lg shadow cursor-pointer text-xs"
-                style={{ cursor: "pointer" }}
-              >
-                <MdWhatsapp /> واتساب
-              </a>
-            )}
-
-            {mailtoLink && (
-              <a
-                href={mailtoLink}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 bg-blue-700 hover:bg-blue-800 text-white font-bold px-3 py-1.5 rounded-lg shadow cursor-pointer text-xs"
-                style={{ cursor: "pointer" }}
-              >
-                <MdEmail /> إرسال إيميل
-              </a>
-            )}
-
-            <button
-              className="flex items-center gap-1 bg-yellow-500 hover:bg-yellow-600 text-white font-bold px-3 py-1.5 rounded-lg shadow cursor-pointer text-xs"
-              style={{ cursor: "pointer" }}
-              onClick={() => setShowNotifModal(true)}
-            >
-              <MdNotificationsActive /> إشعار مخصص
-            </button>
-          </div>
-
-          {/* Chat box */}
-          {showChat && client?.userId && (
-            <div className="mt-4 border rounded-xl bg-gray-50 p-2 shadow-inner">
-              <ChatWidgetFull
-                userId={currentEmployee.userId}
-                userName={currentEmployee.name}
-                roomId={client.userId}
-              />
-            </div>
-          )}
-
-          {/* Change status form */}
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              const form = e.target;
-              const newStatus = form.status.value;
-              const note = form.note.value;
-              setPendingStatus({
-                order,
-                newStatus,
-                note,
-              });
-            }}
-            className="flex flex-col gap-2 mt-6 border-t border-gray-200 pt-4"
-          >
-            <label className="font-bold text-gray-800 text-sm">
-              تغيير الحالة:
-            </label>
-
-            <select
-              name="status"
-              defaultValue={order.status}
-              className="border rounded-lg px-2 py-2 cursor-pointer focus:ring-2 focus:ring-gray-900 text-sm font-bold text-gray-800"
-              style={{ cursor: "pointer" }}
-            >
-              {Object.keys(STATUS_LABEL).map((key) => (
-                <option value={key} key={key}>
-                  {STATUS_ICONS[key]} {STATUS_LABEL[key]}
-                </option>
-              ))}
-            </select>
-
-            <input
-              type="text"
-              name="note"
-              className="border rounded-lg px-2 py-2 text-sm text-gray-800"
-              placeholder="ملاحظة الموظف (اختياري)"
-            />
-
-            <button
-              type="submit"
-              className="flex items-center justify-center gap-2 bg-gray-900 hover:bg-black text-white px-4 py-2 rounded-lg font-bold shadow text-sm cursor-pointer transition-all"
-              style={{ cursor: "pointer" }}
-            >
-              <MdNotificationsActive />
-              حفظ الحالة وإشعار العميل
-            </button>
-          </form>
-
-          {/* Assign to employee */}
-          <div className="mt-4">
-            <button
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold shadow text-sm cursor-pointer transition-all"
-              style={{ cursor: "pointer" }}
-              onClick={() => setShowAssignModal(true)}
-            >
-              <FaUserTie /> تحويل الطلب لموظف آخر
-            </button>
-          </div>
-        </section>
-
-        {/* Assign Modal */}
-        {showAssignModal && (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] p-4">
-            <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full relative border border-gray-200">
-              <button
-                className="absolute top-2 left-2 text-2xl font-bold text-gray-700 hover:text-gray-900 transition"
-                style={{ cursor: "pointer" }}
-                onClick={() => setShowAssignModal(false)}
-              >
-                ×
-              </button>
-
-              <div className="font-bold mb-3 text-gray-900 flex items-center gap-2 text-lg">
-                <FaUserTie className="text-indigo-600" />
-                اختر الموظف
+              <div className="text-xs text-gray-700">
+                <span className="font-bold text-gray-700">
+                  وقت الطلب:
+                </span>{" "}
+                {createdAtLocal}{" "}
+                <span className="text-gray-500 font-normal">
+                  ({sinceTextValue} مضت)
+                </span>
               </div>
 
-              <select
-                className="border-2 border-gray-300 rounded-lg w-full px-3 py-2 mb-3 cursor-pointer text-gray-900 font-bold bg-white focus:border-gray-900 focus:ring-2 focus:ring-gray-900/20"
+              <div className="text-sm">
+                <span className="font-bold text-gray-700">
+                  الموظف الحالي:
+                </span>{" "}
+                <span className="inline-flex items-center gap-1 text-indigo-700 font-bold">
+                  <FaUserTie className="text-indigo-600" />
+                  {assignedEmp
+                    ? assignedEmp.name
+                    : order.assignedTo || "غير معين"}
+                </span>
+              </div>
+
+              <div className="text-sm">
+                <span className="font-bold text-gray-700">
+                  المبلغ:
+                </span>{" "}
+                <span className="text-green-700 font-bold">
+                  {order.paidAmount
+                    ? `${order.paidAmount} د.إ`
+                    : "-"}
+                </span>
+              </div>
+            </div>
+
+            {/* آخر ملاحظة للحالة */}
+            {currentNote && (
+              <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 rounded text-yellow-700 font-semibold text-sm">
+                <div className="font-bold text-yellow-800 mb-1">
+                  ملاحظة الموظف الحالية:
+                </div>
+                <div>{currentNote}</div>
+              </div>
+            )}
+
+            {/* مرفقات الطلب */}
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+              <div className="font-bold text-gray-800 mb-3 text-sm flex items-center justify-between">
+                <span>مرفقات هذا الطلب</span>
+                <span className="text-[0.7rem] text-gray-500 font-normal">
+                  (مرفوع من العميل لهذا الطلب بالذات)
+                </span>
+              </div>
+
+              {order.orderAttachments &&
+              order.orderAttachments.length > 0 ? (
+                <ul className="flex flex-col gap-2 text-sm">
+                  {order.orderAttachments.map((att, i) => (
+                    <li
+                      key={i}
+                      className="flex items-start justify-between bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs"
+                    >
+                      <div className="text-gray-800 font-semibold leading-snug break-all">
+                        {att.name || `مرفق ${i + 1}`}
+                      </div>
+                      <a
+                        href={att.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline text-indigo-600 font-bold"
+                        style={{ cursor: "pointer" }}
+                        download={att.name}
+                      >
+                        تنزيل
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="text-gray-400 text-xs font-semibold">
+                  لا يوجد مرفقات مضافة على هذا الطلب حتى الآن
+                </div>
+              )}
+            </div>
+
+            {/* المستندات المطلوبة من العميل */}
+            {order.requiredDocuments &&
+              order.requiredDocuments.length > 0 && (
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+                  <div className="font-bold text-gray-800 mb-3 text-sm flex items-center justify-between">
+                    <span>المستندات المطلوبة من العميل</span>
+                    <span className="text-[0.7rem] text-gray-500 font-normal">
+                      (لازم يرفعهم عشان نكمل)
+                    </span>
+                  </div>
+
+                  <ul className="list-disc ml-5 text-xs text-gray-800 font-semibold leading-relaxed">
+                    {order.requiredDocuments.map((reqItem, i) => (
+                      <li key={i} className="mb-1">
+                        {typeof reqItem === "string"
+                          ? reqItem
+                          : reqItem?.label ||
+                            reqItem?.name ||
+                            "مستند مطلوب"}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+            {/* تواصل مع العميل */}
+            <div className="flex flex-wrap gap-2 items-center mt-2 text-sm">
+              <span className="font-bold text-gray-800">
+                تواصل مع العميل:
+              </span>
+
+              <button
+                className="flex items-center gap-1 bg-gray-900 hover:bg-black text-white font-bold px-3 py-1.5 rounded-lg shadow text-xs"
                 style={{ cursor: "pointer" }}
-                value={assignTo}
-                onChange={(e) => setAssignTo(e.target.value)}
+                onClick={() => setShowChat(!showChat)}
+                disabled={!formattedClient?.userId}
               >
-                <option value="">اختر الموظف</option>
-                {employees.map((emp) => (
-                  <option value={emp.userId} key={emp.userId}>
-                    {emp.name}
+                <MdOutlineChat /> شات داخلي
+              </button>
+
+              {whatsappLink && (
+                <a
+                  href={whatsappLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white font-bold px-3 py-1.5 rounded-lg shadow text-xs"
+                  style={{ cursor: "pointer" }}
+                >
+                  <MdWhatsapp /> واتساب
+                </a>
+              )}
+
+              {mailtoLink && (
+                <a
+                  href={mailtoLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 bg-blue-700 hover:bg-blue-800 text-white font-bold px-3 py-1.5 rounded-lg shadow text-xs"
+                  style={{ cursor: "pointer" }}
+                >
+                  <MdEmail /> إرسال إيميل
+                </a>
+              )}
+
+              <button
+                className="flex items-center gap-1 bg-yellow-500 hover:bg-yellow-600 text-white font-bold px-3 py-1.5 rounded-lg shadow text-xs"
+                style={{ cursor: "pointer" }}
+                onClick={() => setShowNotifModal(true)}
+              >
+                <MdNotificationsActive /> إشعار مخصص
+              </button>
+            </div>
+
+            {/* الشات الداخلي */}
+            {showChat && formattedClient?.userId && (
+              <div className="mt-4 border rounded-xl bg-gray-50 p-2 shadow-inner">
+                <ChatWidgetFull
+                  userId={currentEmployee.userId}
+                  userName={currentEmployee.name}
+                  roomId={formattedClient.userId}
+                />
+              </div>
+            )}
+
+            {/* تغيير حالة الطلب */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const form = e.target;
+                const newStatus = form.status.value;
+                const note = form.note.value;
+                setPendingStatus({
+                  order,
+                  newStatus,
+                  note,
+                });
+              }}
+              className="flex flex-col gap-2 mt-6 border-t border-gray-200 pt-4"
+            >
+              <label className="font-bold text-gray-800 text-sm">
+                تغيير الحالة:
+              </label>
+
+              <select
+                name="status"
+                defaultValue={order.status}
+                className="border rounded-lg px-2 py-2 cursor-pointer focus:ring-2 focus:ring-gray-900 text-sm font-bold text-gray-800"
+                style={{ cursor: "pointer" }}
+              >
+                {Object.keys(STATUS_LABEL).map((key) => (
+                  <option value={key} key={key}>
+                    {STATUS_ICONS[key]} {STATUS_LABEL[key]}
                   </option>
                 ))}
               </select>
 
-              <button
-                className="bg-indigo-700 hover:bg-indigo-800 text-white px-4 py-2 rounded-lg font-bold w-full cursor-pointer mb-2 transition"
-                style={{ cursor: "pointer" }}
-                disabled={!assignTo}
-                onClick={() => {
-                  handleAssign(order, assignTo);
-                }}
-              >
-                تحويل الطلب
-              </button>
-
-              <button
-                className="absolute top-2 right-2 text-2xl font-bold text-gray-400 hover:text-red-500 cursor-pointer transition"
-                style={{ cursor: "pointer" }}
-                onClick={() => setShowAssignModal(false)}
-              >
-                <MdClose />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Custom notification modal */}
-        {showNotifModal && (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] p-4">
-            <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full relative border border-yellow-200">
-              <button
-                className="absolute top-2 left-2 text-2xl cursor-pointer text-gray-600 hover:text-gray-900"
-                style={{ cursor: "pointer" }}
-                onClick={() => setShowNotifModal(false)}
-              >
-                ×
-              </button>
-
-              <div className="font-bold mb-3 text-yellow-700 flex items-center gap-2 text-lg">
-                <MdNotificationsActive />
-                إرسال إشعار للعميل
-              </div>
-
-              <textarea
-                className="border rounded-lg w-full px-3 py-2 mb-3 text-sm text-gray-800 focus:ring-2 focus:ring-yellow-400"
-                rows={3}
-                placeholder="محتوى الإشعار..."
-                value={notifContent}
-                onChange={(e) => setNotifContent(e.target.value)}
+              <input
+                type="text"
+                name="note"
+                className="border rounded-lg px-2 py-2 text-sm text-gray-800"
+                placeholder="ملاحظة الموظف (اختياري)"
               />
 
               <button
-                className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg font-bold w-full cursor-pointer transition text-sm"
+                type="submit"
+                className="flex items-center justify-center gap-2 bg-gray-900 hover:bg-black text-white px-4 py-2 rounded-lg font-bold shadow text-sm transition-all"
                 style={{ cursor: "pointer" }}
-                disabled={!notifContent}
-                onClick={() =>
-                  sendCustomNotification(order, notifContent)
-                }
               >
-                إرسال الإشعار
+                <MdNotificationsActive />
+                حفظ الحالة وإشعار العميل
               </button>
+            </form>
 
+            {/* تحويل لموظف آخر */}
+            <div className="mt-4">
               <button
-                className="absolute top-2 right-2 text-gray-400 hover:text-red-500 text-2xl font-bold cursor-pointer transition"
+                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold shadow text-sm transition-all"
                 style={{ cursor: "pointer" }}
-                onClick={() => setShowNotifModal(false)}
+                onClick={() => setShowAssignModal(true)}
               >
-                <MdClose />
+                <FaUserTie /> تحويل الطلب لموظف آخر
               </button>
+            </div>
+          </section>
+        </div>
+      </div>
+    );
+  }
+
+  // ---------- RENDER ----------
+  return (
+    <div className="p-6 bg-gray-50 min-h-screen">
+      {/* Header */}
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">
+          إدارة الطلبات
+        </h1>
+
+        {/* تنبيه طلبات جديدة */}
+        {newOrders.length > 0 && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+            <div className="flex items-center gap-2 text-blue-800 font-bold">
+              <MdNotificationsActive className="text-xl" />
+              <span>
+                لديك {newOrders.length} طلب جديد يحتاج للمراجعة
+              </span>
             </div>
           </div>
         )}
+
+        {/* Tabs حسب نوع العميل */}
+        <div className="flex gap-2 mb-4 flex-wrap">
+          {TYPE_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm transition-all ${
+                activeTab === tab.key
+                  ? "bg-gray-900 text-white"
+                  : "bg-white text-gray-700 hover:bg-gray-100"
+              }`}
+              style={{ cursor: "pointer" }}
+              onClick={() => setActiveTab(tab.key)}
+            >
+              {tab.icon}
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* الفلاتر العامة */}
+        <div className="flex gap-4 items-center flex-wrap">
+          <select
+            className="border rounded-lg px-3 py-2 bg-white text-sm"
+            style={{ cursor: "pointer" }}
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            <option value="all">جميع الحالات</option>
+            {Object.keys(STATUS_LABEL).map((status) => (
+              <option key={status} value={status}>
+                {STATUS_ICONS[status]} {STATUS_LABEL[status]} (
+                {statusCounts[status] || 0})
+              </option>
+            ))}
+          </select>
+
+          <input
+            type="text"
+            placeholder="بحث برقم الطلب / العميل / الخدمة..."
+            className="border rounded-lg px-3 py-2 text-sm"
+            value={searchValue}
+            onChange={(e) => setSearchValue(e.target.value)}
+          />
+
+          {/* زر الصوت التجريبي */}
+          <button
+            className="flex items-center gap-2 bg-white border border-yellow-300 hover:bg-yellow-50 text-yellow-700 px-3 py-2 rounded-lg font-bold text-sm shadow-sm"
+            style={{ cursor: "pointer" }}
+            onClick={() => {
+              if (notifAudioRef.current) notifAudioRef.current.play();
+            }}
+            title="تشغيل صوت الإشعار"
+          >
+            <MdVolumeUp /> صوت إشعار
+          </button>
+        </div>
       </div>
 
-      {/* pending status confirm modal */}
+      {/* جدول الطلبات */}
+      <div className="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-right">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-xs font-bold text-gray-600 uppercase">
+                  الطلب
+                </th>
+                <th className="px-4 py-3 text-xs font-bold text-gray-600 uppercase">
+                  العميل
+                </th>
+                <th className="px-4 py-3 text-xs font-bold text-gray-600 uppercase">
+                  الحالة
+                </th>
+                <th className="px-4 py-3 text-xs font-bold text-gray-600 uppercase">
+                  الوقت
+                </th>
+                <th className="px-4 py-3 text-xs font-bold text-gray-600 uppercase">
+                  الموظف
+                </th>
+                <th className="px-4 py-3 text-xs font-bold text-gray-600 uppercase">
+                  إجراءات
+                </th>
+              </tr>
+            </thead>
+
+            <tbody className="text-gray-800">
+              {filteredOrders.map((order) => {
+                const client = clients[order.clientId] || {};
+                const svcFromDB = services[order.serviceId] || {};
+                const serviceDisplay =
+                  order.serviceName || svcFromDB.name || order.serviceId;
+                const assignedEmp = employees.find(
+                  (e) => e.userId === order.assignedTo
+                );
+
+                return (
+                  <tr
+                    key={order.requestId}
+                    className="border-t hover:bg-gray-50 transition"
+                  >
+                    <td className="px-4 py-3 align-top">
+                      <div className="text-sm font-bold text-gray-900">
+                        {serviceDisplay}
+                      </div>
+                      <div className="text-xs text-gray-500 font-mono">
+                        {order.trackingNumber || order.requestId}
+                      </div>
+                    </td>
+
+                    <td className="px-4 py-3 align-top">
+                      <div className="flex items-center gap-2">
+                        <img
+                          src={client.profilePic || "/default-avatar.png"}
+                          alt={client.name}
+                          className="w-8 h-8 rounded-full object-cover"
+                        />
+                        <div>
+                          <div className="text-sm font-bold text-gray-900">
+                            {client.name || "بدون اسم"}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            {client.userId}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+
+                    <td className="px-4 py-3 align-top">
+                      <span
+                        className={`px-2 py-1 rounded-full text-xs font-bold border ${
+                          STATUS_BADGE_STYLE[order.status] ||
+                          "bg-gray-100 text-gray-900 border-gray-400"
+                        }`}
+                      >
+                        {STATUS_ICONS[order.status]}{" "}
+                        {STATUS_LABEL[order.status] || order.status}
+                      </span>
+                    </td>
+
+                    <td className="px-4 py-3 align-top text-xs text-gray-600">
+                      {timeSince(order.createdAt)} مضت
+                    </td>
+
+                    <td className="px-4 py-3 align-top text-xs text-gray-800 font-bold">
+                      {assignedEmp
+                        ? assignedEmp.name
+                        : order.assignedTo || "-"}
+                    </td>
+
+                    <td className="px-4 py-3 align-top">
+                      <div className="flex gap-2 flex-wrap">
+                        <button
+                          className="text-blue-600 hover:text-blue-800 text-sm font-bold"
+                          style={{ cursor: "pointer" }}
+                          onClick={() => setSelectedOrder(order)}
+                        >
+                          عرض
+                        </button>
+
+                        {client && (
+                          <button
+                            className="text-gray-600 hover:text-gray-800 text-sm font-bold"
+                            style={{ cursor: "pointer" }}
+                            onClick={() => setShowClientCard(client)}
+                          >
+                            العميل
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {filteredOrders.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="px-4 py-10 text-center text-gray-400 text-sm font-bold"
+                  >
+                    لا يوجد طلبات بهذه البيانات.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* --------- MODALS / OVERLAYS (خارج الجدول) --------- */}
+
+      {/* تفاصيل الطلب */}
+      {selectedOrder && <OrderDetailsModal order={selectedOrder} />}
+
+      {/* كارت عميل مستقل من الجدول */}
+      {showClientCard && !selectedOrder && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <ClientCard
+            client={showClientCard}
+            onClose={() => setShowClientCard(null)}
+          />
+        </div>
+      )}
+
+      {/* مودال تحويل الطلب لموظف آخر */}
+      {showAssignModal && selectedOrder && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full relative border border-gray-200">
+            <button
+              className="absolute top-2 left-2 text-2xl font-bold text-gray-700 hover:text-gray-900 transition"
+              style={{ cursor: "pointer" }}
+              onClick={() => setShowAssignModal(false)}
+            >
+              ×
+            </button>
+
+            <div className="font-bold mb-3 text-gray-900 flex items-center gap-2 text-lg">
+              <FaUserTie className="text-indigo-600" />
+              اختر الموظف
+            </div>
+
+            <select
+              className="border-2 border-gray-300 rounded-lg w-full px-3 py-2 mb-3 cursor-pointer text-gray-900 font-bold bg-white focus:border-gray-900 focus:ring-2 focus:ring-gray-900/20"
+              style={{ cursor: "pointer" }}
+              value={assignTo}
+              onChange={(e) => setAssignTo(e.target.value)}
+            >
+              <option value="">اختر الموظف</option>
+              {employees.map((emp) => (
+                <option value={emp.userId} key={emp.userId}>
+                  {emp.name}
+                </option>
+              ))}
+            </select>
+
+            <button
+              className="bg-indigo-700 hover:bg-indigo-800 text-white px-4 py-2 rounded-lg font-bold w-full cursor-pointer mb-2 transition"
+              style={{ cursor: "pointer" }}
+              disabled={!assignTo}
+              onClick={() => {
+                handleAssign(selectedOrder, assignTo);
+              }}
+            >
+              تحويل الطلب
+            </button>
+
+            <button
+              className="absolute top-2 right-2 text-2xl font-bold text-gray-400 hover:text-red-500 cursor-pointer transition"
+              style={{ cursor: "pointer" }}
+              onClick={() => setShowAssignModal(false)}
+            >
+              <MdClose />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* مودال إرسال إشعار مخصص */}
+      {showNotifModal && selectedOrder && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full relative border border-yellow-200">
+            <button
+              className="absolute top-2 left-2 text-2xl cursor-pointer text-gray-600 hover:text-gray-900"
+              style={{ cursor: "pointer" }}
+              onClick={() => setShowNotifModal(false)}
+            >
+              ×
+            </button>
+
+            <div className="font-bold mb-3 text-yellow-700 flex items-center gap-2 text-lg">
+              <MdNotificationsActive />
+              إرسال إشعار للعميل
+            </div>
+
+            <textarea
+              className="border rounded-lg w-full px-3 py-2 mb-3 text-sm text-gray-800 focus:ring-2 focus:ring-yellow-400"
+              rows={3}
+              placeholder="محتوى الإشعار..."
+              value={notifContent}
+              onChange={(e) => setNotifContent(e.target.value)}
+            />
+
+            <button
+              className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg font-bold w-full cursor-pointer transition text-sm"
+              style={{ cursor: "pointer" }}
+              disabled={!notifContent}
+              onClick={() =>
+                sendCustomNotification(selectedOrder, notifContent)
+              }
+            >
+              إرسال الإشعار
+            </button>
+
+            <button
+              className="absolute top-2 right-2 text-gray-400 hover:text-red-500 text-2xl font-bold cursor-pointer transition"
+              style={{ cursor: "pointer" }}
+              onClick={() => setShowNotifModal(false)}
+            >
+              <MdClose />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* مودال تأكيد تغيير الحالة */}
       {pendingStatus && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[70] p-4">
           <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full relative flex flex-col items-center border border-gray-200">
@@ -1088,8 +1281,7 @@ function OrderDetailsModal({ order }) {
                 ].join(" ")}
               >
                 <span>
-                  {STATUS_ICONS[pendingStatus.newStatus] ||
-                    "❓"}
+                  {STATUS_ICONS[pendingStatus.newStatus] || "❓"}
                 </span>
                 <span>
                   {STATUS_LABEL[pendingStatus.newStatus] ||
@@ -1123,186 +1315,8 @@ function OrderDetailsModal({ order }) {
           </div>
         </div>
       )}
-    </div>
-  );
-}
 
-  // ---------- RENDER ----------
-
-  return (
-    <div className="p-6 bg-gray-50 min-h-screen">
-      {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">إدارة الطلبات</h1>
-        
-        {/* New orders alert */}
-        {newOrders.length > 0 && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-            <div className="flex items-center gap-2 text-blue-800 font-bold">
-              <MdNotificationsActive className="text-xl" />
-              <span>لديك {newOrders.length} طلب جديد يحتاج للمراجعة</span>
-            </div>
-          </div>
-        )}
-
-        {/* Type tabs */}
-        <div className="flex gap-2 mb-4 flex-wrap">
-          {TYPE_TABS.map((tab) => (
-            <button
-              key={tab.key}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm transition-all cursor-pointer ${
-                activeTab === tab.key
-                  ? "bg-gray-900 text-white"
-                  : "bg-white text-gray-700 hover:bg-gray-100"
-              }`}
-              style={{ cursor: "pointer" }}
-              onClick={() => setActiveTab(tab.key)}
-            >
-              {tab.icon}
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Filters */}
-        <div className="flex gap-4 items-center flex-wrap">
-          <select
-            className="border rounded-lg px-3 py-2 bg-white cursor-pointer text-sm"
-            style={{ cursor: "pointer" }}
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-          >
-            <option value="all">جميع الحالات</option>
-            {Object.keys(STATUS_LABEL).map((status) => (
-              <option key={status} value={status}>
-                {STATUS_ICONS[status]} {STATUS_LABEL[status]} ({statusCounts[status] || 0})
-              </option>
-            ))}
-          </select>
-
-          <input
-            type="text"
-            placeholder="البحث..."
-            className="border rounded-lg px-3 py-2 text-sm"
-            value={searchValue}
-            onChange={(e) => setSearchValue(e.target.value)}
-          />
-        </div>
-      </div>
-
-      {/* Orders table */}
-      <div className="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-right text-xs font-bold text-gray-600 uppercase">
-                  الطلب
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-bold text-gray-600 uppercase">
-                  العميل
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-bold text-gray-600 uppercase">
-                  الحالة
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-bold text-gray-600 uppercase">
-                  التوقيت
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-bold text-gray-600 uppercase">
-                  الموظف
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-bold text-gray-600 uppercase">
-                  إجراءات
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredOrders.map((order) => {
-                const client = clients[order.clientId] || {};
-                const svcFromDB = services[order.serviceId] || {};
-                const serviceDisplay = order.serviceName || svcFromDB.name || order.serviceId;
-                const assignedEmp = employees.find((e) => e.userId === order.assignedTo);
-
-                return (
-                  <tr key={order.requestId} className="border-t hover:bg-gray-50">
-                    <td className="px-4 py-3">
-                      <div className="text-sm font-bold text-gray-900">
-                        {serviceDisplay}
-                      </div>
-                      <div className="text-xs text-gray-500 font-mono">
-                        {order.trackingNumber || order.requestId}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <img
-                          src={client.profilePic || "/default-avatar.png"}
-                          alt={client.name}
-                          className="w-8 h-8 rounded-full object-cover"
-                        />
-                        <div>
-                          <div className="text-sm font-bold text-gray-900">
-                            {client.name || "بدون اسم"}
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            {client.userId}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`px-2 py-1 rounded-full text-xs font-bold border ${
-                          STATUS_BADGE_STYLE[order.status] || "bg-gray-100 text-gray-900 border-gray-400"
-                        }`}
-                      >
-                        {STATUS_ICONS[order.status]} {STATUS_LABEL[order.status] || order.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-gray-600">
-                      {timeSince(order.createdAt)} مضت
-                    </td>
-                    <td className="px-4 py-3 text-xs">
-                      {assignedEmp ? assignedEmp.name : order.assignedTo || "-"}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex gap-2">
-                        <button
-                          className="text-blue-600 hover:text-blue-800 text-sm font-bold cursor-pointer"
-                          style={{ cursor: "pointer" }}
-                          onClick={() => setSelectedOrder(order)}
-                        >
-                          عرض
-                        </button>
-                        {client && (
-                          <button
-                            className="text-gray-600 hover:text-gray-800 text-sm font-bold cursor-pointer"
-                            style={{ cursor: "pointer" }}
-                            onClick={() => setShowClientCard(client)}
-                          >
-                            العميل
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Modals */}
-      {selectedOrder && <OrderDetailsModal order={selectedOrder} />}
-      
-      {showClientCard && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <ClientCard client={showClientCard} />
-        </div>
-      )}
-
-      {/* Audio for notifications */}
+      {/* الصوت */}
       <audio
         ref={notifAudioRef}
         src="/sounds/new-order.mp3"
