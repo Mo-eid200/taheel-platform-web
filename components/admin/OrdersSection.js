@@ -128,47 +128,49 @@ function formatClient(rawUser) {
 
   const coreDocs = [];
 
-  // Emirates ID front
-  if (rawUser.eidFront?.url || rawUser.eidFrontUrl || typeof rawUser.eidFront === "string") {
+  const pushDoc = (label, type, url) => {
+    if (!url) return;
     coreDocs.push({
-      label: "هوية إمارات (الوجه الأمامي)",
-      type: "eidFront",
-      url:
-        rawUser.eidFront?.url ||
-        rawUser.eidFrontUrl ||
-        (typeof rawUser.eidFront === "string" ? rawUser.eidFront : ""),
+      label: label || type || "مستند",
+      type: type || "",
+      url: url,
     });
+  };
+
+  // Emirates ID front
+  if (rawUser.eidFront) {
+    if (typeof rawUser.eidFront === "string") {
+      pushDoc("هوية إمارات (الوجه الأمامي)", "eidFront", rawUser.eidFront);
+    } else if (rawUser.eidFront.url) {
+      pushDoc(rawUser.eidFront.label || "هوية إمارات (الوجه الأمامي)", rawUser.eidFront.type || "eidFront", rawUser.eidFront.url);
+    }
+  } else if (rawUser.eidFrontUrl) {
+    pushDoc("هوية إمارات (الوجه الأمامي)", "eidFront", rawUser.eidFrontUrl);
   }
 
   // Emirates ID back
-  if (rawUser.eidBack?.url || rawUser.eidBackUrl || typeof rawUser.eidBack === "string") {
-    coreDocs.push({
-      label: "هوية إمارات (الوجه الخلفي)",
-      type: "eidBack",
-      url:
-        rawUser.eidBack?.url ||
-        rawUser.eidBackUrl ||
-        (typeof rawUser.eidBack === "string" ? rawUser.eidBack : ""),
-    });
+  if (rawUser.eidBack) {
+    if (typeof rawUser.eidBack === "string") {
+      pushDoc("هوية إمارات (الوجه الخلفي)", "eidBack", rawUser.eidBack);
+    } else if (rawUser.eidBack.url) {
+      pushDoc(rawUser.eidBack.label || "هوية إمارات (الوجه الخلفي)", rawUser.eidBack.type || "eidBack", rawUser.eidBack.url);
+    }
+  } else if (rawUser.eidBackUrl) {
+    pushDoc("هوية إمارات (الوجه الخلفي)", "eidBack", rawUser.eidBackUrl);
   }
 
   // Passport
-  if (
-    rawUser.passport?.url ||
-    rawUser.passportUrl ||
-    typeof rawUser.passport === "string"
-  ) {
-    coreDocs.push({
-      label: "جواز السفر",
-      type: "passport",
-      url:
-        rawUser.passport?.url ||
-        rawUser.passportUrl ||
-        (typeof rawUser.passport === "string" ? rawUser.passport : ""),
-    });
+  if (rawUser.passport) {
+    if (typeof rawUser.passport === "string") {
+      pushDoc("جواز السفر", "passport", rawUser.passport);
+    } else if (rawUser.passport.url) {
+      pushDoc(rawUser.passport.label || "جواز السفر", rawUser.passport.type || "passport", rawUser.passport.url);
+    }
+  } else if (rawUser.passportUrl) {
+    pushDoc("جواز السفر", "passport", rawUser.passportUrl);
   }
 
-  // Company docs
+  // company docs
   const isCompany =
     rawUser.accountType === "company" ||
     !!rawUser.companyLicenseNumber ||
@@ -176,88 +178,111 @@ function formatClient(rawUser) {
     !!rawUser.companyNameAr;
 
   if (isCompany) {
-    if (rawUser.tradeLicenseUrl) {
-      coreDocs.push({
-        label: "الرخصة التجارية",
-        type: "tradeLicense",
-        url: rawUser.tradeLicenseUrl,
+    if (rawUser.tradeLicenseUrl) pushDoc("الرخصة التجارية", "tradeLicense", rawUser.tradeLicenseUrl);
+    if (Array.isArray(rawUser.companyDocs)) {
+      rawUser.companyDocs.forEach((d, i) => {
+        if (!d) return;
+        if (typeof d === "string") pushDoc(`مستند شركة ${i + 1}`, "companyDoc", d);
+        else if (d.url) pushDoc(d.label || `مستند شركة ${i + 1}`, d.type || "companyDoc", d.url);
       });
     }
+  }
 
-    if (Array.isArray(rawUser.companyDocs)) {
-      rawUser.companyDocs.forEach((doc, idx) => {
-        if (!doc?.url) return;
-        coreDocs.push({
-          label: doc.label || `مستند شركة ${idx + 1}`,
-          type: doc.type || "companyDoc",
-          url: doc.url,
-        });
+  // وثائق عامة موجودة في حقل documents (map أو array)
+  if (rawUser.documents) {
+    const docs = rawUser.documents;
+    if (Array.isArray(docs)) {
+      docs.forEach((d, i) => {
+        if (!d) return;
+        if (typeof d === "string") pushDoc(`مستند ${i + 1}`, `doc_${i}`, d);
+        else if (d.url) pushDoc(d.label || `مستند ${i + 1}`, d.type || `doc_${i}`, d.url);
+      });
+    } else if (typeof docs === "object") {
+      Object.entries(docs).forEach(([k, v]) => {
+        if (!v) return;
+        if (typeof v === "string") pushDoc(k, k, v);
+        else if (Array.isArray(v)) {
+          v.forEach((item, idx) => {
+            if (item?.url) pushDoc(item.label || `${k} ${idx + 1}`, item.type || k, item.url);
+          });
+        } else if (v.url) {
+          pushDoc(v.label || k, v.type || k, v.url);
+        }
       });
     }
   }
 
   return {
-    userId: rawUser.userId || rawUser.customerId,
+    userId: rawUser.userId || rawUser.customerId || rawUser.uid || "",
     profilePic: rawUser.profilePic || "",
     name: fullName,
-    email: rawUser.email || "",
+    email: rawUser.email || rawUser.userEmail || "",
     phone: rawUser.phone || "",
     coreDocuments: coreDocs,
+    _raw: rawUser, // احتفظ بالأصل للـ debug عند الحاجة
   };
 }
 
 // نسق بيانات الطلب
 function formatOrder(rawReq) {
-  let orderFiles = [];
+  if (!rawReq) return null;
 
-  if (Array.isArray(rawReq.attachments) && rawReq.attachments.length > 0) {
-    orderFiles = rawReq.attachments
-      .filter((att) => att?.url)
-      .map((att, i) => ({
-        name: att.name || `مرفق ${i + 1}`,
-        url: att.url,
-      }));
-  } else if (rawReq.fileUrl) {
-    orderFiles.push({
-      name: rawReq.fileName || "مرفق",
-      url: rawReq.fileUrl,
+  const orderFiles = [];
+
+  // attachments يمكن أن تكون array أو object/map أو legacy fileUrl
+  const atts = rawReq.attachments ?? rawReq.attachmentsMap ?? rawReq.files ?? null;
+
+  if (Array.isArray(atts) && atts.length > 0) {
+    atts.forEach((att, i) => {
+      if (!att) return;
+      if (typeof att === "string") orderFiles.push({ name: `مرفق ${i + 1}`, url: att });
+      else if (att.url) orderFiles.push({ name: att.name || att.label || `مرفق ${i + 1}`, url: att.url });
     });
+  } else if (atts && typeof atts === "object") {
+    Object.entries(atts).forEach(([k, v]) => {
+      if (!v) return;
+      if (typeof v === "string") orderFiles.push({ name: k, url: v });
+      else if (Array.isArray(v)) {
+        v.forEach((item, idx) => {
+          if (item?.url) orderFiles.push({ name: item.name || `${k} ${idx + 1}`, url: item.url });
+        });
+      } else if (v.url) {
+        orderFiles.push({ name: v.name || v.label || k, url: v.url });
+      } else {
+        const possible = v.fileUrl || v.urlString || null;
+        if (possible) orderFiles.push({ name: v.name || k, url: possible });
+      }
+    });
+  } else if (rawReq.fileUrl) {
+    orderFiles.push({ name: rawReq.fileName || "مرفق", url: rawReq.fileUrl });
   }
 
   let requiredDocs = [];
   if (Array.isArray(rawReq.requiredDocuments)) {
     requiredDocs = rawReq.requiredDocuments;
-  } else if (
-    rawReq.service &&
-    Array.isArray(rawReq.service.requiredDocuments)
-  ) {
+  } else if (rawReq.service && Array.isArray(rawReq.service.requiredDocuments)) {
     requiredDocs = rawReq.service.requiredDocuments;
   }
 
   return {
-    requestId: rawReq.requestId || rawReq.id,
-    trackingNumber: rawReq.trackingNumber || rawReq.requestId,
-    clientId: rawReq.clientId || rawReq.customerId,
-    serviceId: rawReq.serviceId || rawReq.service?.serviceId || "",
+    requestId: rawReq.requestId || rawReq.id || "",
+    trackingNumber: rawReq.trackingNumber || rawReq.requestId || rawReq.id || "",
+    clientId: rawReq.clientId || rawReq.customerId || "",
+    serviceId: rawReq.serviceId || (rawReq.service && (rawReq.service.serviceId || rawReq.service.id)) || "",
     serviceName:
       rawReq.serviceName ||
-      rawReq.service?.name ||
-      rawReq.service?.serviceName ||
+      (rawReq.service && (rawReq.service.name || rawReq.service.serviceName)) ||
       rawReq.serviceId ||
       "",
     status: rawReq.status || "new",
     createdAt: rawReq.createdAt || rawReq.lastUpdated || "",
     assignedTo: rawReq.assignedTo || "",
     assignedToName: rawReq.assignedToName || "",
-    paidAmount:
-      typeof rawReq.paidAmount === "number" ? rawReq.paidAmount : null,
-
-    statusHistory: Array.isArray(rawReq.statusHistory)
-      ? rawReq.statusHistory
-      : [],
-
+    paidAmount: typeof rawReq.paidAmount === "number" ? rawReq.paidAmount : null,
+    statusHistory: Array.isArray(rawReq.statusHistory) ? rawReq.statusHistory : [],
     orderAttachments: orderFiles,
     requiredDocuments: requiredDocs,
+    _raw: rawReq,
   };
 }
 
