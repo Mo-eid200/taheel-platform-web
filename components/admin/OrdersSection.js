@@ -117,10 +117,9 @@ function timeSince(dateIso) {
 function formatClient(rawUser) {
   if (!rawUser) return null;
 
-  // اسم العميل: حاول نبني اسم واحد نظيف
+  // اسم واضح
   const fullName =
     rawUser.name ||
-    rawUser.nameEn ||
     rawUser.nameEn ||
     [
       rawUser.firstName,
@@ -134,26 +133,56 @@ function formatClient(rawUser) {
     rawUser.userId ||
     "بدون اسم";
 
-  // المرفقات: انت حالياً مخزن eidFront/eidBack/passport كماب،
-  // أنا هجمعهم في array علشان الكارت يعرضهم.
-  const docs = [];
+  // بناء مرفقات أساسية من هيكل documents عندك
+  const coreDocs = [];
+
   if (rawUser.eidFront?.url) {
-    docs.push({
-      type: "بطاقة الهوية - الأمام",
+    coreDocs.push({
+      label: "هوية إمارات (الوجه الأمامي)",
+      type: "eidFront",
       url: rawUser.eidFront.url,
     });
   }
   if (rawUser.eidBack?.url) {
-    docs.push({
-      type: "بطاقة الهوية - الخلف",
+    coreDocs.push({
+      label: "هوية إمارات (الوجه الخلفي)",
+      type: "eidBack",
       url: rawUser.eidBack.url,
     });
   }
   if (rawUser.passport?.url) {
-    docs.push({
-      type: "جواز السفر",
+    coreDocs.push({
+      label: "جواز السفر",
+      type: "passport",
       url: rawUser.passport.url,
     });
+  }
+
+  // لو عنده بيانات شركة (يعني accountType === "company" أو فيه license)
+  if (
+    rawUser.accountType === "company" ||
+    rawUser.companyLicenseNumber ||
+    rawUser.companyNameEn ||
+    rawUser.companyNameAr
+  ) {
+    if (rawUser.tradeLicenseUrl) {
+      coreDocs.push({
+        label: "الرخصة التجارية",
+        type: "tradeLicense",
+        url: rawUser.tradeLicenseUrl,
+      });
+    }
+    // لو عندك مستندات تانية للشركة (مثلاً عقد التأسيس، بطاقة المنشأة...):
+    if (rawUser.companyDocs && Array.isArray(rawUser.companyDocs)) {
+      rawUser.companyDocs.forEach((doc, idx) => {
+        if (!doc?.url) return;
+        coreDocs.push({
+          label: doc.label || `مستند شركة ${idx + 1}`,
+          type: doc.type || "companyDoc",
+          url: doc.url,
+        });
+      });
+    }
   }
 
   return {
@@ -162,40 +191,72 @@ function formatClient(rawUser) {
     name: fullName,
     email: rawUser.email || "",
     phone: rawUser.phone || "",
-    documents: docs,
+    coreDocuments: coreDocs, // 👈 مهم
   };
 }
 
+
 // توحيد شكل بيانات الطلب
 function formatOrder(rawReq) {
+  // جهز مرفقات الطلب نفسه
+  // انت مرات بتخزن attachments كـ array، ومرات بتحط fields زي fileUrl/fileName
+  let orderFiles = [];
+  if (Array.isArray(rawReq.attachments) && rawReq.attachments.length > 0) {
+    orderFiles = rawReq.attachments
+      .filter((att) => att?.url)
+      .map((att, i) => ({
+        name: att.name || `مرفق ${i + 1}`,
+        url: att.url,
+      }));
+  } else if (rawReq.fileUrl) {
+    orderFiles.push({
+      name: rawReq.fileName || "مرفق",
+      url: rawReq.fileUrl,
+    });
+  }
+
+  // جهز لستة المطلوب منه (لو الخدمة طالبة مستندات محددة)
+  // ممكن يكون عندك rawReq.requiredDocuments أو rawReq.service.requiredDocuments
+  let requiredDocs = [];
+  if (Array.isArray(rawReq.requiredDocuments)) {
+    requiredDocs = rawReq.requiredDocuments;
+  } else if (
+    rawReq.service &&
+    Array.isArray(rawReq.service.requiredDocuments)
+  ) {
+    requiredDocs = rawReq.service.requiredDocuments;
+  }
+
   return {
     requestId: rawReq.requestId || rawReq.id,
     trackingNumber: rawReq.trackingNumber || rawReq.requestId,
     clientId: rawReq.clientId || rawReq.customerId,
-    serviceId: rawReq.serviceId || "",
-    serviceName: rawReq.serviceName || rawReq.serviceId || "",
+    serviceId: rawReq.serviceId || rawReq.service?.serviceId || "",
+    serviceName:
+      rawReq.serviceName ||
+      rawReq.service?.name ||
+      rawReq.service?.serviceName ||
+      rawReq.serviceId ||
+      "",
     status: rawReq.status || "new",
     createdAt: rawReq.createdAt || rawReq.lastUpdated || "",
     assignedTo: rawReq.assignedTo || "",
     assignedToName: rawReq.assignedToName || "",
     paidAmount:
       typeof rawReq.paidAmount === "number" ? rawReq.paidAmount : null,
+
     statusHistory: Array.isArray(rawReq.statusHistory)
       ? rawReq.statusHistory
       : [],
-    attachments:
-      Array.isArray(rawReq.attachments) && rawReq.attachments.length > 0
-        ? rawReq.attachments
-        : rawReq.fileUrl
-        ? [
-            {
-              name: rawReq.fileName || "مرفق",
-              url: rawReq.fileUrl,
-            },
-          ]
-        : [],
+
+    // مرفقات الطلب الحالية (عشان الموظف يشيّك اللي العميل رفعه فعلاً)
+    orderAttachments: orderFiles, // 👈 مهم
+
+    // المستندات المطلوبة من العميل (حتى لو لسا ما رفعهاش)
+    requiredDocuments: requiredDocs, // 👈 مهم
   };
 }
+
 
 // =======================
 // MAIN COMPONENT
