@@ -538,75 +538,84 @@ function OrdersSectionInner({ lang = "ar" }) {
 
   // ---------- SMALL SUB COMPONENTS ----------
 
-  function ClientCard({ client }) {
-    if (!client) return null;
+function ClientCard({ client }) {
+  if (!client) return null;
 
-    return (
-      <div className="p-5 rounded-2xl bg-white shadow-xl border border-gray-200 w-full max-w-lg relative">
-        <button
-          className="absolute top-2 left-2 text-2xl text-gray-400 hover:text-gray-900 font-bold cursor-pointer"
-          style={{ cursor: "pointer" }}
-          onClick={() => setShowClientCard(null)}
-        >
-          <MdClose />
-        </button>
+  return (
+    <div className="p-5 rounded-2xl bg-white shadow-xl border border-gray-200 w-full max-w-lg relative">
+      {/* close */}
+      <button
+        className="absolute top-2 left-2 text-2xl text-gray-400 hover:text-gray-900 font-bold cursor-pointer"
+        style={{ cursor: "pointer" }}
+        onClick={() => setShowClientCard(null)}
+      >
+        <MdClose />
+      </button>
 
-        <div className="flex flex-col items-center text-center">
-          <img
-            src={client.profilePic || "/default-avatar.png"}
-            alt={client.name}
-            className="w-24 h-24 rounded-full border-4 border-gray-100 shadow mb-2 object-cover"
-          />
-          <div className="text-xl font-extrabold text-gray-900">
-            {client.name}
-          </div>
-          <div className="text-gray-500 font-mono font-semibold text-xs">
-            {client.userId}
-          </div>
-
-          <div className="mt-3 mb-1 flex flex-wrap justify-center gap-2 text-[0.8rem] font-semibold">
-            {client.email && (
-              <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded border border-gray-200">
-                {client.email}
-              </span>
-            )}
-            {client.phone && (
-              <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded border border-gray-200">
-                {client.phone}
-              </span>
-            )}
-          </div>
+      {/* info */}
+      <div className="flex flex-col items-center text-center">
+        <img
+          src={client.profilePic || "/default-avatar.png"}
+          alt={client.name}
+          className="w-24 h-24 rounded-full border-4 border-gray-100 shadow mb-2 object-cover"
+        />
+        <div className="text-xl font-extrabold text-gray-900">
+          {client.name}
+        </div>
+        <div className="text-gray-500 font-mono font-semibold text-xs">
+          {client.userId}
         </div>
 
-        <div className="mt-4 w-full text-left">
-          <div className="font-bold text-gray-800 mb-2 text-sm">
-            مرفقات العميل:
-          </div>
-
-          {client.documents && client.documents.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {client.documents.map((docItem, i) => (
-                <a
-                  key={i}
-                  href={docItem.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="bg-white px-3 py-1 rounded text-indigo-700 font-bold text-xs hover:bg-indigo-50 border border-indigo-200 shadow-sm"
-                  style={{ cursor: "pointer" }}
-                >
-                  {docItem.type}
-                </a>
-              ))}
-            </div>
-          ) : (
-            <div className="text-gray-400 text-xs font-semibold">
-              لا يوجد مرفقات
-            </div>
+        <div className="mt-3 mb-1 flex flex-wrap justify-center gap-2 text-[0.8rem] font-semibold">
+          {client.email && (
+            <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded border border-gray-200">
+              {client.email}
+            </span>
+          )}
+          {client.phone && (
+            <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded border border-gray-200">
+              {client.phone}
+            </span>
           )}
         </div>
       </div>
-    );
-  }
+
+      {/* core docs */}
+      <div className="mt-4 w-full text-left">
+        <div className="font-bold text-gray-800 mb-2 text-sm">
+          مستندات الحساب الأساسية:
+        </div>
+
+        {client.coreDocuments && client.coreDocuments.length > 0 ? (
+          <div className="flex flex-col gap-2">
+            {client.coreDocuments.map((docItem, i) => (
+              <a
+                key={i}
+                href={docItem.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-start justify-between bg-white px-3 py-2 rounded-lg text-indigo-700 font-bold text-xs hover:bg-indigo-50 border border-indigo-200 shadow-sm"
+                style={{ cursor: "pointer" }}
+              >
+                <span className="text-gray-800 font-semibold leading-snug">
+                  {docItem.label}
+                </span>
+                <span className="underline text-indigo-600 font-mono break-all text-[0.7rem]">
+                  فتح
+                </span>
+              </a>
+            ))}
+          </div>
+        ) : (
+          <div className="text-gray-400 text-xs font-semibold">
+            لا يوجد مستندات أساسية
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 
   function OrderDetailsModal({ order }) {
     if (!order) return null;
