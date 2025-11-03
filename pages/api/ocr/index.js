@@ -1,110 +1,113 @@
+// pages/api/ocr.js
 import { promises as fs } from "fs";
 import formidable from "formidable";
 import vision from "@google-cloud/vision";
 
-export const config = {
-  api: { bodyParser: false },
-};
+export const config = { api: { bodyParser: false } };
 
-// إعداد بيانات الخدمة بشكل آمن
+// ------- CORS -------
+function setCors(res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+}
+
+// ------- Google Credentials -------
 let credentials;
 try {
   if (!process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
-    console.error("GOOGLE_SERVICE_ACCOUNT_KEY is undefined. تحقق من ملف البيئة .env");
-    throw new Error("GOOGLE_SERVICE_ACCOUNT_KEY is undefined. تحقق من ملف البيئة .env");
+    throw new Error("GOOGLE_SERVICE_ACCOUNT_KEY is undefined");
   }
-  console.log("GOOGLE_SERVICE_ACCOUNT_KEY موجود، جاري التحويل إلى JSON...");
-  const rawCreds = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
-  console.log("تمت قراءة GOOGLE_SERVICE_ACCOUNT_KEY كـ JSON.");
-
-  if (rawCreds.private_key && rawCreds.private_key.includes("\\n")) {
-    rawCreds.private_key = rawCreds.private_key.replace(/\\n/g, '\n');
-    console.log("private_key تم تحويل \\n إلى أسطر حقيقة.");
+  const raw = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
+  if (raw.private_key && raw.private_key.includes("\\n")) {
+    raw.private_key = raw.private_key.replace(/\\n/g, "\n");
   }
-  credentials = rawCreds;
-  console.log("بيانات الخدمة جاهزة للـ Vision API.");
+  credentials = raw;
 } catch (err) {
   console.error("Google Service Account Key Error:", err);
-  throw new Error("خطأ في قراءة GOOGLE_SERVICE_ACCOUNT_KEY من ملف البيئة. تأكد من وجوده وصيغته الصحيحة.");
+  throw new Error("Invalid GOOGLE_SERVICE_ACCOUNT_KEY");
 }
 
 const client = new vision.ImageAnnotatorClient({ credentials });
 
+// ------- Utils -------
+function normalizeDocType(dt) {
+  const map = {
+    ownerEidFront: "ownerIdFront",
+    ownerEidBack: "ownerIdBack",
+  };
+  return map[dt] || dt;
+}
+
+function allowMimeFor(docType) {
+  const imageTypes = ["image/jpeg", "image/jpg", "image/png", "image/heic", "image/heif", "image/webp"];
+  if (docType === "license") return [...imageTypes, "application/pdf"];
+  return imageTypes;
+}
+
+// ------- Handler -------
 export default async function handler(req, res) {
-  console.log("تم استدعاء /api/ocr بالميثود:", req.method);
+  setCors(res);
+  if (req.method === "OPTIONS") return res.status(200).end();
 
   if (req.method !== "POST") {
-    console.error("ميثود غير مدعوم:", req.method);
     return res.status(405).json({ success: false, message: "Method Not Allowed" });
   }
 
-  const form = formidable({ keepExtensions: true });
+  const form = formidable({
+    keepExtensions: true,
+    maxFileSize: 12 * 1024 * 1024, // 12MB
+  });
 
   try {
     const [fields, files] = await new Promise((resolve, reject) => {
-      form.parse(req, (err, fields, files) => {
-        if (err) {
-          console.error("Formidable error:", err);
-          reject(err);
-        } else {
-          console.log("Form fields:", fields);
-          console.log("Form files:", files);
-          resolve([fields, files]);
-        }
-      });
+      form.parse(req, (err, flds, fls) => (err ? reject(err) : resolve([flds, fls])));
     });
 
     const fileRaw = files?.file;
     const file = Array.isArray(fileRaw) ? fileRaw[0] : fileRaw;
-    const docTypeRaw = fields?.docType;
-    const docType = Array.isArray(docTypeRaw) ? docTypeRaw[0] : docTypeRaw;
 
-    if (!file?.filepath || typeof docType !== "string" || !docType.trim()) {
-      console.error("الملف أو نوع المستند غير موجود", { file, docType });
+    const docTypeRaw = fields?.docType;
+    const _docType = Array.isArray(docTypeRaw) ? docTypeRaw[0] : docTypeRaw;
+    const docType = normalizeDocType(typeof _docType === "string" ? _docType.trim() : "");
+
+    if (!file?.filepath || !docType) {
       return res.status(400).json({ success: false, message: "الملف أو نوع المستند غير موجود" });
     }
 
-    // تحقق من نوع وصيغة الصورة بشكل آمن
-    const allowedTypes = ["image/jpeg", "image/png", "image/jpg"];
-    const fileMimetype = typeof file?.mimetype === "string" ? file.mimetype : "";
-    if (!allowedTypes.includes(fileMimetype)) {
-      console.error("نوع الصورة غير مدعوم:", fileMimetype);
+    const allowed = allowMimeFor(docType);
+    const mimetype = typeof file?.mimetype === "string" ? file.mimetype : "";
+
+    if (!allowed.includes(mimetype)) {
       return res.status(400).json({
         success: false,
-        message: "❌ فقط صور JPG أو PNG مدعومة.",
+        message: docType === "license"
+          ? "❌ نوع الملف غير مدعوم. مسموح PNG/JPG/HEIC/PDF."
+          : "❌ نوع الملف غير مدعوم. مسموح PNG/JPG/HEIC.",
       });
     }
 
-    // قراءة الملف من النظام
     let fileBuffer;
     try {
       fileBuffer = await fs.readFile(file.filepath);
-      console.log("تمت قراءة ملف الصورة من النظام.");
-    } catch (readErr) {
-      console.error("تعذر قراءة الملف من النظام:", readErr);
-      return res.status(400).json({
-        success: false,
-        message: "تعذر قراءة الملف، أعد رفعه.",
-      });
+    } catch {
+      return res.status(400).json({ success: false, message: "تعذر قراءة الملف، أعد الرفع." });
     }
 
-    // تحقق أن الملف غير فارغ
     if (!fileBuffer || !Buffer.isBuffer(fileBuffer) || fileBuffer.length === 0) {
-      console.error("الصورة غير صالحة أو فارغة.");
-      return res.status(400).json({
-        success: false,
-        message: "الصورة غير صالحة أو فارغة، أعد رفع الملف.",
-      });
+      return res.status(400).json({ success: false, message: "الصورة غير صالحة أو فارغة." });
     }
 
-    // -------- Google Vision API OCR --------
+    // ------- OCR (Google Vision) -------
     let result;
     try {
-      console.log("إرسال الصورة إلى Google Vision API...");
-      [result] = await client.textDetection({ image: { content: fileBuffer } });
-      console.log("تم استلام نتيجة OCR من Google Vision.");
+      // PDF يفضّل documentTextDetection — قد تتطلب GCS لملفات PDF كبيرة؛ هنا نجرب مباشرة.
+      if (mimetype === "application/pdf") {
+        [result] = await client.documentTextDetection({ image: { content: fileBuffer } });
+      } else {
+        [result] = await client.textDetection({ image: { content: fileBuffer } });
+      }
     } catch (visionErr) {
-      console.error("Google Vision OCR Error:", visionErr);
       return res.status(500).json({
         success: false,
         message: "خطأ في خدمة OCR من Google Vision",
@@ -114,73 +117,61 @@ export default async function handler(req, res) {
 
     const detections = Array.isArray(result?.textAnnotations) ? result.textAnnotations : [];
     const text = (detections[0]?.description && typeof detections[0].description === "string") ? detections[0].description : "";
-
-    // -------- END GOOGLE VISION --------
-
     const cleanedText = (typeof text === "string" ? text : "").trim();
     const upperText = cleanedText ? cleanedText.toUpperCase() : "";
 
-    console.log("النص المستخرج من المستند:", cleanedText);
-
     if (cleanedText.length < 15) {
-      console.error("النص المستخرج قصير جدًا:", cleanedText);
       return res.status(200).json({
         success: false,
         text: cleanedText,
-        message: `فشل الفحص. المستند غير واضح أو لا يحتوي على نص قابل للتحليل.`,
+        message: "فشل الفحص. المستند غير واضح أو لا يحتوي على نص قابل للتحليل.",
       });
     }
 
     let isValid = false;
     let extractedData = {};
 
-    // تحقق من نوع المستند وأمان فحص النص
     if (docType === "eidFront" || docType === "ownerIdFront") {
       const indicators = [
-        typeof upperText === "string" && upperText.includes("NATIONALITY"),
-        typeof upperText === "string" && upperText.includes("ISSUING DATE"),
-        typeof upperText === "string" && upperText.includes("EXPIRY DATE")
+        upperText.includes("NATIONALITY"),
+        upperText.includes("ISSUING DATE"),
+        upperText.includes("EXPIRY DATE"),
       ];
       isValid = indicators.filter(Boolean).length >= 2;
     } else if (docType === "eidBack" || docType === "ownerIdBack") {
-      isValid =
-        typeof upperText === "string" &&
-        upperText.includes("OCCUPATION") &&
-        upperText.includes("EMPLOYER");
+      isValid = upperText.includes("OCCUPATION") && upperText.includes("EMPLOYER");
     } else if (docType === "passport") {
-      const mrzMatch = typeof upperText === "string" ? upperText.match(/P<([A-Z]{3})([A-Z<]+)<<([A-Z<]+)[\s\S]+?([A-Z0-9]{6,})[A-Z]{3}/) : null;
+      const mrzMatch = upperText.match(/P<([A-Z]{3})([A-Z<]+)<<([A-Z<]+)[\s\S]+?([A-Z0-9]{6,})[A-Z]{3}/);
       if (mrzMatch) {
         isValid = true;
         const countryCode = mrzMatch[1];
         const surname = mrzMatch[2]?.replace(/</g, " ").trim();
         const givenNames = mrzMatch[3]?.replace(/</g, " ").trim();
         const passportNumber = mrzMatch[4];
-
         extractedData = {
           passportNumber,
           countryCode,
-          fullName: `${surname} ${givenNames}`.replace(/\s+/g, " ").trim()
+          fullName: `${surname} ${givenNames}`.replace(/\s+/g, " ").trim(),
         };
       }
     } else if (docType === "license") {
       const licenseIndicators = [
-        typeof upperText === "string" && (upperText.includes("LICENSE") || upperText.includes("رخصة")),
-        typeof upperText === "string" && (upperText.includes("TRADE") || upperText.includes("تجاري")),
-        typeof upperText === "string" && (upperText.includes("COMMERCIAL") || upperText.includes("اقتصادية")),
-        typeof upperText === "string" && (upperText.includes("ECONOMIC") || upperText.includes("الاقتصادية")),
-        typeof upperText === "string" && (upperText.includes("DEPARTMENT") || upperText.includes("دائرة")),
-        typeof upperText === "string" && (upperText.includes("LICENSE NO") || upperText.includes("رقم الرخصة")),
-        typeof upperText === "string" && (upperText.includes("EXPIRY DATE") || upperText.includes("تاريخ الانتهاء") || upperText.includes("تاريخ الإنتهاء")),
-        typeof upperText === "string" && (upperText.includes("ISSUE DATE") || upperText.includes("تاريخ الاصدار") || upperText.includes("تاريخ الإصدار")),
-        typeof upperText === "string" && (upperText.includes("TRADE NAME") || upperText.includes("الاسم التجاري") || upperText.includes("اسم النشاط"))
+        upperText.includes("LICENSE") || upperText.includes("رخصة"),
+        upperText.includes("TRADE") || upperText.includes("تجاري"),
+        upperText.includes("COMMERCIAL") || upperText.includes("اقتصادية"),
+        upperText.includes("ECONOMIC") || upperText.includes("الاقتصادية"),
+        upperText.includes("DEPARTMENT") || upperText.includes("دائرة"),
+        upperText.includes("LICENSE NO") || upperText.includes("رقم الرخصة"),
+        upperText.includes("EXPIRY DATE") || upperText.includes("تاريخ الانتهاء") || upperText.includes("تاريخ الإنتهاء"),
+        upperText.includes("ISSUE DATE") || upperText.includes("تاريخ الاصدار") || upperText.includes("تاريخ الإصدار"),
+        upperText.includes("TRADE NAME") || upperText.includes("الاسم التجاري") || upperText.includes("اسم النشاط"),
       ];
-
       isValid = licenseIndicators.filter(Boolean).length >= 3;
 
-      const licenseNumberMatch = typeof upperText === "string" ? upperText.match(/(?:LICENSE\s*NO|رخصة\s*رقم|رقم\s*الرخصة)[:\s\-]*([A-Z0-9\-]+)/) : null;
-      const issueDateMatch = typeof upperText === "string" ? upperText.match(/(?:ISSUE\s*DATE|تاريخ\s*الإصدار|تاريخ\s*الاصدار)[:\s\-]*([\d\/\-]+)/) : null;
-      const expiryDateMatch = typeof upperText === "string" ? upperText.match(/(?:EXPIR[YI]\s*DATE|تاريخ\s*الانتهاء|تاريخ\s*الإنتهاء)[:\s\-]*([\d\/\-]+)/) : null;
-      const tradeNameMatch = typeof upperText === "string" ? upperText.match(/(?:TRADE\s*NAME|الاسم\s*التجاري|اسم\s*النشاط|اسم\s*الشركة)[:\s\-]*([A-Z\s\u0600-\u06FF]+)/) : null;
+      const licenseNumberMatch = upperText.match(/(?:LICENSE\s*NO|رخصة\s*رقم|رقم\s*الرخصة)[:\s\-]*([A-Z0-9\-]+)/);
+      const issueDateMatch = upperText.match(/(?:ISSUE\s*DATE|تاريخ\s*الإصدار|تاريخ\s*الاصدار)[:\s\-]*([\d\/\-]+)/);
+      const expiryDateMatch = upperText.match(/(?:EXPIR[YI]\s*DATE|تاريخ\s*الانتهاء|تاريخ\s*الإنتهاء)[:\s\-]*([\d\/\-]+)/);
+      const tradeNameMatch = upperText.match(/(?:TRADE\s*NAME|الاسم\s*التجاري|اسم\s*النشاط|اسم\s*الشركة)[:\s\-]*([A-Z\s\u0600-\u06FF]+)/);
 
       extractedData = {
         licenseNumber: licenseNumberMatch?.[1] || null,
@@ -190,14 +181,11 @@ export default async function handler(req, res) {
       };
     }
 
-    console.log("نتيجة التحقق من المستند:", { isValid, extractedData });
-
     if (!isValid) {
-      console.error(`فشل الفحص. لم يتم العثور على محتوى مناسب في مستند (${docType})`);
       return res.status(200).json({
         success: false,
         text: cleanedText,
-        message: `فشل الفحص. لم يتم العثور على محتوى مناسب في مستند (${docType})`,
+        message: `فشل الفحص. لم يتم العثور على محتوى مناسب في مستند (${docType}).`,
       });
     }
 
@@ -207,7 +195,6 @@ export default async function handler(req, res) {
       extracted: extractedData,
       message: "تم التحقق من المستند بنجاح",
     });
-
   } catch (error) {
     console.error("OCR Error:", error);
     return res.status(500).json({
