@@ -8,10 +8,15 @@ import {
   orderBy,
   addDoc,
   Timestamp,
+  setDoc,
+  doc,
 } from "firebase/firestore";
 import { firestore } from "@/lib/firebase.client";
 import StyledQRCode from "@/components/StyledQRCode";
 
+/* =========================
+   ثابتات/Labels
+========================= */
 const CATEGORY_LABELS = {
   translation: { ar: "الترجمة", en: "Translation" },
   hr: { ar: "الموارد البشرية", en: "HR" },
@@ -19,7 +24,27 @@ const CATEGORY_LABELS = {
   other: { ar: "أخرى", en: "Other" },
 };
 
+/* =========================
+   Helpers: slug + URLs
+========================= */
+const slugify = (s) =>
+  (s || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\u0600-\u06FFa-z0-9\s-]/g, "") // عربي/إنجليزي فقط
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 48);
+
 const getVerifyUrl = (id) => `https://www.taheel.ae/verify/${id}`;
+const getPageUrl = (slug) => `https://www.taheel.ae/p/u/${slug}`;
+const getSmartQrUrl = (qrKey) => {
+  if (qrKey?.startsWith("PAGE::")) {
+    const slug = qrKey.replace("PAGE::", "");
+    return getPageUrl(slug);
+  }
+  return getVerifyUrl(qrKey);
+};
 
 export default function ArchiveSection({ lang = "ar" }) {
   const [category, setCategory] = useState("translation");
@@ -27,6 +52,7 @@ export default function ArchiveSection({ lang = "ar" }) {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
 
+  // رفع ملف
   const [file, setFile] = useState(null);
   const [nameAr, setNameAr] = useState("");
   const [nameEn, setNameEn] = useState("");
@@ -34,9 +60,22 @@ export default function ArchiveSection({ lang = "ar" }) {
   const [descEn, setDescEn] = useState("");
   const [uploading, setUploading] = useState(false);
 
-  const [qrFor, setQrFor] = useState(null); // id of file to show QR for
+  // QR المعروض (id للملف أو PAGE::<slug>)
+  const [qrFor, setQrFor] = useState(null);
 
-  // تحميل الملفات من فايرستور
+  // إنشاء صفحة VIP
+  const [createVipPage, setCreateVipPage] = useState(false);
+  const [clientName, setClientName] = useState("");
+  const [clientNumber, setClientNumber] = useState(""); // رقم العميل
+  const [vipSlug, setVipSlug] = useState("");
+  const [vipImageUrl, setVipImageUrl] = useState("");
+
+  // مولّد QR يدوي لأي صفحة (اختياري صغير مفيد)
+  const [quickSlug, setQuickSlug] = useState("");
+
+  /* =========================
+     جلب الملفات حسب التصنيف
+  ========================== */
   useEffect(() => {
     setLoading(true);
     async function fetchFiles() {
@@ -53,17 +92,25 @@ export default function ArchiveSection({ lang = "ar" }) {
     fetchFiles();
   }, [category, uploading]);
 
-  // رفع الملف على Google Storage عبر API Route ثم حفظ الرابط في Firestore
+  /* =========================
+     رفع الملف ثم (اختياري) إنشاء صفحة VIP
+  ========================== */
   const handleUpload = async (e) => {
     e.preventDefault();
     if (!file || !nameAr || !nameEn) {
       setMsg(lang === "ar" ? "كل الحقول مطلوبة!" : "All fields are required!");
       return;
     }
+    if (createVipPage && (!clientName || !clientNumber)) {
+      setMsg(lang === "ar" ? "اسم ورقم العميل مطلوبان لصفحة VIP" : "Client name & number required for VIP page");
+      return;
+    }
+
     setUploading(true);
     setMsg("");
+
     try {
-      // 1) رفع الملف
+      // 1) رفع الملف إلى GCS عبر API
       const formData = new FormData();
       formData.append("file", file);
       formData.append("category", category);
@@ -75,7 +122,7 @@ export default function ArchiveSection({ lang = "ar" }) {
       const uploadJson = await uploadRes.json();
       if (!uploadJson.url) throw new Error("Upload failed");
 
-      // 2) حفظ بيانات الملف
+      // 2) حفظ بيانات الملف في Firestore
       const docRef = await addDoc(collection(firestore, "archiveFiles"), {
         nameAr,
         nameEn,
@@ -86,8 +133,42 @@ export default function ArchiveSection({ lang = "ar" }) {
         createdAt: Timestamp.now(),
       });
 
-      setMsg(lang === "ar" ? "تم رفع الملف بنجاح ✅" : "File uploaded successfully ✅");
-      setQrFor(docRef.id);
+      // 3) (اختياري) إنشاء صفحة VIP وتوليد QR للرابط الثابت
+      if (createVipPage) {
+        // slug تلقائي لو المستخدم ما كتبش
+        let finalSlug = vipSlug || slugify(clientName) || slugify(nameEn) || `vip-${docRef.id}`;
+
+        // حفظ تعريف الصفحة في client_pages/<slug>
+        const pageRef = doc(collection(firestore, "client_pages"), finalSlug);
+        await setDoc(pageRef, {
+          slug: finalSlug,
+          clientName: clientName,
+          clientNumber: clientNumber,
+          // بيانات أولية — تعدلها لاحقًا في الكود الخاص بكل صفحة
+          title: clientName,
+          bio: descAr || descEn || "",
+          imageUrl: vipImageUrl || "",
+          links: [
+            { label: lang === "ar" ? "الملف" : "File", url: uploadJson.url },
+          ],
+          template: "custom", // مجرد مؤشر — التصميم الحقيقي هيكون في ملف منفصل حسب slug
+          enabled: true,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        });
+
+        // اعرض QR الخاص بالصفحة
+        setQrFor(`PAGE::${finalSlug}`);
+        setMsg(
+          lang === "ar"
+            ? "تم رفع الملف وإنشاء صفحة VIP ✅"
+            : "File uploaded & VIP page created ✅"
+        );
+      } else {
+        // افتراضي: اعرض QR التحقق للملف
+        setQrFor(docRef.id);
+        setMsg(lang === "ar" ? "تم رفع الملف بنجاح ✅" : "File uploaded successfully ✅");
+      }
 
       // reset
       setFile(null);
@@ -95,6 +176,9 @@ export default function ArchiveSection({ lang = "ar" }) {
       setNameEn("");
       setDescAr("");
       setDescEn("");
+      setVipImageUrl("");
+      // متعمّد ما نمسحش clientName/Number/Slug عشان لو عايز تكرر بسرعة
+
     } catch (err) {
       setMsg(lang === "ar" ? "خطأ أثناء الرفع!" : "Upload error!");
     } finally {
@@ -102,21 +186,40 @@ export default function ArchiveSection({ lang = "ar" }) {
     }
   };
 
-  // تحميل صورة الكيو آر كـ PNG
+  /* =========================
+     تحميل QR كصورة PNG
+  ========================== */
   const qrRef = useRef(null);
-  const handleDownloadQR = (id) => {
+  const handleDownloadQR = (qrKey) => {
     const canvas = qrRef.current?.querySelector("canvas");
     if (!canvas) return;
     const url = canvas.toDataURL("image/png");
     const link = document.createElement("a");
+    const niceName = qrKey?.startsWith("PAGE::")
+      ? qrKey.replace("PAGE::", "")
+      : qrKey;
     link.href = url;
-    link.download = `taheel-qr-${id}.png`;
+    link.download = `taheel-qr-${niceName}.png`;
     link.click();
+  };
+
+  /* =========================
+     تحميل QR يدوي لأي slug (اختياري)
+  ========================== */
+  const quickQrRef = useRef(null);
+  const handleDownloadQuickQR = () => {
+    const canvas = quickQrRef.current?.querySelector("canvas");
+    if (!canvas) return;
+    const url = canvas.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `taheel-qr-${quickSlug || "page"}.png`;
+    a.click();
   };
 
   return (
     <div className="max-w-4xl mx-auto p-4 font-cairo">
-      {/* نموذج رفع ملف جديد */}
+      {/* نموذج رفع ملف جديد + خيار صفحة VIP */}
       <div className="bg-[#171f26] rounded-xl shadow-lg p-5 mb-8 border border-emerald-800">
         <h2 className="font-extrabold text-2xl mb-6 text-emerald-400 text-center drop-shadow">
           {lang === "ar" ? "إضافة ملف جديد للأرشيف" : "Add New Archive File"}
@@ -165,6 +268,7 @@ export default function ArchiveSection({ lang = "ar" }) {
             value={descEn}
             onChange={(e) => setDescEn(e.target.value)}
           />
+
           <input
             type="file"
             className="file:rounded-lg file:bg-emerald-600 file:text-white file:font-bold file:px-3 file:py-2 file:border-0 file:cursor-pointer col-span-2"
@@ -172,6 +276,73 @@ export default function ArchiveSection({ lang = "ar" }) {
             onChange={(e) => setFile(e.target.files?.[0] || null)}
             required
           />
+
+          {/* ===== خيار إنشاء صفحة VIP ===== */}
+          <div className="col-span-2 mt-2 p-3 rounded-xl border border-emerald-700 bg-[#122019]">
+            <label className="flex items-center gap-2 font-extrabold text-emerald-300">
+              <input
+                type="checkbox"
+                checked={createVipPage}
+                onChange={(e) => setCreateVipPage(e.target.checked)}
+              />
+              {lang === "ar"
+                ? "إنشاء صفحة عميل مميز (VIP) + توليد رابط وQR"
+                : "Create VIP client page + URL & QR"}
+            </label>
+
+            {createVipPage && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                <input
+                  type="text"
+                  className="p-3 rounded-lg border-2 border-emerald-400 bg-[#1a272f] text-white font-bold placeholder:text-emerald-300"
+                  placeholder={lang === "ar" ? "اسم العميل" : "Client name"}
+                  value={clientName}
+                  onChange={(e) => {
+                    setClientName(e.target.value);
+                    // لو مفيش slug، خليه يتولّد تلقائي من الاسم
+                    if (!vipSlug) setVipSlug(slugify(e.target.value));
+                  }}
+                  required
+                />
+                <input
+                  type="text"
+                  className="p-3 rounded-lg border-2 border-emerald-400 bg-[#1a272f] text-white font-bold placeholder:text-emerald-300"
+                  placeholder={lang === "ar" ? "رقم العميل" : "Client number"}
+                  value={clientNumber}
+                  onChange={(e) => setClientNumber(e.target.value)}
+                  required
+                />
+                <input
+                  type="text"
+                  className="p-3 rounded-lg border-2 border-emerald-400 bg-[#1a272f] text-white font-bold placeholder:text-emerald-300 md:col-span-2"
+                  placeholder={lang === "ar" ? "Slug الرابط (مثال: mohamed-kestiro)" : "URL slug (e.g., mohamed-kestiro)"}
+                  value={vipSlug}
+                  onChange={(e) => setVipSlug(slugify(e.target.value))}
+                />
+                <input
+                  type="url"
+                  className="p-3 rounded-lg border-2 border-gray-300 bg-[#26343d] text-gray-200 font-bold placeholder:text-gray-400 md:col-span-2"
+                  placeholder={lang === "ar" ? "رابط صورة (اختياري)" : "Profile image URL (optional)"}
+                  value={vipImageUrl}
+                  onChange={(e) => setVipImageUrl(e.target.value)}
+                />
+
+                {vipSlug && (
+                  <div className="md:col-span-2 text-emerald-300 font-bold">
+                    {lang === "ar" ? "رابط الصفحة:" : "Page URL:"}{" "}
+                    <a
+                      className="underline text-emerald-400"
+                      href={getPageUrl(vipSlug)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {getPageUrl(vipSlug)}
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           <button
             type="submit"
@@ -184,23 +355,63 @@ export default function ArchiveSection({ lang = "ar" }) {
 
         {msg && <div className="text-center text-emerald-300 mt-3 font-bold">{msg}</div>}
 
-        {/* مكان مخصص لعرض الكيو آر بعد الرفع */}
+        {/* عرض QR (للتحقق أو للصفحة) بعد الرفع */}
         {qrFor && (
           <div ref={qrRef} className="mt-5 flex flex-col items-center justify-center gap-2 bg-[#101b15] border border-emerald-400 rounded-xl p-5">
-            <div className="font-bold mb-1 text-emerald-600">{lang === "ar" ? "كود التحقق" : "Verification QR"}</div>
-            <StyledQRCode value={getVerifyUrl(qrFor)} size={140} />
+            <div className="font-bold mb-1 text-emerald-600">
+              {lang === "ar" ? "الكود" : "QR Code"}
+            </div>
+            <StyledQRCode value={getSmartQrUrl(qrFor)} size={140} />
             <a
-              href={getVerifyUrl(qrFor)}
+              href={getSmartQrUrl(qrFor)}
               target="_blank"
               rel="noopener noreferrer"
               className="text-emerald-400 underline break-all font-bold mt-2"
             >
-              {getVerifyUrl(qrFor)}
+              {getSmartQrUrl(qrFor)}
             </a>
             <button
               onClick={() => handleDownloadQR(qrFor)}
               className="mt-2 bg-white text-emerald-700 border-2 border-emerald-700 font-bold rounded-lg px-5 py-2 hover:bg-emerald-50"
             >
+              {lang === "ar" ? "تحميل الكود كصورة" : "Download QR as image"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* (اختياري) توليد QR سريع لأي صفحة VIP بالـ slug */}
+      <div className="bg-[#151c23] rounded-xl shadow-lg p-5 mb-8 border border-emerald-800">
+        <h3 className="font-extrabold text-xl mb-4 text-emerald-400">
+          {lang === "ar" ? "توليد QR سريع لصفحة VIP" : "Quick QR for VIP page"}
+        </h3>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+          <input
+            type="text"
+            className="p-3 rounded-lg border-2 border-emerald-400 bg-[#1a272f] text-white font-bold placeholder:text-emerald-300 md:col-span-2"
+            placeholder={lang === "ar" ? "اكتب الـ slug (مثال: mohamed-kestiro)" : "Enter slug (e.g., mohamed-kestiro)"}
+            value={quickSlug}
+            onChange={(e) => setQuickSlug(slugify(e.target.value))}
+          />
+          <a
+            className={`text-center px-5 py-3 rounded-lg font-extrabold border-2 transition ${quickSlug ? "bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-700" : "bg-gray-600/40 text-gray-300 border-gray-600 pointer-events-none"}`}
+            href={quickSlug ? getPageUrl(quickSlug) : "#"}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {lang === "ar" ? "فتح الرابط" : "Open URL"}
+          </a>
+        </div>
+
+        {quickSlug && (
+          <div ref={quickQrRef} className="mt-5 flex flex-col items-center gap-2 bg-[#101b15] border border-emerald-400 rounded-xl p-5">
+            <div className="font-bold mb-1 text-emerald-600">{lang === "ar" ? "كود الصفحة" : "Page QR"}</div>
+            <StyledQRCode value={getPageUrl(quickSlug)} size={140} />
+            <a href={getPageUrl(quickSlug)} target="_blank" rel="noopener noreferrer" className="text-emerald-400 underline break-all font-bold mt-2">
+              {getPageUrl(quickSlug)}
+            </a>
+            <button onClick={handleDownloadQuickQR} className="mt-2 bg-white text-emerald-700 border-2 border-emerald-700 font-bold rounded-lg px-5 py-2 hover:bg-emerald-50">
               {lang === "ar" ? "تحميل الكود كصورة" : "Download QR as image"}
             </button>
           </div>
@@ -287,14 +498,14 @@ export default function ArchiveSection({ lang = "ar" }) {
             className="mt-7 flex flex-col items-center justify-center gap-2 bg-[#101b15] border border-emerald-400 rounded-xl p-5 w-fit mx-auto"
           >
             <div className="font-bold mb-1 text-emerald-600">{lang === "ar" ? "كود التحقق" : "Verification QR"}</div>
-            <StyledQRCode value={getVerifyUrl(qrFor)} size={140} />
+            <StyledQRCode value={getSmartQrUrl(qrFor)} size={140} />
             <a
-              href={getVerifyUrl(qrFor)}
+              href={getSmartQrUrl(qrFor)}
               target="_blank"
               rel="noopener noreferrer"
               className="text-emerald-400 underline break-all font-bold mt-2"
             >
-              {getVerifyUrl(qrFor)}
+              {getSmartQrUrl(qrFor)}
             </a>
             <button
               onClick={() => handleDownloadQR(qrFor)}
