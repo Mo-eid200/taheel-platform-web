@@ -6,9 +6,9 @@ import { useSearchParams } from "next/navigation";
 /**
  * Mona Basal • Executive VIP Profile (single-file, JS only)
  * - Animated neon background (GPU-friendly, respects reduced motion)
- * - Rich executive sections: KPIs, Qualifications, Timeline, Case Studies, Boards, Media, Education, Certifications, Testimonials
+ * - Rich sections: KPIs, Qualifications, Case Studies, Timeline, Boards, Media, Education, Certifications, Testimonials
  * - AR/EN via ?lang=ar|en (default: en)
- * - Tailwind only, responsive with clamp() typography
+ * - Tailwind only (no styled-jsx / no @apply)
  */
 
 /** @typedef {"ar" | "en"} Lang */
@@ -156,6 +156,13 @@ export default function MonaBasal() {
 
   const t = useMemo(() => COPY[lang], [lang]);
 
+  // ----- UI utility class constants (بديل .btn-chip و.link-block إلخ)
+  const CHIP = "group inline-flex items-center gap-2 rounded-xl border-2 bg-black/20 px-3.5 sm:px-4 py-2 text-[13px] sm:text-sm font-bold hover:bg-white/10 transition";
+  const LINK_BLOCK = "block w-full rounded-lg px-4 py-2.5 sm:py-3 text-[13px] sm:text-sm font-bold hover:bg-white/10 transition border";
+  const LIST_CHECK = "pl-5 grid gap-2 list-disc marker:text-emerald-400 text-emerald-50/90";
+  const LIST_DASH  = "pl-5 grid gap-1.5 list-disc marker:text-white/60 text-emerald-50/90 text-sm";
+  const LEAD_STYLE = { lineHeight: "1.9", fontSize: "clamp(0.95rem, 1.15vw, 1.1rem)", color: "rgba(236,253,245,.9)" };
+
   const downloadVCF = () => {
     const vcf =
       "BEGIN:VCARD\n" +
@@ -239,22 +246,22 @@ export default function MonaBasal() {
 
               {/* Actions */}
               <div className="flex flex-wrap items-center justify-center md:justify-end gap-2.5 sm:gap-3">
-                <a href={`mailto:${LINKS.emailOfficial}`} className="btn-chip border-emerald-400/60">
+                <a href={`mailto:${LINKS.emailOfficial}`} className={`${CHIP} border-emerald-400/60`}>
                   <Dot className="text-emerald-300 group-hover:scale-125" />{t.ctaEmail}
                 </a>
-                <a href={LINKS.linkedin} target="_blank" rel="noreferrer" className="btn-chip border-sky-400/60">
+                <a href={LINKS.linkedin} target="_blank" rel="noreferrer" className={`${CHIP} border-sky-400/60`}>
                   <Dot className="text-sky-300 group-hover:scale-125" />LinkedIn
                 </a>
-                <button onClick={downloadVCF} className="btn-chip border-white/25">
+                <button onClick={downloadVCF} className={`${CHIP} border-white/25`}>
                   <Dot className="text-white/80 group-hover:scale-125" />{t.ctaVCF}
                 </button>
-                <a href={LINKS.site} target="_blank" rel="noreferrer" className="btn-chip border-emerald-300/40">
+                <a href={LINKS.site} target="_blank" rel="noreferrer" className={`${CHIP} border-emerald-300/40`}>
                   <Dot className="text-emerald-200 group-hover:scale-125" />{t.ctaSite}
                 </a>
               </div>
             </div>
 
-            {/* Executive Snapshot (3 badges) */}
+            {/* Executive Snapshot */}
             <div className="mt-6 sm:mt-8 grid gap-4 sm:gap-5 md:grid-cols-3">
               <BadgeCard title={t.hl1Title}>{t.hl1Body}</BadgeCard>
               <BadgeCard title={t.hl2Title}>{t.hl2Body}</BadgeCard>
@@ -270,16 +277,16 @@ export default function MonaBasal() {
           ))}
         </div>
 
-        {/* Rich Bio + Sidebar Links */}
+        {/* Rich Bio + Sidebar */}
         <div className="mt-8 sm:mt-10 grid gap-5 sm:gap-6 lg:grid-cols-3">
           <div className="lg:col-span-2 rounded-2xl border border-white/15 bg-white/[.06] p-5 sm:p-6 md:p-7 backdrop-blur">
             <SectionTitle>{t.aboutTitle}</SectionTitle>
-            <p className="lead-paragraph">{t.aboutBody}</p>
+            <p className="text-emerald-50/90" style={LEAD_STYLE}>{t.aboutBody}</p>
 
             {/* Qualifications */}
             <div className="mt-6">
               <SubTitle>{t.qual.title}</SubTitle>
-              <ul className="list-check">
+              <ul className={LIST_CHECK}>
                 {t.qual.items.map((it, idx) => <li key={idx}>{it}</li>)}
               </ul>
             </div>
@@ -309,18 +316,18 @@ export default function MonaBasal() {
           <aside className="rounded-2xl border border-emerald-400/30 bg-white/[.06] p-5 sm:p-6 md:p-7 backdrop-blur">
             <SectionTitle>{t.mediaTitle}</SectionTitle>
             <div className="space-y-2.5 sm:space-y-3">
-              <a className="link-block border-emerald-400/40" href={LINKS.instagram} target="_blank" rel="noreferrer">Instagram</a>
-              <a className="link-block border-sky-400/40" href={LINKS.threads} target="_blank" rel="noreferrer">Threads</a>
-              <a className="link-block border-white/30" href={`tel:${LINKS.phone.replace(/\s+/g, "")}`}>{t.callCTA}</a>
-              <a className="link-block border-white/30" href={LINKS.linkedin} target="_blank" rel="noreferrer">LinkedIn</a>
-              <a className="link-block border-white/30" href={LINKS.site} target="_blank" rel="noreferrer">{t.ctaSite}</a>
-              <button className="w-full link-block border-white/30" onClick={downloadVCF}>{t.ctaVCF}</button>
+              <a className={`${LINK_BLOCK} border-emerald-400/40`} href={LINKS.instagram} target="_blank" rel="noreferrer">Instagram</a>
+              <a className={`${LINK_BLOCK} border-sky-400/40`} href={LINKS.threads} target="_blank" rel="noreferrer">Threads</a>
+              <a className={`${LINK_BLOCK} border-white/30`} href={`tel:${LINKS.phone.replace(/\s+/g, "")}`}>{t.callCTA}</a>
+              <a className={`${LINK_BLOCK} border-white/30`} href={LINKS.linkedin} target="_blank" rel="noreferrer">LinkedIn</a>
+              <a className={`${LINK_BLOCK} border-white/30`} href={LINKS.site} target="_blank" rel="noreferrer">{t.ctaSite}</a>
+              <button className={`${LINK_BLOCK} border-white/30`} onClick={downloadVCF}>{t.ctaVCF}</button>
             </div>
 
             {/* Boards & Memberships */}
             <div className="mt-6">
               <SubTitle>{t.boards.title}</SubTitle>
-              <ul className="list-dash">
+              <ul className={LIST_DASH}>
                 {t.boards.items.map((b, i) => <li key={i}>{b}</li>)}
               </ul>
             </div>
@@ -328,14 +335,14 @@ export default function MonaBasal() {
             {/* Education & Certs */}
             <div className="mt-6">
               <SubTitle>{t.edu.title}</SubTitle>
-              <ul className="list-dash">
+              <ul className={LIST_DASH}>
                 {t.edu.items.map((e, i) => <li key={i}>{e}</li>)}
               </ul>
             </div>
 
             <div className="mt-6">
               <SubTitle>{t.certs.title}</SubTitle>
-              <ul className="list-dash">
+              <ul className={LIST_DASH}>
                 {t.certs.items.map((c, i) => <li key={i}>{c}</li>)}
               </ul>
             </div>
@@ -361,15 +368,6 @@ export default function MonaBasal() {
       {/* extra glow */}
       <div aria-hidden className="pointer-events-none fixed inset-0 -z-10"
            style={{ background:"radial-gradient(40% 30% at 70% 20%, rgba(35,218,198,.08), transparent 60%)", mixBlendMode:"screen" }} />
-      <style jsx global>{`
-        .btn-chip { @apply group inline-flex items-center gap-2 rounded-xl border-2 bg-black/20 px-3.5 sm:px-4 py-2 text-[13px] sm:text-sm font-bold hover:bg-white/10 transition; }
-        .lead-paragraph { line-height: 1.9; font-size: clamp(0.95rem, 1.15vw, 1.1rem); color: rgba(236,253,245,.9); }
-        .list-check { @apply grid gap-2; }
-        .list-check li::before { content: "•"; color: #23dac6; margin-inline-end: .5rem; }
-        .list-dash { @apply grid gap-1.5 text-sm; }
-        .list-dash li::before { content: "— "; color: rgba(255,255,255,.6); }
-        .link-block { @apply block rounded-lg px-4 py-2.5 sm:py-3 text-[13px] sm:text-sm font-bold hover:bg-white/10 transition border; }
-      `}</style>
     </main>
   );
 }
