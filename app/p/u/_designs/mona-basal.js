@@ -229,7 +229,7 @@ export default function MonaBasal() {
               <div className="relative shrink-0">
                 <div className="h-[88px] w-[88px] sm:h-28 sm:w-28 md:h-32 md:w-32 lg:h-36 lg:w-36 rounded-2xl bg-gradient-to-br from-emerald-400/30 to-sky-400/30 border border-white/20 backdrop-blur-sm grid place-items-center overflow-hidden">
                   <img
-                    src="/mona-pro.jpg"
+                    src="/mona.jpg"
                     alt="Mona Basal — Executive Portrait"
                     className="h-full w-full object-cover"
                     onError={(e) => {
