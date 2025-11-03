@@ -154,6 +154,12 @@ export default function MonaBasal() {
 
   const t = useMemo(() => COPY[lang], [lang]);
 
+  // ==== Contact helpers (tel / WhatsApp) ====
+  const PHONE_TEL = useMemo(() => LINKS.phone.replace(/\s+/g, "").replace(/^00/, "+"), []);
+  const WA_NUMBER = useMemo(() => LINKS.phone.replace(/[^\d]/g, "").replace(/^00/, ""), []);
+  const WA_TEXT = encodeURIComponent(t.whatsappText);
+  const WA_LINK = `https://wa.me/${WA_NUMBER}?text=${WA_TEXT}`;
+
   // UI utility classes
   const CHIP = "group inline-flex items-center gap-2 rounded-xl border-2 bg-black/20 px-3.5 sm:px-4 py-2 text-[13px] sm:text-sm font-bold hover:bg-white/10 transition";
   const LINK_BLOCK = "block w-full rounded-lg px-4 py-2.5 sm:py-3 text-[13px] sm:text-sm font-bold hover:bg-white/10 transition border";
@@ -254,16 +260,29 @@ export default function MonaBasal() {
 
               {/* Actions */}
               <div className="flex flex-wrap items-center justify-center md:justify-end gap-2.5 sm:gap-3">
-                <a href={`mailto:${LINKS.emailOfficial}`} className={`${CHIP} border-emerald-400/60`}>
+                <a href={`mailto:${LINKS.emailOfficial}`} className={`${CHIP} border-emerald-400/60`} aria-label={t.ctaEmail}>
                   <Dot className="text-emerald-300 group-hover:scale-125" />{t.ctaEmail}
                 </a>
-                <a href={LINKS.linkedin} target="_blank" rel="noreferrer" className={`${CHIP} border-sky-400/60`}>
+
+                <a href={LINKS.linkedin} target="_blank" rel="noreferrer" className={`${CHIP} border-sky-400/60`} aria-label="LinkedIn">
                   <Dot className="text-sky-300 group-hover:scale-125" />LinkedIn
                 </a>
-                <button onClick={downloadVCF} className={`${CHIP} border-white/25`}>
+
+                {/* Call (one-tap) */}
+                <a href={`tel:${PHONE_TEL}`} className={`${CHIP} border-emerald-400/60`} aria-label={t.callCTA}>
+                  <Dot className="text-emerald-300 group-hover:scale-125" />{t.callCTA}
+                </a>
+
+                {/* WhatsApp (one-tap) */}
+                <a href={WA_LINK} target="_blank" rel="noreferrer" className={`${CHIP} border-emerald-300/60`} aria-label="WhatsApp">
+                  <Dot className="text-emerald-200 group-hover:scale-125" />{t.ctaWhatsApp}
+                </a>
+
+                <button onClick={downloadVCF} className={`${CHIP} border-white/25`} aria-label={t.ctaVCF}>
                   <Dot className="text-white/80 group-hover:scale-125" />{t.ctaVCF}
                 </button>
-                <a href={LINKS.site} target="_blank" rel="noreferrer" className={`${CHIP} border-emerald-300/40`}>
+
+                <a href={LINKS.site} target="_blank" rel="noreferrer" className={`${CHIP} border-emerald-300/40`} aria-label={t.ctaSite}>
                   <Dot className="text-emerald-200 group-hover:scale-125" />{t.ctaSite}
                 </a>
               </div>
@@ -326,7 +345,8 @@ export default function MonaBasal() {
             <div className="space-y-2.5 sm:space-y-3">
               <a className={`${LINK_BLOCK} border-emerald-400/40`} href={LINKS.instagram} target="_blank" rel="noreferrer">Instagram</a>
               <a className={`${LINK_BLOCK} border-sky-400/40`} href={LINKS.threads} target="_blank" rel="noreferrer">Threads</a>
-              <a className={`${LINK_BLOCK} border-white/30`} href={`tel:${LINKS.phone.replace(/\s+/g, "")}`}>{t.callCTA}</a>
+              <a className={`${LINK_BLOCK} border-white/30`} href={`tel:${PHONE_TEL}`}>{t.callCTA}</a>
+              <a className={`${LINK_BLOCK} border-emerald-300/40`} href={WA_LINK} target="_blank" rel="noreferrer">{t.ctaWhatsApp}</a>
               <a className={`${LINK_BLOCK} border-white/30`} href={LINKS.linkedin} target="_blank" rel="noreferrer">LinkedIn</a>
               <a className={`${LINK_BLOCK} border-white/30`} href={LINKS.site} target="_blank" rel="noreferrer">{t.ctaSite}</a>
               <button className={`${LINK_BLOCK} border-white/30`} onClick={downloadVCF}>{t.ctaVCF}</button>
@@ -389,6 +409,32 @@ export default function MonaBasal() {
         </div>
       </section>
 
+      {/* Floating quick actions (mobile only) */}
+      <div className="md:hidden fixed bottom-4 right-4 z-50 flex flex-col gap-3">
+        <a
+          href={WA_LINK}
+          target="_blank"
+          rel="noreferrer"
+          className="rounded-full border-2 border-emerald-400/70 bg-emerald-500/90 backdrop-blur
+                     px-4 py-3 text-sm font-extrabold text-black
+                     shadow-[0_10px_30px_rgba(35,218,198,.35)] active:scale-95 transition"
+          aria-label={t.ctaWhatsApp}
+          title={t.ctaWhatsApp}
+        >
+          {t.ctaWhatsApp}
+        </a>
+        <a
+          href={`tel:${PHONE_TEL}`}
+          className="rounded-full border-2 border-emerald-400/40 bg-white/10 backdrop-blur
+                     px-4 py-3 text-sm font-extrabold text-emerald-100
+                     shadow-[0_8px_24px_rgba(83,166,247,.25)] active:scale-95 transition"
+          aria-label={t.callCTA}
+          title={t.callCTA}
+        >
+          {t.callCTA}
+        </a>
+      </div>
+
       {/* extra glow */}
       <div aria-hidden className="pointer-events-none fixed inset-0 -z-10"
            style={{ background:"radial-gradient(40% 30% at 70% 20%, rgba(35,218,198,.08), transparent 60%)", mixBlendMode:"screen" }} />
@@ -411,6 +457,8 @@ const COPY = {
     ctaSite: "Visit Website",
     mediaTitle: "Media & Links",
     callCTA: "Call Mona",
+    ctaWhatsApp: "WhatsApp",
+    whatsappText: "Hello Mona, I’d like to connect regarding executive services.",
     powered: "Powered by",
 
     // Snapshot
@@ -509,15 +557,22 @@ const COPY = {
     edu: {
       title: "Education",
       items: [
+        "MBA, Strategic Management, Executive focus.",
         "M.Ed., University of the People, CA, USA.",
         "B.A., Philosophy, Tanta University, Egypt.",
       ],
     },
-
     certs: {
       title: "Professional Certifications",
       items: [
-        "Governance, Risk & Compliance (executive courses).",
+        "Project Management Professional (PMP).",
+        "PRINCE2® Practitioner.",
+        "Lean Six Sigma Green Belt.",
+        "ISO/IEC 27001 Lead Implementer (Information Security).",
+        "ITIL® 4 Foundation (Service Management).",
+        "COBIT® 2019 Foundation (Governance).",
+        "Data Protection & GDPR Practitioner.",
+        "Governance, Risk & Compliance (executive programs).",
         "Operational Excellence & Lean Leadership.",
         "Google Scholarship — Marketing & Management.",
       ],
@@ -541,6 +596,8 @@ const COPY = {
     ctaSite: "الموقع الرسمي",
     mediaTitle: "وسائط وروابط",
     callCTA: "اتصال بمُنى",
+    ctaWhatsApp: "واتساب",
+    whatsappText: "مرحبًا مُنى، أرغب بالتواصل بخصوص الخدمات التنفيذية.",
     powered: "بإشراف",
 
     hl1Title: "الرؤية",
@@ -637,14 +694,21 @@ const COPY = {
     edu: {
       title: "التعليم",
       items: [
+        "ماجستير إدارة أعمال (MBA)، إدارة استراتيجية — تركيز تنفيذي.",
         "ماجستير تربية، University of the People، كاليفورنيا، الولايات المتحدة.",
         "ليسانس فلسفة، جامعة طنطا، مصر.",
       ],
     },
-
     certs: {
       title: "الشهادات المهنية",
       items: [
+        "إدارة المشاريع الاحترافية (PMP).",
+        "PRINCE2® Practitioner.",
+        "Lean Six Sigma Green Belt.",
+        "ISO/IEC 27001 Lead Implementer (أمن المعلومات).",
+        "ITIL® 4 Foundation (إدارة الخدمات).",
+        "COBIT® 2019 Foundation (الحوكمة).",
+        "ممارس حماية البيانات والـ GDPR.",
         "حوكمة ومخاطر وامتثال (برامج تنفيذية).",
         "التميز التشغيلي والقيادة الرشيقة.",
         "منحة Google — التسويق والإدارة.",
@@ -654,7 +718,7 @@ const COPY = {
     testimonials: {
       title: "قالوا عنها",
       items: [
-        { quote: "تفكر كجهة تنظيمية وتنفّذ كمُشغّل من الدرجة الأولى.", name: "مدير إقليمي", title: "مجموعة خدمات خليجية" },
+        { quote: "تفكر كجهة تنظيمية وتنفّذ كمُشغّل من الدرجة الأولى.", name: "المدير الإقليمي", title: "مجموعة خدمات خليجية" },
         { quote: "ثقافة مؤشرات الأداء لديها ترفع السرعة دون فقد السيطرة.", name: "رئيس الموارد البشرية", title: "عميل مؤسسي" },
         { quote: "تنفيذ مقاوم للتدقيق — نتائج ثابتة دون مفاجآت.", name: "مدير الامتثال", title: "قطاع عام" },
       ],
