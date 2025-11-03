@@ -3,7 +3,9 @@ import { promises as fs } from "fs";
 import formidable from "formidable";
 import vision from "@google-cloud/vision";
 
-export const config = { api: { bodyParser: false } };
+export const config = {
+  api: { bodyParser: false }, // ضروري لـ formidable / multipart
+};
 
 // ------- CORS -------
 function setCors(res) {
@@ -11,12 +13,9 @@ function setCors(res) {
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 }
-if (req.method === "OPTIONS") return res.status(200).end();
-if (req.method !== "POST") return res.status(405).json({ success:false, message:"Method Not Allowed" });
 
-// ------- Google Credentials -------
-let credentials;
-try {
+// ------- Google Credentials (env) -------
+function getGoogleCredentials() {
   if (!process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
     throw new Error("GOOGLE_SERVICE_ACCOUNT_KEY is undefined");
   }
@@ -24,15 +23,19 @@ try {
   if (raw.private_key && raw.private_key.includes("\\n")) {
     raw.private_key = raw.private_key.replace(/\\n/g, "\n");
   }
-  credentials = raw;
-} catch (err) {
-  console.error("Google Service Account Key Error:", err);
-  throw new Error("Invalid GOOGLE_SERVICE_ACCOUNT_KEY");
+  return raw;
 }
 
-const client = new vision.ImageAnnotatorClient({ credentials });
+let visionClient;
+function getVisionClient() {
+  if (!visionClient) {
+    const credentials = getGoogleCredentials();
+    visionClient = new vision.ImageAnnotatorClient({ credentials });
+  }
+  return visionClient;
+}
 
-// ------- Utils -------
+// ------- Helpers -------
 function normalizeDocType(dt) {
   const map = {
     ownerEidFront: "ownerIdFront",
@@ -42,69 +45,149 @@ function normalizeDocType(dt) {
 }
 
 function allowMimeFor(docType) {
-  const imageTypes = ["image/jpeg", "image/jpg", "image/png", "image/heic", "image/heif", "image/webp"];
+  const imageTypes = [
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/heic",
+    "image/heif",
+    "image/webp",
+    // أحيانًا أندرويد يرسل octet-stream مع HEIC
+    "application/octet-stream",
+  ];
   if (docType === "license") return [...imageTypes, "application/pdf"];
   return imageTypes;
+}
+
+function base64ToBuffer(b64) {
+  // يدعم صيغ dataURL مثل: data:image/png;base64,xxxx
+  const m = /^data:([\w/+.-]+);base64,(.*)$/i.exec(b64 || "");
+  if (m) {
+    return { buffer: Buffer.from(m[2], "base64"), mimetype: m[1] };
+  }
+  // لو جالك Base64 خام بدون dataURL:
+  return { buffer: Buffer.from((b64 || "").trim(), "base64"), mimetype: "" };
 }
 
 // ------- Handler -------
 export default async function handler(req, res) {
   setCors(res);
-  if (req.method === "OPTIONS") return res.status(200).end();
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
 
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, message: "Method Not Allowed" });
   }
 
+  // محاولتين للقراءة:
+  // 1) multipart عبر formidable
+  // 2) fallback: JSON/fields فيها base64
   const form = formidable({
     keepExtensions: true,
     maxFileSize: 12 * 1024 * 1024, // 12MB
+    multiples: false,
   });
 
+  let fields = {};
+  let files = {};
+
+  // نحاول parse multipart، ولو فشل هنكمل على base64
   try {
-    const [fields, files] = await new Promise((resolve, reject) => {
+    [fields, files] = await new Promise((resolve, reject) => {
       form.parse(req, (err, flds, fls) => (err ? reject(err) : resolve([flds, fls])));
     });
+  } catch {
+    // تجاهل خطأ formidable — هنحاول قراءة body كـ JSON (base64)
+  }
 
+  try {
+    const docTypeRaw =
+      (Array.isArray(fields?.docType) ? fields.docType[0] : fields?.docType) || "";
+    const docType = normalizeDocType(String(docTypeRaw).trim());
+
+    let fileBuffer = null;
+    let mimetype = "";
+    let tempFilePath = "";
+
+    // ---- (A) لو وصل ملف multipart ----
     const fileRaw = files?.file;
     const file = Array.isArray(fileRaw) ? fileRaw[0] : fileRaw;
 
-    const docTypeRaw = fields?.docType;
-    const _docType = Array.isArray(docTypeRaw) ? docTypeRaw[0] : docTypeRaw;
-    const docType = normalizeDocType(typeof _docType === "string" ? _docType.trim() : "");
-
-    if (!file?.filepath || !docType) {
-      return res.status(400).json({ success: false, message: "الملف أو نوع المستند غير موجود" });
+    if (file?.filepath) {
+      mimetype = typeof file?.mimetype === "string" ? file.mimetype : "";
+      try {
+        fileBuffer = await fs.readFile(file.filepath);
+        tempFilePath = file.filepath;
+      } catch {
+        return res.status(400).json({ success: false, message: "تعذر قراءة الملف، أعد الرفع." });
+      }
     }
 
-    const allowed = allowMimeFor(docType);
-    const mimetype = typeof file?.mimetype === "string" ? file.mimetype : "";
+    // ---- (B) لو ما فيش multipart، جرّب base64 من fields/body ----
+    if (!fileBuffer) {
+      // Next.js pages API مع bodyParser:false، ممكن body يكون ستريم؛ هنحاول نقرأه من fields لو الموبايل بعته كـ form fields
+      const base64Raw =
+        (Array.isArray(fields?.base64) ? fields.base64[0] : fields?.base64) ||
+        (Array.isArray(fields?.fileBase64) ? fields.fileBase64[0] : fields?.fileBase64) ||
+        null;
 
-    if (!allowed.includes(mimetype)) {
-      return res.status(400).json({
-        success: false,
-        message: docType === "license"
-          ? "❌ نوع الملف غير مدعوم. مسموح PNG/JPG/HEIC/PDF."
-          : "❌ نوع الملف غير مدعوم. مسموح PNG/JPG/HEIC.",
-      });
+      if (base64Raw) {
+        const { buffer, mimetype: mt } = base64ToBuffer(base64Raw);
+        fileBuffer = buffer;
+        mimetype = mt || "image/jpeg"; // تخمين افتراضي لو مش محدد
+      } else {
+        // آخر محاولة: لو البودي JSON (في حال تم إرساله application/json)
+        // نجمع ستريم البودي:
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        const rawBody = Buffer.concat(chunks).toString("utf8");
+        if (rawBody) {
+          try {
+            const json = JSON.parse(rawBody);
+            const base64 = json?.base64 || json?.fileBase64;
+            const type = json?.mimetype || json?.type;
+            if (base64) {
+              const { buffer, mimetype: mt2 } = base64ToBuffer(base64);
+              fileBuffer = buffer;
+              mimetype = type || mt2 || "image/jpeg";
+            }
+          } catch {
+            // مش JSON صالح — نكمل
+          }
+        }
+      }
     }
 
-    let fileBuffer;
-    try {
-      fileBuffer = await fs.readFile(file.filepath);
-    } catch {
-      return res.status(400).json({ success: false, message: "تعذر قراءة الملف، أعد الرفع." });
+    if (!docType) {
+      return res.status(400).json({ success: false, message: "نوع المستند مفقود (docType)." });
     }
 
     if (!fileBuffer || !Buffer.isBuffer(fileBuffer) || fileBuffer.length === 0) {
-      return res.status(400).json({ success: false, message: "الصورة غير صالحة أو فارغة." });
+      return res.status(400).json({ success: false, message: "الصورة/الملف غير صالحة أو فارغة." });
+    }
+
+    const allowed = allowMimeFor(docType);
+    // لو الموبايل بعت octet-stream وفي الحقيقة صورة HEIC/PNG… هنسمح ونكمّل
+    if (mimetype && !allowed.includes(mimetype)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          docType === "license"
+            ? "❌ نوع الملف غير مدعوم. مسموح PNG/JPG/HEIC/PDF."
+            : "❌ نوع الملف غير مدعوم. مسموح PNG/JPG/HEIC.",
+        receivedType: mimetype,
+      });
     }
 
     // ------- OCR (Google Vision) -------
+    const client = getVisionClient();
     let result;
+
     try {
-      // PDF يفضّل documentTextDetection — قد تتطلب GCS لملفات PDF كبيرة؛ هنا نجرب مباشرة.
       if (mimetype === "application/pdf") {
+        // PDF: documentTextDetection أفضل
         [result] = await client.documentTextDetection({ image: { content: fileBuffer } });
       } else {
         [result] = await client.textDetection({ image: { content: fileBuffer } });
@@ -115,10 +198,22 @@ export default async function handler(req, res) {
         message: "خطأ في خدمة OCR من Google Vision",
         error: visionErr?.message || "Unknown Vision API error",
       });
+    } finally {
+      // تنظيف الملف المؤقت لو موجود
+      if (tempFilePath) {
+        try {
+          await fs.unlink(tempFilePath);
+        } catch {
+          /* ignore */
+        }
+      }
     }
 
     const detections = Array.isArray(result?.textAnnotations) ? result.textAnnotations : [];
-    const text = (detections[0]?.description && typeof detections[0].description === "string") ? detections[0].description : "";
+    const text =
+      detections[0]?.description && typeof detections[0].description === "string"
+        ? detections[0].description
+        : "";
     const cleanedText = (typeof text === "string" ? text : "").trim();
     const upperText = cleanedText ? cleanedText.toUpperCase() : "";
 
@@ -179,7 +274,7 @@ export default async function handler(req, res) {
         licenseNumber: licenseNumberMatch?.[1] || null,
         issueDate: issueDateMatch?.[1] || null,
         expiryDate: expiryDateMatch?.[1] || null,
-        tradeName: tradeNameMatch?.[1]?.trim() || null,
+        tradeName: (tradeNameMatch?.[1] || "").trim() || null,
       };
     }
 
