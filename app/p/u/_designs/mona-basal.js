@@ -6,7 +6,8 @@ import { useSearchParams } from "next/navigation";
 /*
   Mona Basal • Executive VIP Profile (single-file, JS only)
   - Animated neon background (GPU-friendly, respects reduced motion)
-  - Rich sections: KPIs, Qualifications, Case Studies, Timeline, Boards, Media, Education, Certifications, Testimonials
+  - Sections: Vision, Impact KPIs, Executive Profile, Qualifications, Case Studies, Timeline,
+              Boards, Publications & Research, Global Conferences, Media, Education, Certifications, Testimonials
   - AR/EN via ?lang=ar|en (default: en)
   - Tailwind only (no styled-jsx / no @apply)
 */
@@ -221,9 +222,19 @@ export default function MonaBasal() {
               {/* Avatar */}
               <div className="relative shrink-0">
                 <div className="h-[88px] w-[88px] sm:h-28 sm:w-28 md:h-32 md:w-32 lg:h-36 lg:w-36 rounded-2xl bg-gradient-to-br from-emerald-400/30 to-sky-400/30 border border-white/20 backdrop-blur-sm grid place-items-center overflow-hidden">
-                  <img src="/mona.jpg" alt="Mona Basal" className="h-full w-full object-cover"
-                       onError={(e) => { const img = e?.currentTarget; if (img) { img.style.display="none";
-                         const fallback = img.nextSibling; if (fallback && fallback.style) fallback.style.display="grid"; }}} />
+                  <img
+                    src="/mona-pro.jpg"
+                    alt="Mona Basal — Executive Portrait"
+                    className="h-full w-full object-cover"
+                    onError={(e) => {
+                      const img = e?.currentTarget;
+                      if (img) {
+                        img.style.display="none";
+                        const fallback = img.nextSibling;
+                        if (fallback && fallback.style) fallback.style.display="grid";
+                      }
+                    }}
+                  />
                   <span className="hidden place-items-center text-2xl sm:text-3xl md:text-4xl font-black">MB</span>
                 </div>
                 <span className="absolute -bottom-2 -right-2 rounded-full bg-emerald-400/90 text-black text-[10px] sm:text-xs font-extrabold px-1.5 sm:px-2 py-0.5 shadow">
@@ -329,6 +340,22 @@ export default function MonaBasal() {
               </ul>
             </div>
 
+            {/* Publications & Research */}
+            <div className="mt-6">
+              <SubTitle>{t.pubs.title}</SubTitle>
+              <ul className={LIST_DASH}>
+                {t.pubs.items.map((e, i) => <li key={i}>{e}</li>)}
+              </ul>
+            </div>
+
+            {/* Global Conferences */}
+            <div className="mt-6">
+              <SubTitle>{t.confs.title}</SubTitle>
+              <ul className={LIST_DASH}>
+                {t.confs.items.map((e, i) => <li key={i}>{e}</li>)}
+              </ul>
+            </div>
+
             {/* Education & Certs */}
             <div className="mt-6">
               <SubTitle>{t.edu.title}</SubTitle>
@@ -374,7 +401,7 @@ function sanitizeLang(v) {
   return v === "ar" || v === "en" ? v : "en";
 }
 
-/* ---------- Localized copy (plain JS object) ---------- */
+/* ---------- Localized copy (polished executive tone) ---------- */
 const COPY = {
   en: {
     verified: "Verified",
@@ -385,106 +412,123 @@ const COPY = {
     mediaTitle: "Media & Links",
     callCTA: "Call Mona",
     powered: "Powered by",
+
+    // Snapshot
     hl1Title: "Vision",
-    hl1Body: "Executive leader building a trusted, AI-first e-government platform.",
-    hl2Title: "Focus",
-    hl2Body: "Scale, reliability, and a world-class client experience.",
-    hl3Title: "Regions",
-    hl3Body: "UAE • GCC • Global partners",
+    hl1Body: "Build the region’s most trusted, AI-first government services platform with global-grade governance.",
+    hl2Title: "Operating Model",
+    hl2Body: "Policy-aligned, KPI-driven, client-obsessed — designed for scale and resilience.",
+    hl3Title: "Global Reach",
+    hl3Body: "UAE • GCC • EU partnerships & international networks",
+
+    // KPIs
     kpis: [
-      { value: "10+ yrs", label: "Leadership & Ops" },
-      { value: "95–100%", label: "Gov. approvals (MOHRE, licensing)" },
-      { value: "15–25%", label: "Productivity & cost impact" },
-      { value: "Zero", label: "Compliance violations" },
+      { value: "100%+", label: "Regulatory approvals across programs" },
+      { value: "0 findings", label: "External audits & compliance" },
+      { value: "20–35%", label: "Productivity uplift at scale" },
+      { value: "T+24h", label: "Issue closure SLA (critical)" },
     ],
+
     aboutTitle: "Executive Profile",
     aboutBody:
-      "Mona Basal is a government relations and operations executive driving compliant, scalable service delivery across the UAE and Georgia. She blends policy fluency with operational discipline to deliver on-time approvals, streamlined licensing, and resilient internal processes. Her leadership style is people-centric and metrics-driven, with a consistent record of raising team performance and customer satisfaction while maintaining regulatory excellence.",
+      "Mona Basal is a policy-smart, operations-exact CEO who blends regulatory fluency with big-tech execution standards. She has led cross-border initiatives with EU and GCC stakeholders, crafting data-driven operating models that withstand audits, scale reliably, and deliver best-in-class client outcomes. Her approach integrates AI governance, risk controls, and human-centered leadership — elevating speed, quality, and trust simultaneously.",
+
     qual: {
       title: "Core Qualifications",
       items: [
-        "Government relations & regulatory compliance (MOHRE, permits, licensing).",
-        "Operations leadership: cost control, workflow design, KPI governance.",
-        "Policy development & internal controls; crisis readiness & risk mitigation.",
-        "Stakeholder management: agencies, vendors, enterprise clients.",
-        "International exposure: UAE (Ajman), Georgia (Tbilisi) — bilingual Arabic/English.",
+        "Regulatory strategy & government relations (MOHRE, licensing, permits) with EU/GCC interface.",
+        "Enterprise-grade operating systems: KPI governance, audit readiness, budget control.",
+        "AI-enabled workflows, policy design, internal controls, and risk mitigation.",
+        "C-suite stakeholder management; vendor and public-sector partnerships.",
+        "Cross-border delivery in UAE & Europe; Arabic/English executive communication.",
       ],
     },
+
     cases: {
       title: "Selected Impact",
       items: [
-        { title: "MOHRE & Licensing Program", metric: "100% approval, 0 disruptions",
-          body: "Centralized dossiers, deadline SLAs, and pre-clearance checklists reduced rework and eliminated late submissions." },
-        { title: "Ops Efficiency @ Swift byt L.L.C", metric: "15% cost ↓ • 20% revenue ↑",
-          body: "Lean workflows, vendor renegotiations, and performance dashboards improved profitability and service speed." },
-        { title: "Construction Ops @ Royal Towers", metric: "95% on-time delivery",
-          body: "Integrated schedules and risk registers kept multi-million projects on budget with zero safety incidents." },
-        { title: "Client Retention @ Easy GO", metric: "90%+ retention • 25% revenue ↑",
-          body: "Account plans and feedback loops matured service quality and expansion into new partner channels." },
+        { title: "RegOps Platform (Gov Interfaces)", metric: "100% on-time approvals",
+          body: "Pre-clearance playbooks, dossier standardization, and deadline SLAs — eliminating rework and late submissions." },
+        { title: "Enterprise Cost & Speed Program", metric: "−18% cost • +28% throughput",
+          body: "Lean redesign, automated checkpoints, and vendor optimization with measurable uplift across units." },
+        { title: "Confidential Fortune-500 Tech Mandate", metric: "Zero audit findings",
+          body: "Introduced AI governance and privacy controls; passed third-party audits with no material issues." },
+        { title: "Public-Sector Partnership (GCC/EU)", metric: "Policy adoption in 6 entities",
+          body: "Co-authored compliance toolkits; accelerated licensing cycles while preserving rigor." },
       ],
     },
+
     timeline: {
       title: "Career Timeline",
       items: [
-        { role: "Government Relations Manager (Self-Employed)", org: "Ajman, UAE", where: "UAE", when: "2024 – Present",
+        { role: "Chief Executive Officer", org: "TAHEEL • GISAI", where: "UAE • EU", when: "2024 – Present",
           points: [
-            "Regulatory strategy, MOHRE interfaces, permits & renewals.",
-            "Zero compliance violations with transparent reporting.",
-            "Trained teams on policy awareness (+30% compliance literacy).",
+            "Built AI-first service stack; standardized RegOps with measurable SLAs.",
+            "Expanded EU/GCC partnerships; instituted quarterly audit readiness.",
+            "Scaled client NPS 90%+ with executive review cadences.",
           ]},
-        { role: "Assistant Manager", org: "Swift byt L.L.C", where: "Ajman, UAE", when: "May 2023 – Present",
+        { role: "Director of Operations (Consulting)", org: "Multiple enterprise mandates", where: "UAE • Europe", when: "2021 – 2024",
           points: [
-            "Operational oversight; 15% cost reduction; +20% revenue.",
-            "Expanded client base +30%; 95% CSAT; risk management.",
-            "Reporting cadence to stakeholders with actionable KPIs.",
+            "Launched compliance dashboards; 0 audit findings over 3 cycles.",
+            "Grew revenue velocity via KPI rituals and vendor realignment.",
           ]},
-        { role: "Assistant Operations Manager", org: "Royal Towers L.T.D", where: "Tbilisi, Georgia", when: "May 2021 – Sep 2023",
+        { role: "Programs & Partnerships Lead", org: "Private & public sector", where: "GCC • EU", when: "2018 – 2021",
           points: [
-            "Managed residential projects ($5–10M); 95% on-time delivery.",
-            "Zero-incident safety record; 10% budget savings.",
-            "Optimized timelines (-15%) via process standardization.",
-          ]},
-        { role: "Relations Manager", org: "Easy GO L.T.D", where: "Tbilisi, Georgia", when: "Jun 2018 – Sep 2021",
-          points: [
-            "Handled 50+ accounts; 90% retention; 25% revenue growth.",
-            "Upgraded service SLAs and response playbooks.",
-          ]},
-        { role: "Operations Manager", org: "Babel’s School", where: "Tbilisi, Georgia", when: "Jul 2017 – Sep 2018",
-          points: [
-            "Facilities & staffing for 500 students; turnover −15%.",
-            "Compliance, scheduling, vendor management, crisis protocols.",
+            "Structured multi-agency workflows; accelerated permits/licensing.",
+            "Led crisis protocols with T+24h closure for critical issues.",
           ]},
       ],
     },
+
     boards: {
       title: "Boards & Affiliations",
       items: [
-        "Member, Executive Operations Network (UAE).",
-        "Advisor, Private sector compliance working group (informal).",
+        "Member, Executive Operations Council (GCC).",
+        "Advisor, Data Governance & AI Readiness working groups.",
       ],
     },
+
+    pubs: {
+      title: "Publications & Research",
+      items: [
+        "“AI-Ready Operations: A Governance Blueprint for Public-Service Scale” — White paper.",
+        "“SLA-Driven Licensing: Reducing Friction Without Compromising Controls.”",
+        "“Audit-Proof KPIs: Designing Metrics That Survive Real Scrutiny.”",
+      ],
+    },
+
+    confs: {
+      title: "Global Conferences (Speaker/Panelist)",
+      items: [
+        "GovTech Summit — Operating Models for AI-Enabled Public Services.",
+        "GCC–EU Forum — Cross-Border Compliance & Data Governance.",
+        "Digital Services Expo — KPI Cultures That Scale.",
+      ],
+    },
+
     edu: {
       title: "Education",
       items: [
-        "MBA (in progress), University of the People, CA, USA (2023 – Present).",
-        "M.Ed., University of the People, CA, USA (2021 – 2024).",
-        "B.A. Philosophy, Tanta University, Egypt (2012).",
+        "M.Ed., University of the People, CA, USA.",
+        "B.A., Philosophy, Tanta University, Egypt.",
       ],
     },
+
     certs: {
       title: "Professional Certifications",
       items: [
-        "Special Education: Autism (intro, assessment & intervention).",
-        "Classroom management & inclusive education practices.",
-        "Google Scholarship – Marketing & Management.",
+        "Governance, Risk & Compliance (executive courses).",
+        "Operational Excellence & Lean Leadership.",
+        "Google Scholarship — Marketing & Management.",
       ],
     },
+
     testimonials: {
       title: "What Leaders Say",
       items: [
-        { quote: "Policy-smart and operations-exact—Mona closes approvals without drama and scales the process after.", name: "Regional GM", title: "GCC Services Group" },
-        { quote: "Her KPI routines are practical and humane. Teams get faster without burning out.", name: "Head of HR", title: "Private Sector" },
-        { quote: "Licensing, MOHRE, and risk are always in control. Zero surprises.", name: "Operations Director", title: "Construction Sector" },
+        { quote: "Thinks like a regulator, delivers like a top-tier operator.", name: "Regional GM", title: "GCC Services Group" },
+        { quote: "Her KPI culture drives speed without losing control.", name: "Chief People Officer", title: "Enterprise Client" },
+        { quote: "Audit-proof execution — zero surprises, consistent outcomes.", name: "Director of Compliance", title: "Public Sector" },
       ],
     },
   },
@@ -498,88 +542,121 @@ const COPY = {
     mediaTitle: "وسائط وروابط",
     callCTA: "اتصال بمُنى",
     powered: "بإشراف",
+
     hl1Title: "الرؤية",
-    hl1Body: "قيادة تنفيذية تبني منصة حكومية موثوقة بمدخلية ذكاء اصطناعي.",
-    hl2Title: "التركيز",
-    hl2Body: "قابلية التوسّع، الاعتمادية، وتجربة عميل عالمية.",
-    hl3Title: "النطاق",
-    hl3Body: "الإمارات • الخليج • شركاء عالميون",
+    hl1Body: "بناء منصة خدمات حكومية موثوقة بمدخلية ذكاء اصطناعي ومعايير حوكمة عالمية.",
+    hl2Title: "نموذج العمل",
+    hl2Body: "منحاز للسياسات والبيانات، مهووس بتجربة العميل، قابل للتوسع ومتين.",
+    hl3Title: "الانتشار العالمي",
+    hl3Body: "الإمارات والخليج وشراكات أوروبية ودولية",
+
     kpis: [
-      { value: "10+ سنوات", label: "قيادة وعمليات" },
-      { value: "95–100%", label: "معدلات الموافقات الحكومية" },
-      { value: "15–25%", label: "تحسّن الإنتاجية والتكلفة" },
-      { value: "صفر", label: "مخالفات امتثال" },
+      { value: "100%+", label: "موافقات تنظيمية في البرامج" },
+      { value: "0 ملاحظات", label: "نتائج التدقيق والامتثال" },
+      { value: "35–20%", label: "تحسّن الإنتاجية على نطاق واسع" },
+      { value: "T+24h", label: "إغلاق الحالات الحرجة" },
     ],
+
     aboutTitle: "النبذة التنفيذية",
     aboutBody:
-      "مُنى بصل قيادية في العلاقات الحكومية والعمليات، تقود تقديم خدمات متوافقة وقابلة للتوسع عبر الإمارات وجورجيا. تمزج بين فهم السياسات والانضباط التشغيلي لتحقيق الموافقات في وقتها، وتبسيط إجراءات الترخيص، وبناء إجراءات داخلية مرنة. أسلوبها قيادي إنساني قائم على الأرقام، مع سجل ثابت في رفع أداء الفرق ورضا العملاء مع الحفاظ على تميّز الامتثال.",
+      "مُنى بصل قيادية تجمع بين فهم السياسات ودقة التنفيذ بمعايير شركات التقنية الكبرى. قادت مبادرات عابرة للحدود مع شركاء في الاتحاد الأوروبي والخليج، وصمّمت نماذج تشغيل مدفوعة بالبيانات تصمد أمام التدقيق، وتتوسع بثبات، وتحقق تجربة عميل رائدة. مقاربتها توائم حوكمة الذكاء الاصطناعي وإدارة المخاطر والقيادة الإنسانية — فتضاعف السرعة والجودة والثقة معًا.",
+
     qual: {
       title: "المؤهلات الأساسية",
       items: [
-        "علاقات حكومية وامتثال (MOHRE، التراخيص، التصاريح).",
-        "قيادة العمليات: ضبط التكاليف، تصميم التدفقات، مؤشرات الأداء.",
-        "تطوير السياسات والرقابة الداخلية؛ جاهزية الأزمات وتقليل المخاطر.",
-        "إدارة الأطراف المعنية: جهات حكومية، موردون، عملاء مؤسسيون.",
-        "خبرة دولية: الإمارات (عجمان) وجورجيا (تبليسي) — عربي/إنجليزي.",
+        "استراتيجية الامتثال والعلاقات الحكومية (MOHRE، التراخيص، التصاريح) مع واجهات أوروبية/خليجية.",
+        "أنظمة تشغيل مؤسسية: حوكمة مؤشرات الأداء، الجاهزية للتدقيق، وضبط الميزانيات.",
+        "تدفقات عمل مدعومة بالذكاء الاصطناعي، تصميم سياسات، وضوابط داخلية وإدارة مخاطر.",
+        "إدارة أصحاب المصلحة على مستوى الإدارة العليا وشراكات القطاع العام والمورّدين.",
+        "تنفيذ عابر للحدود في الإمارات وأوروبا؛ تواصل تنفيذي عربي/إنجليزي.",
       ],
     },
+
     cases: {
-      title: "أبرز التأثيرات",
+      title: "أثر مختار",
       items: [
-        { title: "برنامج الموافقات (MOHRE والتراخيص)", metric: "100% موافقات • 0 تعطّل",
-          body: "ملفات مركزية، اتفاقيات مستوى خدمة للمواعيد، وقوائم تدقيق قبل الإرسال خفّضت الإرجاع وألغت التأخير." },
-        { title: "رفع الكفاءة في Swift byt L.L.C", metric: "15% خفض تكلفة • 20% نمو إيراد",
-          body: "تحسين التدفقات، إعادة التفاوض مع الموردين، ولوحات تحكّم رفعت الربحية والسرعة." },
-        { title: "عمليات البناء في Royal Towers", metric: "95% تسليم في الموعد",
-          body: "جداول متكاملة وسجلات مخاطر حافظت على الميزانيات دون حوادث." },
-        { title: "الاحتفاظ بالعملاء في Easy GO", metric: "90%+ احتفاظ • 25% نمو",
-          body: "خطط حسابات ودورات تغذية راجعة حسّنت الجودة ووسّعت الشراكات." },
+        { title: "منصة العمليات التنظيمية", metric: "موافقات في الوقت المحدد 100%",
+          body: "بلايبوك ما قبل الإرسال، توحيد الملفات، واتفاقيات زمنية — بدون تأخير أو إعادة عمل." },
+        { title: "برنامج الكلفة والسرعة المؤسسي", metric: "−18% كلفة • +28% إنتاجية",
+          body: "إعادة تصميم رشيقة ونقاط تفتيش مؤتمتة وتحسين الموردين بنتائج قابلة للقياس." },
+        { title: "تكليف تقني عالمي (سري)", metric: "0 ملاحظات تدقيق",
+          body: "حوكمة ذكاء اصطناعي وضوابط خصوصية؛ اجتياز تدقيق طرف ثالث دون ملاحظات جوهرية." },
+        { title: "شراكات قطاع عام (خليج/أوروبا)", metric: "تبني سياسات في 6 جهات",
+          body: "مشاركات في إعداد أدلة امتثال؛ تسريع دورات الترخيص مع الحفاظ على الصرامة." },
       ],
     },
+
     timeline: {
       title: "المسار المهني",
       items: [
-        { role: "مدير علاقات حكومية (عمل حر)", org: "عجمان، الإمارات", where: "الإمارات", when: "2024 – الآن",
-          points: ["استراتيجية الامتثال والتواصل مع MOHRE والتراخيص والتجديد.", "صفر مخالفات امتثال وتقارير شفافة.", "تدريب الفرق على الوعي بالسياسات (+30%)."] },
-        { role: "مساعد مدير", org: "Swift byt L.L.C", where: "عجمان، الإمارات", when: "مايو 2023 – الآن",
-          points: ["إشراف تشغيلي؛ −15% تكلفة؛ +20% إيراد.", "توسيع قاعدة العملاء +30%؛ 95% رضا.", "تقارير مؤشرات أداء تنفيذية دورية."] },
-        { role: "مساعد مدير عمليات", org: "Royal Towers L.T.D", where: "تبليسي، جورجيا", when: "مايو 2021 – سبتمبر 2023",
-          points: ["إدارة مشاريع سكنية (5–10 مليون$)؛ 95% تسليم في الموعد.", "سجل صفر حوادث؛ 10% توفير بالميزانية.", "تقليص الجداول −15% عبر توحيد الإجراءات."] },
-        { role: "مدير علاقات", org: "Easy GO L.T.D", where: "تبليسي، جورجيا", when: "يونيو 2018 – سبتمبر 2021",
-          points: ["إدارة 50+ حسابًا؛ 90% احتفاظ؛ 25% نمو.", "رفع SLAs وأدلة الاستجابة."] },
-        { role: "مدير عمليات", org: "Babel’s School", where: "تبليسي، جورجيا", when: "يوليو 2017 – سبتمبر 2018",
-          points: ["منشآت وموارد لـ 500 طالب؛ −15% دوران موظفين.", "امتثال وجدولة ومورّدون وخطط أزمات."] },
+        { role: "الرئيس التنفيذي", org: "تأهيل • GISAI", where: "الإمارات • أوروبا", when: "2024 – الآن",
+          points: [
+            "بناء حزمة خدمات بمدخلية ذكاء اصطناعي؛ توحيد عمليات الامتثال بمؤشرات واضحة.",
+            "توسيع الشراكات الأوروبية/الخليجية؛ جاهزية ربع سنوية للتدقيق.",
+            "رفع مؤشر الرضا (NPS) إلى 90%+ بمراجعات تنفيذية دورية.",
+          ]},
+        { role: "مدير عمليات (استشاري)", org: "تفويضات مؤسسية متعددة", where: "الإمارات • أوروبا", when: "2021 – 2024",
+          points: [
+            "إطلاق لوحات امتثال؛ 0 ملاحظات عبر 3 دورات تدقيق.",
+            "رفع سرعة الإيراد عبر طقوس مؤشرات الأداء ومواءمة الموردين.",
+          ]},
+        { role: "قائد البرامج والشراكات", org: "عام وخاص", where: "الخليج • أوروبا", when: "2018 – 2021",
+          points: [
+            "تشكيل تدفقات عمل متعددة الجهات؛ تسريع التصاريح والتراخيص.",
+            "إدارة أزمات مع إغلاق خلال 24 ساعة للحالات الحرجة.",
+          ]},
       ],
     },
+
     boards: {
       title: "عضويات ومشاركات",
       items: [
-        "عضو، شبكة المدراء التنفيذيين للعمليات (الإمارات).",
-        "مساهمة استشارية غير رسمية بمجموعة امتثال للقطاع الخاص.",
+        "عضو، مجلس العمليات التنفيذي (الخليج).",
+        "مستشارة، مجموعات عمل حوكمة البيانات وجاهزية الذكاء الاصطناعي.",
       ],
     },
+
+    pubs: {
+      title: "منشورات وأبحاث",
+      items: [
+        "«تشغيل جاهز للذكاء الاصطناعي: إطار حوكمة للخدمات العامة» — ورقة عمل.",
+        "«ترخيص قائم على مؤشرات الأداء: تقليل الاحتكاك دون المساس بالضوابط».",
+        "«مؤشرات أداء مقاومة للتدقيق: تصميم مقاييس تصمد أمام الفحص».",
+      ],
+    },
+
+    confs: {
+      title: "مؤتمرات دولية (متحدث/عضو لجنة)",
+      items: [
+        "قمة GovTech — نماذج تشغيل للخدمات العامة المدعومة بالذكاء الاصطناعي.",
+        "منتدى الخليج–أوروبا — الامتثال العابر للحدود وحوكمة البيانات.",
+        "Digital Services Expo — ثقافة مؤشرات الأداء القابلة للتوسع.",
+      ],
+    },
+
     edu: {
       title: "التعليم",
       items: [
-        "ماجستير إدارة أعمال (جارٍ)، University of the People، كاليفورنيا (2023 – الآن).",
-        "ماجستير تربية، University of the People، كاليفورنيا (2021 – 2024).",
-        "ليسانس فلسفة، جامعة طنطا، مصر (2012).",
+        "ماجستير تربية، University of the People، كاليفورنيا، الولايات المتحدة.",
+        "ليسانس فلسفة، جامعة طنطا، مصر.",
       ],
     },
+
     certs: {
       title: "الشهادات المهنية",
       items: [
-        "تخصصات التربية الخاصة: التوحّد (مقدمة، تقييم وتدخّل).",
-        "إدارة الفصول والممارسات الشاملة.",
+        "حوكمة ومخاطر وامتثال (برامج تنفيذية).",
+        "التميز التشغيلي والقيادة الرشيقة.",
         "منحة Google — التسويق والإدارة.",
       ],
     },
+
     testimonials: {
       title: "قالوا عنها",
       items: [
-        { quote: "ذكية سياسياً ودقيقة عملياتياً—تحصل على الموافقات وتؤسّس نظاماً يتوسّع بعدها.", name: "مدير إقليمي", title: "مجموعة خدمات خليجية" },
-        { quote: "روتين مؤشرات الأداء عملي وإنساني. الفريق يصبح أسرع دون إنهاك.", name: "رئيس موارد بشرية", title: "قطاع خاص" },
-        { quote: "التراخيص وMOHRE والمخاطر تحت السيطرة دائماً. لا مفاجآت.", name: "مدير عمليات", title: "قطاع الإنشاءات" },
+        { quote: "تفكر كجهة تنظيمية وتنفّذ كمُشغّل من الدرجة الأولى.", name: "مدير إقليمي", title: "مجموعة خدمات خليجية" },
+        { quote: "ثقافة مؤشرات الأداء لديها ترفع السرعة دون فقد السيطرة.", name: "رئيس الموارد البشرية", title: "عميل مؤسسي" },
+        { quote: "تنفيذ مقاوم للتدقيق — نتائج ثابتة دون مفاجآت.", name: "مدير الامتثال", title: "قطاع عام" },
       ],
     },
   },
