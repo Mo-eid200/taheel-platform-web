@@ -3,21 +3,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
-/**
- * Mona Basal • Executive VIP Profile (single-file, JS only)
- * - Animated neon background (GPU-friendly, respects reduced motion)
- * - Rich sections: KPIs, Qualifications, Case Studies, Timeline, Boards, Media, Education, Certifications, Testimonials
- * - AR/EN via ?lang=ar|en (default: en)
- * - Tailwind only (no styled-jsx / no @apply)
- */
-
-/** @typedef {"ar" | "en"} Lang */
+/*
+  Mona Basal • Executive VIP Profile (single-file, JS only)
+  - Animated neon background (GPU-friendly, respects reduced motion)
+  - Rich sections: KPIs, Qualifications, Case Studies, Timeline, Boards, Media, Education, Certifications, Testimonials
+  - AR/EN via ?lang=ar|en (default: en)
+  - Tailwind only (no styled-jsx / no @apply)
+*/
 
 export default function MonaBasal() {
   const params = useSearchParams();
   const initialParam = (params?.get("lang") || "en").toLowerCase();
 
-  /** @type {[Lang, Function]} */
+  // JS-only state (no types)
   const [lang, setLang] = useState(sanitizeLang(initialParam));
   const [motionOK, setMotionOK] = useState(true);
 
@@ -47,7 +45,6 @@ export default function MonaBasal() {
     const NEON_G = "rgba(35,218,198,0.9)";
     const NEON_B = "rgba(83,166,247,0.9)";
 
-    /** @type {{x:number,y:number,r:number,vx:number,vy:number}[]} */
     let P = [];
     let t = 0;
 
@@ -156,7 +153,7 @@ export default function MonaBasal() {
 
   const t = useMemo(() => COPY[lang], [lang]);
 
-  // ----- UI utility class constants (بديل .btn-chip و.link-block إلخ)
+  // UI utility classes
   const CHIP = "group inline-flex items-center gap-2 rounded-xl border-2 bg-black/20 px-3.5 sm:px-4 py-2 text-[13px] sm:text-sm font-bold hover:bg-white/10 transition";
   const LINK_BLOCK = "block w-full rounded-lg px-4 py-2.5 sm:py-3 text-[13px] sm:text-sm font-bold hover:bg-white/10 transition border";
   const LIST_CHECK = "pl-5 grid gap-2 list-disc marker:text-emerald-400 text-emerald-50/90";
@@ -373,10 +370,11 @@ export default function MonaBasal() {
 }
 
 /* ---------- helpers ---------- */
-/** @param {string} v */ function sanitizeLang(v) { return v === "ar" || v === "en" ? v : "en"; }
+function sanitizeLang(v) {
+  return v === "ar" || v === "en" ? v : "en";
+}
 
-/* ---------- Localized copy ---------- */
-/** @type {{[k in Lang]: any}} */
+/* ---------- Localized copy (plain JS object) ---------- */
 const COPY = {
   en: {
     verified: "Verified",
@@ -387,27 +385,21 @@ const COPY = {
     mediaTitle: "Media & Links",
     callCTA: "Call Mona",
     powered: "Powered by",
-
-    // top badges
     hl1Title: "Vision",
     hl1Body: "Executive leader building a trusted, AI-first e-government platform.",
     hl2Title: "Focus",
     hl2Body: "Scale, reliability, and a world-class client experience.",
     hl3Title: "Regions",
     hl3Body: "UAE • GCC • Global partners",
-
-    // KPI bar
     kpis: [
       { value: "10+ yrs", label: "Leadership & Ops" },
       { value: "95–100%", label: "Gov. approvals (MOHRE, licensing)" },
       { value: "15–25%", label: "Productivity & cost impact" },
       { value: "Zero", label: "Compliance violations" },
     ],
-
     aboutTitle: "Executive Profile",
     aboutBody:
       "Mona Basal is a government relations and operations executive driving compliant, scalable service delivery across the UAE and Georgia. She blends policy fluency with operational discipline to deliver on-time approvals, streamlined licensing, and resilient internal processes. Her leadership style is people-centric and metrics-driven, with a consistent record of raising team performance and customer satisfaction while maintaining regulatory excellence.",
-
     qual: {
       title: "Core Qualifications",
       items: [
@@ -418,7 +410,6 @@ const COPY = {
         "International exposure: UAE (Ajman), Georgia (Tbilisi) — bilingual Arabic/English.",
       ],
     },
-
     cases: {
       title: "Selected Impact",
       items: [
@@ -432,7 +423,6 @@ const COPY = {
           body: "Account plans and feedback loops matured service quality and expansion into new partner channels." },
       ],
     },
-
     timeline: {
       title: "Career Timeline",
       items: [
@@ -466,7 +456,6 @@ const COPY = {
           ]},
       ],
     },
-
     boards: {
       title: "Boards & Affiliations",
       items: [
@@ -474,7 +463,6 @@ const COPY = {
         "Advisor, Private sector compliance working group (informal).",
       ],
     },
-
     edu: {
       title: "Education",
       items: [
@@ -483,7 +471,6 @@ const COPY = {
         "B.A. Philosophy, Tanta University, Egypt (2012).",
       ],
     },
-
     certs: {
       title: "Professional Certifications",
       items: [
@@ -492,7 +479,6 @@ const COPY = {
         "Google Scholarship – Marketing & Management.",
       ],
     },
-
     testimonials: {
       title: "What Leaders Say",
       items: [
@@ -512,25 +498,21 @@ const COPY = {
     mediaTitle: "وسائط وروابط",
     callCTA: "اتصال بمُنى",
     powered: "بإشراف",
-
     hl1Title: "الرؤية",
     hl1Body: "قيادة تنفيذية تبني منصة حكومية موثوقة بمدخلية ذكاء اصطناعي.",
     hl2Title: "التركيز",
     hl2Body: "قابلية التوسّع، الاعتمادية، وتجربة عميل عالمية.",
     hl3Title: "النطاق",
     hl3Body: "الإمارات • الخليج • شركاء عالميون",
-
     kpis: [
       { value: "10+ سنوات", label: "قيادة وعمليات" },
       { value: "95–100%", label: "معدلات الموافقات الحكومية" },
       { value: "15–25%", label: "تحسّن الإنتاجية والتكلفة" },
       { value: "صفر", label: "مخالفات امتثال" },
     ],
-
     aboutTitle: "النبذة التنفيذية",
     aboutBody:
       "مُنى بصل قيادية في العلاقات الحكومية والعمليات، تقود تقديم خدمات متوافقة وقابلة للتوسع عبر الإمارات وجورجيا. تمزج بين فهم السياسات والانضباط التشغيلي لتحقيق الموافقات في وقتها، وتبسيط إجراءات الترخيص، وبناء إجراءات داخلية مرنة. أسلوبها قيادي إنساني قائم على الأرقام، مع سجل ثابت في رفع أداء الفرق ورضا العملاء مع الحفاظ على تميّز الامتثال.",
-
     qual: {
       title: "المؤهلات الأساسية",
       items: [
@@ -541,7 +523,6 @@ const COPY = {
         "خبرة دولية: الإمارات (عجمان) وجورجيا (تبليسي) — عربي/إنجليزي.",
       ],
     },
-
     cases: {
       title: "أبرز التأثيرات",
       items: [
@@ -555,7 +536,6 @@ const COPY = {
           body: "خطط حسابات ودورات تغذية راجعة حسّنت الجودة ووسّعت الشراكات." },
       ],
     },
-
     timeline: {
       title: "المسار المهني",
       items: [
@@ -571,7 +551,6 @@ const COPY = {
           points: ["منشآت وموارد لـ 500 طالب؛ −15% دوران موظفين.", "امتثال وجدولة ومورّدون وخطط أزمات."] },
       ],
     },
-
     boards: {
       title: "عضويات ومشاركات",
       items: [
@@ -579,7 +558,6 @@ const COPY = {
         "مساهمة استشارية غير رسمية بمجموعة امتثال للقطاع الخاص.",
       ],
     },
-
     edu: {
       title: "التعليم",
       items: [
@@ -588,7 +566,6 @@ const COPY = {
         "ليسانس فلسفة، جامعة طنطا، مصر (2012).",
       ],
     },
-
     certs: {
       title: "الشهادات المهنية",
       items: [
@@ -597,7 +574,6 @@ const COPY = {
         "منحة Google — التسويق والإدارة.",
       ],
     },
-
     testimonials: {
       title: "قالوا عنها",
       items: [
