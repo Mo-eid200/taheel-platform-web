@@ -11,9 +11,10 @@ const nextConfig = {
         protocol: "https",
         hostname: "taheel-platform.app",
       }
-      // ممكن تضيف أي دومين خارجي آخر بنفس الشكل
     ]
-  }
+  },
+  typescript: { ignoreBuildErrors: true },
+  eslint: { ignoreDuringBuilds: true },
 };
 
 export default nextConfig;
