@@ -4,16 +4,20 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,          // ⬅️ جديد
   limit,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
   Timestamp,
+  where,            // ⬅️ جديد
 } from "firebase/firestore";
 import { firestore as db } from "@/lib/firebase.client";
 
-// Helpers
+/* =========================
+   Helpers
+========================= */
 function formatDate(ts, lang = "ar") {
   if (!ts) return "-";
   const d = typeof ts?.toDate === "function" ? ts.toDate() : new Date(ts);
@@ -26,6 +30,13 @@ function toE164(raw) {
   if (digits.startsWith("971")) return `+${digits}`;
   return `+971${digits}`;
 }
+function humanType(t, lang="ar"){
+  if (t === "company") return lang==="ar" ? "شركة" : "Company";
+  if (t === "resident") return lang==="ar" ? "مقيم" : "Resident";
+  if (t === "nonresident") return lang==="ar" ? "غير مقيم" : "Non-resident";
+  return "-";
+}
+
 function Badge({ children, intent }) {
   const map = {
     success: "bg-emerald-100 text-emerald-700",
@@ -40,6 +51,7 @@ function Badge({ children, intent }) {
     </span>
   );
 }
+
 function ClientActions({ client, lang }) {
   if (!client) return null;
   const phone = toE164(client.phone);
@@ -73,7 +85,9 @@ function ClientActions({ client, lang }) {
   );
 }
 
-// Main compact control panel component
+/* =========================
+   Main compact control panel
+========================= */
 export default function NotificationsSection({ lang = "ar" }) {
   const [notifications, setNotifications] = useState([]);
   const [clients, setClients] = useState([]);
@@ -83,11 +97,14 @@ export default function NotificationsSection({ lang = "ar" }) {
 
   const [notifTypeFilter, setNotifTypeFilter] = useState("all");
   const [notifSearch, setNotifSearch] = useState("");
+
   const [clientSearch, setClientSearch] = useState("");
+  const [clientTypeTab, setClientTypeTab] = useState("all"); // ⬅️ تبويب النوع
 
   const [scheduleAt, setScheduleAt] = useState("");
   const [priority, setPriority] = useState("high"); // default high
 
+  // Load notifications + clients
   useEffect(() => {
     const qNotifs = query(collection(db, "notifications"), orderBy("timestamp", "desc"), limit(300));
     const unsubNotifs = onSnapshot(qNotifs, (snap) => {
@@ -95,11 +112,13 @@ export default function NotificationsSection({ lang = "ar" }) {
       snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
       setNotifications(list);
     });
+
     const unsubClients = onSnapshot(collection(db, "users"), (snap) => {
       const list = [];
       snap.forEach((d) => list.push({ userId: d.id, ...d.data() }));
       setClients(list);
     });
+
     return () => {
       unsubNotifs();
       unsubClients();
@@ -112,6 +131,42 @@ export default function NotificationsSection({ lang = "ar" }) {
     return m;
   }, [clients]);
 
+  // ⬅️ إحضار التوكنات من subcollection أولاً، ثم fallback للحقول القديمة
+  async function getActiveTokensForUser(uid) {
+    const tokens = [];
+
+    // 1) subcollection: users/{uid}/pushTokens where active==true
+    try {
+      const qTokens = query(
+        collection(db, "users", uid, "pushTokens"),
+        where("active", "==", true)
+      );
+      const snap = await getDocs(qTokens);
+      snap.forEach((d) => {
+        const v = d.data();
+        if (v?.token) tokens.push(v.token);
+      });
+    } catch (e) {
+      // ignore and fallback
+    }
+
+    // 2) fallback: expoPushToken / expoPushTokens على الدوكيومنت نفسه
+    if (!tokens.length) {
+      const userRef = doc(db, "users", uid);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+        const u = userSnap.data();
+        if (u?.expoPushToken) tokens.push(u.expoPushToken);
+        if (Array.isArray(u?.expoPushTokens)) {
+          u.expoPushTokens.forEach((t) => t && tokens.push(t));
+        }
+      }
+    }
+
+    // unique & clean
+    return Array.from(new Set(tokens.filter(Boolean)));
+  }
+
   async function sendNotification() {
     if (!message.trim()) {
       alert(lang === "ar" ? "من فضلك اكتب نص الإشعار." : "Please write a message.");
@@ -119,35 +174,28 @@ export default function NotificationsSection({ lang = "ar" }) {
     }
     setLoading(true);
     try {
-      // pushAt: serverTimestamp() for immediate (automatic) unless user picks a schedule
       const pushAtValue = scheduleAt ? Timestamp.fromDate(new Date(scheduleAt)) : serverTimestamp();
 
       const payload = {
         title: lang === "ar" ? "إشعار جديد" : "New Notification",
         body: message.trim(),
         targetId: target === "all" ? "all" : String(target),
-        timestamp: serverTimestamp(), // created time
-        pushAt: pushAtValue, // scheduled or immediate (serverTimestamp)
+        timestamp: serverTimestamp(),   // created time
+        pushAt: pushAtValue,            // scheduled or immediate
         type: target === "all" ? "general" : "custom",
         status: "queued",
         pushed: false,
         attempts: 0,
         lastError: null,
-        priority: priority || "high", // "high" or "normal"
+        priority: priority || "high",   // "high" | "normal"
         data: {},
       };
 
-      // attach tokens for single client to simplify sending function
+      // ⬅️ لو موجه لمستخدم واحد، جهّز التوكنات النشطة
       if (target !== "all") {
-        const userRef = doc(db, "users", target);
-        const userSnap = await getDoc(userRef);
-        if (userSnap.exists()) {
-          const userData = userSnap.data();
-          const tokens = [];
-          if (userData?.expoPushToken) tokens.push(userData.expoPushToken);
-          if (Array.isArray(userData?.expoPushTokens)) tokens.push(...userData.expoPushTokens);
-          if (tokens.length) payload.tokens = tokens;
-        }
+        const tokens = await getActiveTokensForUser(String(target));
+        if (tokens?.length) payload.tokens = tokens;
+        else payload.status = "no_tokens"; // يسهل تتبع الحالة
       }
 
       await addDoc(collection(db, "notifications"), payload);
@@ -167,33 +215,46 @@ export default function NotificationsSection({ lang = "ar" }) {
     }
   }
 
+  /* =========================
+     Filters / Searches
+  ========================= */
   const filteredNotifications = useMemo(() => {
     const search = notifSearch.trim().toLowerCase();
     return notifications.filter((n) => {
       if (notifTypeFilter !== "all" && n.type !== notifTypeFilter) return false;
       if (!search) return true;
       const client = clientsMap.get(n.targetId || "");
-      const name = (client?.name || "").toLowerCase();
-      const phone = client?.phone || "";
-      return (n.body || "").toLowerCase().includes(search) || name.includes(search) || phone.includes(search);
+      const name = (client?.name || client?.displayName || "").toLowerCase();
+      const phone = client?.phone || client?.phoneE164 || "";
+      return (n.body || "").toLowerCase().includes(search) || name.includes(search) || String(phone).includes(search);
     });
   }, [notifications, notifTypeFilter, notifSearch, clientsMap]);
 
   const filteredClients = useMemo(() => {
-    const search = clientSearch.trim().toLowerCase();
-    if (!search) return clients;
+    // تبويب النوع + بحث
+    const s = clientSearch.trim().toLowerCase();
     return clients.filter((c) => {
+      if (clientTypeTab !== "all" && (c.accountType || "") !== clientTypeTab) return false;
+      if (!s) return true;
+      const name = (c.name || c.displayName || "").toLowerCase();
+      const email = (c.email || "").toLowerCase();
+      const phone = String(c.phone || c.phoneE164 || "");
+      const customerId = (c.customerId || "").toLowerCase();
       return (
-        (c.name && c.name.toLowerCase().includes(search)) ||
-        (c.phone && c.phone.includes(search)) ||
-        (c.email && c.email.toLowerCase().includes(search))
+        (name && name.includes(s)) ||
+        (email && email.includes(s)) ||
+        (phone && phone.includes(s)) ||
+        (customerId && customerId.includes(s))
       );
     });
-  }, [clients, clientSearch]);
+  }, [clients, clientSearch, clientTypeTab]);
 
+  /* =========================
+     UI
+  ========================= */
   return (
     <div className="max-w-5xl mx-auto py-6 px-3 md:px-6 text-sm text-slate-900">
-      {/* Compact form - visually tuned */}
+      {/* Compose / Queue */}
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -211,7 +272,7 @@ export default function NotificationsSection({ lang = "ar" }) {
         />
 
         <select
-          className="p-2 rounded-md border border-slate-200 bg-white text-sm min-w-[180px] cursor-pointer"
+          className="p-2 rounded-md border border-slate-200 bg-white text-sm min-w-[220px] cursor-pointer"
           value={target}
           onChange={(e) => setTarget(e.target.value)}
           title={lang === "ar" ? "المستلم" : "Recipient"}
@@ -219,7 +280,7 @@ export default function NotificationsSection({ lang = "ar" }) {
           <option value="all">{lang === "ar" ? "كل العملاء" : "All Clients"}</option>
           {clients.map((cl) => (
             <option value={cl.userId} key={cl.userId}>
-              {(cl.name || cl.userId) + (cl.phone ? ` (${cl.phone})` : "")}
+              {(cl.name || cl.displayName || cl.userId) + (cl.phone ? ` (${toE164(cl.phone)})` : "")}
             </option>
           ))}
         </select>
@@ -235,9 +296,10 @@ export default function NotificationsSection({ lang = "ar" }) {
             <option value="normal">{lang === "ar" ? "عادية" : "Normal"}</option>
           </select>
 
-          {/* short explanation of priority */}
           <div className="text-xs text-slate-500">
-            {priority === "high" ? (lang === "ar" ? "عالية — تصل فورًا وبأولوية." : "High — delivered immediately with priority.") : (lang === "ar" ? "عادية — تصل حسب الجدولة والاعتمادات." : "Normal — delivered normally (no priority).")}
+            {priority === "high"
+              ? (lang === "ar" ? "عالية — تصل فورًا وبأولوية." : "High — delivered immediately with priority.")
+              : (lang === "ar" ? "عادية — تصل طبيعيًا." : "Normal — delivered normally.")}
           </div>
 
           <input
@@ -258,7 +320,7 @@ export default function NotificationsSection({ lang = "ar" }) {
         </button>
       </form>
 
-      {/* Filters row */}
+      {/* Notifications filter row */}
       <div className="flex flex-col md:flex-row gap-2 items-center mt-4 mb-3">
         <div className="flex gap-1">
           {["all", "general", "custom"].map((k) => (
@@ -321,7 +383,8 @@ export default function NotificationsSection({ lang = "ar" }) {
                         const t = clientsMap.get(n.targetId || "");
                         return t ? (
                           <span className="inline-flex items-center gap-2">
-                            <span className="font-medium">{t.name || t.userId}</span>
+                            <span className="font-medium">{t.name || t.displayName || t.userId}</span>
+                            <Badge intent="muted">{humanType(t.accountType, lang)}</Badge>
                             <ClientActions client={t} lang={lang} />
                           </span>
                         ) : (
@@ -331,7 +394,6 @@ export default function NotificationsSection({ lang = "ar" }) {
                     )}
                   </td>
                   <td className="py-2 px-2 text-slate-500 text-xs whitespace-nowrap">
-                    {/* show created timestamp and scheduled pushAt (if different) */}
                     {formatDate(n.timestamp, lang)}
                     {n.pushAt && n.pushAt !== n.timestamp ? (
                       <div className="text-[10px] text-slate-400">
@@ -347,28 +409,54 @@ export default function NotificationsSection({ lang = "ar" }) {
         </table>
       </div>
 
-      {/* Clients */}
+      {/* Clients header: tabs + search */}
       <div className="mt-6">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-semibold text-emerald-800">{lang === "ar" ? "العملاء" : "Clients"}</span>
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-2">
+          <div className="flex gap-1">
+            {[
+              {k:"all", label: lang==="ar" ? "الكل" : "All"},
+              {k:"resident", label: lang==="ar" ? "مقيم" : "Resident"},
+              {k:"nonresident", label: lang==="ar" ? "غير مقيم" : "Non-resident"},
+              {k:"company", label: lang==="ar" ? "شركة" : "Company"},
+            ].map(t => (
+              <button
+                key={t.k}
+                className={`px-2 py-1 rounded-md text-sm font-medium ${clientTypeTab === t.k ? "bg-emerald-700 text-white" : "bg-emerald-50 text-emerald-800 border border-emerald-200"} cursor-pointer`}
+                onClick={() => setClientTypeTab(t.k)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
           <input
-            className="p-2 rounded-md border border-slate-200 min-w-[140px] text-sm"
-            placeholder={lang === "ar" ? "بحث بالاسم أو الهاتف أو الإيميل..." : "Search by name, phone or email..."}
+            className="p-2 rounded-md border border-slate-200 min-w-[220px] text-sm"
+            placeholder={lang === "ar" ? "بحث بالاسم / الهاتف / الإيميل / رقم العميل..." : "Search name / phone / email / customerId..."}
             value={clientSearch}
             onChange={(e) => setClientSearch(e.target.value)}
             style={{ direction: lang === "ar" ? "rtl" : "ltr" }}
           />
         </div>
 
+        {/* Clients grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {filteredClients.length === 0 ? (
-            <div className="text-slate-400 text-center col-span-2 py-4">{lang === "ar" ? "لا يوجد عملاء" : "No clients found"}</div>
+            <div className="text-slate-400 text-center col-span-2 py-4">
+              {lang === "ar" ? "لا يوجد عملاء" : "No clients found"}
+            </div>
           ) : (
             filteredClients.map((client) => (
               <div key={client.userId} className="flex items-center justify-between bg-emerald-50 p-3 rounded-lg border border-emerald-200 shadow-sm">
                 <div>
-                  <div className="font-medium text-slate-900 text-sm">{client.name || client.userId}</div>
-                  <div className="text-xs text-slate-600">{client.phone}{client.email ? ` | ${client.email}` : ""}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="font-medium text-slate-900 text-sm">{client.name || client.displayName || client.userId}</div>
+                    <Badge intent="muted">{humanType(client.accountType, lang)}</Badge>
+                  </div>
+                  <div className="text-xs text-slate-600">
+                    {(client.customerId ? `#${client.customerId} • ` : "")}
+                    {toE164(client.phone || client.phoneE164) || "-"}
+                    {client.email ? ` | ${client.email}` : ""}
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <ClientActions client={client} lang={lang} />
