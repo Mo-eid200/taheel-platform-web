@@ -139,7 +139,7 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
     }
   }
 
-  async function getActiveTokensForUser(userDocId) {
+async function getActiveTokensForUser(userDocId) {
   if (!userDocId) return [];
   setResolvingTokens(true);
   const tokens = new Set();
