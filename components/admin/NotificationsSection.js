@@ -57,7 +57,9 @@ function Badge({ children, intent }) {
 function ClientActions({ client, lang }) {
   if (!client) return null;
   const phone = toE164(client.phone || client.phoneE164);
-  const msg = encodeURIComponent(lang === "ar" ? "مرحباً، لديك إشعار جديد من منصة تأهيل." : "Hello, you have a new notification from Taheel.");
+  const msg = encodeURIComponent(
+    lang === "ar" ? "مرحباً، لديك إشعار جديد من منصة تأهيل." : "Hello, you have a new notification from Taheel."
+  );
   const subject = encodeURIComponent(lang === "ar" ? "إشعار جديد" : "New Notification");
   return (
     <span className="flex gap-2 ml-1 text-sm">
@@ -113,10 +115,15 @@ export default function NotificationsSection({ lang = "ar" }) {
 
   const [scheduleAt, setScheduleAt] = useState("");
   const [priority, setPriority] = useState("high"); // default high
+  const [targetTokenCount, setTargetTokenCount] = useState(null);
 
   // Load notifications + clients
   useEffect(() => {
-    const qNotifs = query(collection(db, "notifications"), orderBy("timestamp", "desc"), limit(300));
+    const qNotifs = query(
+      collection(db, "notifications"),
+      orderBy("timestamp", "desc"),
+      limit(300)
+    );
     const unsubNotifs = onSnapshot(qNotifs, (snap) => {
       const list = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
@@ -141,31 +148,73 @@ export default function NotificationsSection({ lang = "ar" }) {
     return m;
   }, [clients]);
 
-  // جلب التوكنات النشطة من subcollection ثم fallback
-  async function getActiveTokensForUser(uid) {
+  // -------- Tokens Reader (fixed): read from BOTH expoPushTokens & pushTokens + root fallbacks --------
+  async function getActiveTokensForUser(userDocId) {
     const tokens = [];
-    try {
-      const qTokens = query(collection(db, "users", uid, "pushTokens"), where("active", "==", true));
-      const snap = await getDocs(qTokens);
-      snap.forEach((d) => {
-        const v = d.data();
-        if (v?.token) tokens.push(v.token);
-      });
-    } catch (_) {}
 
-    if (!tokens.length) {
-      const userRef = doc(db, "users", uid);
-      const userSnap = await getDoc(userRef);
+    // 1) expoPushTokens
+    try {
+      const q1 = query(
+        collection(db, "users", userDocId, "expoPushTokens"),
+        where("active", "==", true)
+      );
+      const s1 = await getDocs(q1);
+      s1.forEach((d) => {
+        const v = d.data() || {};
+        // لو موجود ownerDocId، فلتره يساوي نفس المستخدم الحالي
+        if (v?.token && (v.ownerDocId ? v.ownerDocId === userDocId : true)) {
+          tokens.push(v.token);
+        }
+      });
+    } catch {}
+
+    // 2) pushTokens (compat)
+    try {
+      const q2 = query(
+        collection(db, "users", userDocId, "pushTokens"),
+        where("active", "==", true)
+      );
+      const s2 = await getDocs(q2);
+      s2.forEach((d) => {
+        const v = d.data() || {};
+        if (v?.token && (v.ownerDocId ? v.ownerDocId === userDocId : true)) {
+          tokens.push(v.token);
+        }
+      });
+    } catch {}
+
+    // 3) root fallbacks (قديم)
+    try {
+      const userSnap = await getDoc(doc(db, "users", userDocId));
       if (userSnap.exists()) {
-        const u = userSnap.data();
+        const u = userSnap.data() || {};
         if (u?.expoPushToken) tokens.push(u.expoPushToken);
         if (Array.isArray(u?.expoPushTokens)) {
           u.expoPushTokens.forEach((t) => t && tokens.push(t));
         }
       }
-    }
+    } catch {}
+
+    // unique + نظّف القيم الفارغة
     return Array.from(new Set(tokens.filter(Boolean)));
   }
+
+  // لمجرد عرض عدد التوكنات للمستهدف الحالي (UI hint)
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      if (!target || target === "all") {
+        setTargetTokenCount(null);
+        return;
+      }
+      const toks = await getActiveTokensForUser(String(target));
+      if (!cancelled) setTargetTokenCount(toks.length);
+    }
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [target]);
 
   async function sendNotification() {
     if (!message.trim()) {
@@ -174,14 +223,17 @@ export default function NotificationsSection({ lang = "ar" }) {
     }
     setLoading(true);
     try {
-      const pushAtValue = scheduleAt ? Timestamp.fromDate(new Date(scheduleAt)) : serverTimestamp();
+      const now = new Date();
+      const pushAtValue = scheduleAt
+        ? Timestamp.fromDate(new Date(scheduleAt))
+        : Timestamp.fromDate(now); // نخزن pushAt واضح حتى في الإرسال الفوري
 
       const payload = {
         title: lang === "ar" ? "إشعار جديد" : "New Notification",
         body: message.trim(),
         targetId: target === "all" ? "all" : String(target),
-        timestamp: serverTimestamp(),
-        pushAt: pushAtValue,
+        timestamp: serverTimestamp(), // لإنشاء السجلّ بوقت السيرفر
+        pushAt: pushAtValue,          // الوقت المقصود للإرسال (فوري أو مجدول)
         type: target === "all" ? "general" : "custom",
         status: "queued",
         pushed: false,
@@ -193,8 +245,11 @@ export default function NotificationsSection({ lang = "ar" }) {
 
       if (target !== "all") {
         const tokens = await getActiveTokensForUser(String(target));
-        if (tokens?.length) payload.tokens = tokens;
-        else payload.status = "no_tokens";
+        if (tokens?.length) {
+          payload.tokens = tokens;
+        } else {
+          payload.status = "no_tokens";
+        }
       }
 
       await addDoc(collection(db, "notifications"), payload);
@@ -203,6 +258,7 @@ export default function NotificationsSection({ lang = "ar" }) {
       setTarget("all");
       setScheduleAt("");
       setPriority("high");
+      setTargetTokenCount(null);
 
       alert(lang === "ar" ? "تمت إضافة الإشعار إلى قائمة الانتظار." : "Notification queued.");
     } catch (e) {
@@ -274,21 +330,31 @@ export default function NotificationsSection({ lang = "ar" }) {
           aria-label={lang === "ar" ? "نص الإشعار" : "Notification message"}
         />
 
-        <select
-          className="p-2 rounded-md border border-slate-200 bg-white text-sm min-w-[260px] cursor-pointer"
-          value={target}
-          onChange={(e) => setTarget(e.target.value)}
-          title={lang === "ar" ? "المستلم" : "Recipient"}
-        >
-          <option value="all">{lang === "ar" ? "كل العملاء" : "All Clients"}</option>
-          {clients.map((cl) => (
-            <option value={cl.userId} key={cl.userId}>
-              {clientLabel(cl)}
-            </option>
-          ))}
-        </select>
+        <div className="flex flex-col gap-1">
+          <select
+            className="p-2 rounded-md border border-slate-200 bg-white text-sm min-w-[260px] cursor-pointer"
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            title={lang === "ar" ? "المستلم" : "Recipient"}
+          >
+            <option value="all">{lang === "ar" ? "كل العملاء" : "All Clients"}</option>
+            {clients.map((cl) => (
+              <option value={cl.userId} key={cl.userId}>
+                {clientLabel(cl)}
+              </option>
+            ))}
+          </select>
 
-        <div className="flex gap-2 items-center">
+          {target !== "all" && (
+            <div className="text-xs text-slate-500">
+              {lang === "ar"
+                ? `توكنات نشطة: ${targetTokenCount === null ? "..." : targetTokenCount}`
+                : `Active tokens: ${targetTokenCount === null ? "..." : targetTokenCount}`}
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-2 items-center flex-1 flex-wrap">
           <select
             value={priority}
             onChange={(e) => setPriority(e.target.value)}
@@ -329,10 +395,18 @@ export default function NotificationsSection({ lang = "ar" }) {
           {["all", "general", "custom"].map((k) => (
             <button
               key={k}
-              className={`px-2 py-1 rounded-md text-sm font-medium ${notifTypeFilter === k ? "bg-emerald-700 text-white" : "bg-emerald-50 text-emerald-800 border border-emerald-200"} cursor-pointer`}
+              className={`px-2 py-1 rounded-md text-sm font-medium ${
+                notifTypeFilter === k
+                  ? "bg-emerald-700 text-white"
+                  : "bg-emerald-50 text-emerald-800 border border-emerald-200"
+              } cursor-pointer`}
               onClick={() => setNotifTypeFilter(k)}
             >
-              {k === "all" ? (lang === "ar" ? "الكل" : "All") : k === "general" ? (lang === "ar" ? "عام" : "General") : (lang === "ar" ? "مخصص" : "Custom")}
+              {k === "all"
+                ? (lang === "ar" ? "الكل" : "All")
+                : k === "general"
+                ? (lang === "ar" ? "عام" : "General")
+                : (lang === "ar" ? "مخصص" : "Custom")}
             </button>
           ))}
         </div>
@@ -359,7 +433,9 @@ export default function NotificationsSection({ lang = "ar" }) {
           <tbody>
             {filteredNotifications.length === 0 ? (
               <tr>
-                <td colSpan={5} className="py-6 text-slate-400">{lang === "ar" ? "لا يوجد إشعارات" : "No notifications"}</td>
+                <td colSpan={5} className="py-6 text-slate-400">
+                  {lang === "ar" ? "لا يوجد إشعارات" : "No notifications"}
+                </td>
               </tr>
             ) : (
               filteredNotifications.map((n) => (
@@ -380,7 +456,9 @@ export default function NotificationsSection({ lang = "ar" }) {
                   </td>
                   <td className="py-2 px-2 text-sm">
                     {n.targetId === "all" ? (
-                      <span className="font-medium text-slate-700">{lang === "ar" ? "كل العملاء" : "All Clients"}</span>
+                      <span className="font-medium text-slate-700">
+                        {lang === "ar" ? "كل العملاء" : "All Clients"}
+                      </span>
                     ) : (
                       (() => {
                         const t = clientsMap.get(n.targetId || "");
@@ -430,7 +508,11 @@ export default function NotificationsSection({ lang = "ar" }) {
             ].map((t) => (
               <button
                 key={t.k}
-                className={`px-2 py-1 rounded-md text-sm font-medium ${clientTypeTab === t.k ? "bg-emerald-700 text-white" : "bg-emerald-50 text-emerald-800 border border-emerald-200"} cursor-pointer`}
+                className={`px-2 py-1 rounded-md text-sm font-medium ${
+                  clientTypeTab === t.k
+                    ? "bg-emerald-700 text-white"
+                    : "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                } cursor-pointer`}
                 onClick={() => setClientTypeTab(t.k)}
               >
                 {t.label}
@@ -440,7 +522,11 @@ export default function NotificationsSection({ lang = "ar" }) {
 
           <input
             className="p-2 rounded-md border border-slate-200 min-w-[220px] text-sm"
-            placeholder={lang === "ar" ? "بحث بالاسم / الهاتف / الإيميل / رقم العميل..." : "Search name / phone / email / customerId..."}
+            placeholder={
+              lang === "ar"
+                ? "بحث بالاسم / الهاتف / الإيميل / رقم العميل..."
+                : "Search name / phone / email / customerId..."
+            }
             value={clientSearch}
             onChange={(e) => setClientSearch(e.target.value)}
             style={{ direction: lang === "ar" ? "rtl" : "ltr" }}
@@ -455,12 +541,17 @@ export default function NotificationsSection({ lang = "ar" }) {
             </div>
           ) : (
             filteredClients.map((client) => (
-              <div key={client.userId} className="flex items-center justify-between bg-emerald-50 p-3 rounded-lg border border-emerald-200 shadow-sm">
+              <div
+                key={client.userId}
+                className="flex items-center justify-between bg-emerald-50 p-3 rounded-lg border border-emerald-200 shadow-sm"
+              >
                 <div>
                   <div className="flex items-center gap-2">
                     <div className="font-medium text-slate-900 text-sm">
                       {client.name || client.displayName || client.userId}
-                      <span className="ml-2 text-xs text-slate-500 font-mono">#{client.customerId || client.userId}</span>
+                      <span className="ml-2 text-xs text-slate-500 font-mono">
+                        #{client.customerId || client.userId}
+                      </span>
                     </div>
                     <Badge intent="muted">{humanType(client.accountType, lang)}</Badge>
                   </div>
