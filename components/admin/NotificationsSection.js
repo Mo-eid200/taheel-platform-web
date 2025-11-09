@@ -140,71 +140,105 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
   }
 
   async function getActiveTokensForUser(userDocId) {
-    if (!userDocId) return [];
-    setResolvingTokens(true);
-    const tokens = new Set();
+  if (!userDocId) return [];
+  setResolvingTokens(true);
+  const tokens = new Set();
+
+  try {
+    if (typeof __DEV__ !== "undefined" && __DEV__) console.debug("[tokens] resolving for", userDocId);
+
+    // 1) subcollections under this user doc
+    try {
+      const s1 = await getDocs(query(collection(db, "users", userDocId, "expoPushTokens"), where("active", "==", true)));
+      s1.forEach((d) => {
+        const v = d.data() || {};
+        if (v?.token && (v.ownerDocId ? String(v.ownerDocId) === String(userDocId) : true)) tokens.add(v.token);
+      });
+    } catch (e) {
+      if (typeof __DEV__ !== "undefined" && __DEV__) console.debug("[tokens] read expoPushTokens failed:", e);
+    }
 
     try {
-      if (typeof __DEV__ !== "undefined" && __DEV__) console.debug("[tokens] resolving for", userDocId);
+      const s2 = await getDocs(query(collection(db, "users", userDocId, "pushTokens"), where("active", "==", true)));
+      s2.forEach((d) => {
+        const v = d.data() || {};
+        if (v?.token && (v.ownerDocId ? String(v.ownerDocId) === String(userDocId) : true)) tokens.add(v.token);
+      });
+    } catch (e) {
+      if (typeof __DEV__ !== "undefined" && __DEV__) console.debug("[tokens] read pushTokens failed:", e);
+    }
 
-      // primary: read subcollections under this doc id
-      await readSubcollectionTokens(userDocId, "expoPushTokens", tokens);
-      await readSubcollectionTokens(userDocId, "pushTokens", tokens);
+    // 2) root fields fallback (legacy)
+    try {
+      const userSnap = await getDoc(doc(db, "users", userDocId));
+      if (userSnap.exists()) {
+        const u = userSnap.data() || {};
+        if (u?.expoPushToken) tokens.add(u.expoPushToken);
+        if (Array.isArray(u?.expoPushTokens)) u.expoPushTokens.forEach((t) => t && tokens.add(t));
+        if (Array.isArray(u?.pushTokens)) u.pushTokens.forEach((t) => t && tokens.add(t));
+        if (u?.pushToken) tokens.add(u.pushToken);
 
-      // root fields fallback
-      try {
-        const userSnap = await getDoc(doc(db, "users", userDocId));
-        if (userSnap.exists()) {
-          const u = userSnap.data() || {};
-          if (u?.expoPushToken) tokens.add(u.expoPushToken);
-          if (Array.isArray(u?.expoPushTokens)) u.expoPushTokens.forEach((t) => t && tokens.add(t));
-          if (Array.isArray(u?.pushTokens)) u.pushTokens.forEach((t) => t && tokens.add(t));
-          if (u?.pushToken) tokens.add(u.pushToken);
+        // try alternate ids saved in doc only if nothing found yet
+        const altUid = u.uid || u.userId || null;
+        const altCustomerId = u.customerId || null;
 
-          // if nothing found try alternate ids saved in doc
-          const altUid = u.uid || u.userId || null;
-          const altCustomerId = u.customerId || null;
-
-          if (tokens.size === 0) {
-            if (altUid && String(altUid) !== String(userDocId)) {
-              await readSubcollectionTokens(altUid, "pushTokens", tokens);
-              await readSubcollectionTokens(altUid, "expoPushTokens", tokens);
-              try {
-                const altSnap = await getDoc(doc(db, "users", altUid));
-                if (altSnap.exists()) {
-                  const ad = altSnap.data() || {};
-                  if (ad?.expoPushToken) tokens.add(ad.expoPushToken);
-                  if (Array.isArray(ad?.expoPushTokens)) ad.expoPushTokens.forEach((t) => t && tokens.add(t));
-                }
-              } catch {}
-            }
-            if (altCustomerId && String(altCustomerId) !== String(userDocId)) {
-              await readSubcollectionTokens(altCustomerId, "pushTokens", tokens);
-              await readSubcollectionTokens(altCustomerId, "expoPushTokens", tokens);
-              try {
-                const altSnap2 = await getDoc(doc(db, "users", altCustomerId));
-                if (altSnap2.exists()) {
-                  const ad2 = altSnap2.data() || {};
-                  if (ad2?.expoPushToken) tokens.add(ad2.expoPushToken);
-                  if (Array.isArray(ad2?.expoPushTokens)) ad2.expoPushTokens.forEach((t) => t && tokens.add(t));
-                }
-              } catch {}
-            }
+        if (tokens.size === 0) {
+          if (altUid && String(altUid) !== String(userDocId)) {
+            await readSubcollectionTokens(altUid, "pushTokens", tokens);
+            await readSubcollectionTokens(altUid, "expoPushTokens", tokens);
+            try {
+              const altSnap = await getDoc(doc(db, "users", altUid));
+              if (altSnap.exists()) {
+                const ad = altSnap.data() || {};
+                if (ad?.expoPushToken) tokens.add(ad.expoPushToken);
+                if (Array.isArray(ad?.expoPushTokens)) ad.expoPushTokens.forEach((t) => t && tokens.add(t));
+              }
+            } catch {}
+          }
+          if (altCustomerId && String(altCustomerId) !== String(userDocId)) {
+            await readSubcollectionTokens(altCustomerId, "pushTokens", tokens);
+            await readSubcollectionTokens(altCustomerId, "expoPushTokens", tokens);
+            try {
+              const altSnap2 = await getDoc(doc(db, "users", altCustomerId));
+              if (altSnap2.exists()) {
+                const ad2 = altSnap2.data() || {};
+                if (ad2?.expoPushToken) tokens.add(ad2.expoPushToken);
+                if (Array.isArray(ad2?.expoPushTokens)) ad2.expoPushTokens.forEach((t) => t && tokens.add(t));
+              }
+            } catch {}
           }
         }
-      } catch (err) {
-        if (typeof __DEV__ !== "undefined" && __DEV__) console.debug("[tokens] root read failed for", userDocId, err?.message || err);
       }
-    } finally {
-      setResolvingTokens(false);
+    } catch (err) {
+      if (typeof __DEV__ !== "undefined" && __DEV__) console.debug("[tokens] root read failed for", userDocId, err?.message || err);
     }
 
-    const out = Array.from(tokens).filter(Boolean);
-    if (typeof __DEV__ !== "undefined" && __DEV__) {
-      console.debug("[tokens] resolved", out.length, "for", userDocId, "preview:", out.slice(0, 5).map((t) => (t || "").slice(0, 40)));
+    // 3) collectionGroup fallback: find token docs stored under other users but owned by this user
+    try {
+      const cgPush = await getDocs(query(collectionGroup(db, "pushTokens"), where("ownerDocId", "==", userDocId), where("active", "==", true)));
+      cgPush.forEach((d) => {
+        const v = d.data() || {};
+        if (v?.token) tokens.add(v.token);
+      });
+
+      const cgExpo = await getDocs(query(collectionGroup(db, "expoPushTokens"), where("ownerDocId", "==", userDocId), where("active", "==", true)));
+      cgExpo.forEach((d) => {
+        const v = d.data() || {};
+        if (v?.token) tokens.add(v.token);
+      });
+    } catch (e) {
+      if (typeof __DEV__ !== "undefined" && __DEV__) console.debug("[tokens] collectionGroup fallback failed:", e?.message || e);
     }
-    return out;
+  } finally {
+    setResolvingTokens(false);
   }
+
+  const out = Array.from(tokens).filter(Boolean);
+  if (typeof __DEV__ !== "undefined" && __DEV__) {
+    console.debug("[tokens] resolved", out.length, "for", userDocId, "preview:", out.slice(0, 5).map((t) => (t || "").slice(0, 40)));
+  }
+  return out;
+}
 
   // token count hint for selected target
   useEffect(() => {
