@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   addDoc,
   collection,
+  collectionGroup,
   doc,
   getDoc,
   getDocs,
@@ -57,12 +58,12 @@ function Badge({ children, intent = "default" }) {
   );
 }
 
-/* compact client label used in selects */
 function clientLabel(c) {
   const name = c?.name || c?.displayName || c?.userId || "-";
   const cid = c?.customerId ? `#${c.customerId}` : c?.userId ? `#${c.userId}` : "";
   const phone = toE164(c?.phone || c?.phoneE164);
-  return `${name} ${cid}${phone ? ` • ${phone}` : ""}`;
+  const uid = c?.uid ? ` uid:${c.uid}` : "";
+  return `${name} ${cid}${phone ? ` • ${phone}` : ""}${uid ? ` • ${uid}` : ""}`;
 }
 
 /* =========================
@@ -94,6 +95,9 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
   const [tokenPreviewOpen, setTokenPreviewOpen] = useState(false);
   const [tokenPreviewList, setTokenPreviewList] = useState([]);
 
+  // debug: selected client info for display
+  const [selectedClientInfo, setSelectedClientInfo] = useState(null);
+
   // load realtime lists
   useEffect(() => {
     const qNotifs = query(collection(db, "notifications"), orderBy("timestamp", "desc"), limit(500));
@@ -115,14 +119,21 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
     };
   }, []);
 
+  // Build clientsMap keyed by multiple ids: docId (userId), customerId, uid
   const clientsMap = useMemo(() => {
     const m = new Map();
-    clients.forEach((c) => m.set(String(c.userId), c));
+    clients.forEach((c) => {
+      const docId = String(c.userId);
+      m.set(docId, c);
+      if (c.customerId) m.set(String(c.customerId), c);
+      if (c.uid) m.set(String(c.uid), c);
+    });
     return m;
   }, [clients]);
 
   /* =========================
      Robust token resolver
+     - reads subcollections, root fields, then collectionGroup ownerDocId fallbacks
   ========================= */
   async function readSubcollectionTokens(userDocId, subName, tokens) {
     try {
@@ -139,106 +150,106 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
     }
   }
 
-async function getActiveTokensForUser(userDocId) {
-  if (!userDocId) return [];
-  setResolvingTokens(true);
-  const tokens = new Set();
-
-  try {
-    if (typeof __DEV__ !== "undefined" && __DEV__) console.debug("[tokens] resolving for", userDocId);
-
-    // 1) subcollections under this user doc
-    try {
-      const s1 = await getDocs(query(collection(db, "users", userDocId, "expoPushTokens"), where("active", "==", true)));
-      s1.forEach((d) => {
-        const v = d.data() || {};
-        if (v?.token && (v.ownerDocId ? String(v.ownerDocId) === String(userDocId) : true)) tokens.add(v.token);
-      });
-    } catch (e) {
-      if (typeof __DEV__ !== "undefined" && __DEV__) console.debug("[tokens] read expoPushTokens failed:", e);
-    }
+  async function getActiveTokensForUser(userDocId) {
+    if (!userDocId) return [];
+    setResolvingTokens(true);
+    const tokens = new Set();
 
     try {
-      const s2 = await getDocs(query(collection(db, "users", userDocId, "pushTokens"), where("active", "==", true)));
-      s2.forEach((d) => {
-        const v = d.data() || {};
-        if (v?.token && (v.ownerDocId ? String(v.ownerDocId) === String(userDocId) : true)) tokens.add(v.token);
-      });
-    } catch (e) {
-      if (typeof __DEV__ !== "undefined" && __DEV__) console.debug("[tokens] read pushTokens failed:", e);
-    }
+      if (typeof __DEV__ !== "undefined" && __DEV__) console.debug("[tokens] resolving for", userDocId);
 
-    // 2) root fields fallback (legacy)
-    try {
-      const userSnap = await getDoc(doc(db, "users", userDocId));
-      if (userSnap.exists()) {
-        const u = userSnap.data() || {};
-        if (u?.expoPushToken) tokens.add(u.expoPushToken);
-        if (Array.isArray(u?.expoPushTokens)) u.expoPushTokens.forEach((t) => t && tokens.add(t));
-        if (Array.isArray(u?.pushTokens)) u.pushTokens.forEach((t) => t && tokens.add(t));
-        if (u?.pushToken) tokens.add(u.pushToken);
+      // 1) subcollections under this user doc
+      try {
+        const s1 = await getDocs(query(collection(db, "users", userDocId, "expoPushTokens"), where("active", "==", true)));
+        s1.forEach((d) => {
+          const v = d.data() || {};
+          if (v?.token && (v.ownerDocId ? String(v.ownerDocId) === String(userDocId) : true)) tokens.add(v.token);
+        });
+      } catch (e) {
+        if (typeof __DEV__ !== "undefined" && __DEV__) console.debug("[tokens] read expoPushTokens failed:", e);
+      }
 
-        // try alternate ids saved in doc only if nothing found yet
-        const altUid = u.uid || u.userId || null;
-        const altCustomerId = u.customerId || null;
+      try {
+        const s2 = await getDocs(query(collection(db, "users", userDocId, "pushTokens"), where("active", "==", true)));
+        s2.forEach((d) => {
+          const v = d.data() || {};
+          if (v?.token && (v.ownerDocId ? String(v.ownerDocId) === String(userDocId) : true)) tokens.add(v.token);
+        });
+      } catch (e) {
+        if (typeof __DEV__ !== "undefined" && __DEV__) console.debug("[tokens] read pushTokens failed:", e);
+      }
 
-        if (tokens.size === 0) {
-          if (altUid && String(altUid) !== String(userDocId)) {
-            await readSubcollectionTokens(altUid, "pushTokens", tokens);
-            await readSubcollectionTokens(altUid, "expoPushTokens", tokens);
-            try {
-              const altSnap = await getDoc(doc(db, "users", altUid));
-              if (altSnap.exists()) {
-                const ad = altSnap.data() || {};
-                if (ad?.expoPushToken) tokens.add(ad.expoPushToken);
-                if (Array.isArray(ad?.expoPushTokens)) ad.expoPushTokens.forEach((t) => t && tokens.add(t));
-              }
-            } catch {}
-          }
-          if (altCustomerId && String(altCustomerId) !== String(userDocId)) {
-            await readSubcollectionTokens(altCustomerId, "pushTokens", tokens);
-            await readSubcollectionTokens(altCustomerId, "expoPushTokens", tokens);
-            try {
-              const altSnap2 = await getDoc(doc(db, "users", altCustomerId));
-              if (altSnap2.exists()) {
-                const ad2 = altSnap2.data() || {};
-                if (ad2?.expoPushToken) tokens.add(ad2.expoPushToken);
-                if (Array.isArray(ad2?.expoPushTokens)) ad2.expoPushTokens.forEach((t) => t && tokens.add(t));
-              }
-            } catch {}
+      // 2) root fields fallback (legacy)
+      try {
+        const userSnap = await getDoc(doc(db, "users", userDocId));
+        if (userSnap.exists()) {
+          const u = userSnap.data() || {};
+          if (u?.expoPushToken) tokens.add(u.expoPushToken);
+          if (Array.isArray(u?.expoPushTokens)) u.expoPushTokens.forEach((t) => t && tokens.add(t));
+          if (Array.isArray(u?.pushTokens)) u.pushTokens.forEach((t) => t && tokens.add(t));
+          if (u?.pushToken) tokens.add(u.pushToken);
+
+          // try alternate ids saved in doc only if nothing found yet
+          const altUid = u.uid || u.userId || null;
+          const altCustomerId = u.customerId || null;
+
+          if (tokens.size === 0) {
+            if (altUid && String(altUid) !== String(userDocId)) {
+              await readSubcollectionTokens(altUid, "pushTokens", tokens);
+              await readSubcollectionTokens(altUid, "expoPushTokens", tokens);
+              try {
+                const altSnap = await getDoc(doc(db, "users", altUid));
+                if (altSnap.exists()) {
+                  const ad = altSnap.data() || {};
+                  if (ad?.expoPushToken) tokens.add(ad.expoPushToken);
+                  if (Array.isArray(ad?.expoPushTokens)) ad.expoPushTokens.forEach((t) => t && tokens.add(t));
+                }
+              } catch {}
+            }
+            if (altCustomerId && String(altCustomerId) !== String(userDocId)) {
+              await readSubcollectionTokens(altCustomerId, "pushTokens", tokens);
+              await readSubcollectionTokens(altCustomerId, "expoPushTokens", tokens);
+              try {
+                const altSnap2 = await getDoc(doc(db, "users", altCustomerId));
+                if (altSnap2.exists()) {
+                  const ad2 = altSnap2.data() || {};
+                  if (ad2?.expoPushToken) tokens.add(ad2.expoPushToken);
+                  if (Array.isArray(ad2?.expoPushTokens)) ad2.expoPushTokens.forEach((t) => t && tokens.add(t));
+                }
+              } catch {}
+            }
           }
         }
+      } catch (err) {
+        if (typeof __DEV__ !== "undefined" && __DEV__) console.debug("[tokens] root read failed for", userDocId, err?.message || err);
       }
-    } catch (err) {
-      if (typeof __DEV__ !== "undefined" && __DEV__) console.debug("[tokens] root read failed for", userDocId, err?.message || err);
+
+      // 3) collectionGroup fallback: find token docs stored under other users but owned by this user
+      try {
+        const cgPush = await getDocs(query(collectionGroup(db, "pushTokens"), where("ownerDocId", "==", userDocId), where("active", "==", true)));
+        cgPush.forEach((d) => {
+          const v = d.data() || {};
+          if (v?.token) tokens.add(v.token);
+        });
+
+        const cgExpo = await getDocs(query(collectionGroup(db, "expoPushTokens"), where("ownerDocId", "==", userDocId), where("active", "==", true)));
+        cgExpo.forEach((d) => {
+          const v = d.data() || {};
+          if (v?.token) tokens.add(v.token);
+        });
+      } catch (e) {
+        if (typeof __DEV__ !== "undefined" && __DEV__) console.debug("[tokens] collectionGroup fallback failed:", e?.message || e);
+      }
+    } finally {
+      setResolvingTokens(false);
     }
 
-    // 3) collectionGroup fallback: find token docs stored under other users but owned by this user
-    try {
-      const cgPush = await getDocs(query(collectionGroup(db, "pushTokens"), where("ownerDocId", "==", userDocId), where("active", "==", true)));
-      cgPush.forEach((d) => {
-        const v = d.data() || {};
-        if (v?.token) tokens.add(v.token);
-      });
-
-      const cgExpo = await getDocs(query(collectionGroup(db, "expoPushTokens"), where("ownerDocId", "==", userDocId), where("active", "==", true)));
-      cgExpo.forEach((d) => {
-        const v = d.data() || {};
-        if (v?.token) tokens.add(v.token);
-      });
-    } catch (e) {
-      if (typeof __DEV__ !== "undefined" && __DEV__) console.debug("[tokens] collectionGroup fallback failed:", e?.message || e);
+    const out = Array.from(tokens).filter(Boolean);
+    if (typeof __DEV__ !== "undefined" && __DEV__) {
+      console.debug("[tokens] resolved", out.length, "for", userDocId, "preview:", out.slice(0, 5).map((t) => (t || "").slice(0, 40)));
     }
-  } finally {
-    setResolvingTokens(false);
+    return out;
   }
-
-  const out = Array.from(tokens).filter(Boolean);
-  if (typeof __DEV__ !== "undefined" && __DEV__) {
-    console.debug("[tokens] resolved", out.length, "for", userDocId, "preview:", out.slice(0, 5).map((t) => (t || "").slice(0, 40)));
-  }
-  return out;
-}
 
   // token count hint for selected target
   useEffect(() => {
@@ -246,15 +257,22 @@ async function getActiveTokensForUser(userDocId) {
     (async () => {
       if (!target || target === "all") {
         setTargetTokenCount(null);
+        setSelectedClientInfo(null);
         return;
       }
+
+      // resolve a client object from multiple keys (docId, customerId, uid)
+      const resolvedClient = clientsMap.get(String(target)) || null;
+      if (resolvedClient) setSelectedClientInfo({ key: String(target), client: resolvedClient });
+      else setSelectedClientInfo({ key: String(target), client: null });
+
       const toks = await getActiveTokensForUser(String(target));
       if (!cancelled) setTargetTokenCount(toks.length);
     })();
     return () => {
       cancelled = true;
     };
-  }, [target]);
+  }, [target, clientsMap]);
 
   /* =========================
      Sending notifications (queue)
@@ -388,7 +406,25 @@ async function getActiveTokensForUser(userDocId) {
           <label className="block text-xs text-slate-600 mb-2">{isAr ? "المستلم" : "Recipient"}</label>
           <select
             value={target}
-            onChange={(e) => setTarget(e.target.value)}
+            onChange={async (e) => {
+              const id = e.target.value;
+              console.debug("[UI] selected target:", id);
+              setTarget(id);
+              const clientObj = clientsMap.get(String(id)) || null;
+              console.debug("[UI] clientsMap.get =>", clientObj);
+              // immediately resolve tokens for quick feedback
+              try {
+                setResolvingTokens(true);
+                const toks = await getActiveTokensForUser(String(id));
+                setTargetTokenCount(toks.length);
+                console.debug("[UI] tokens preview:", toks.slice(0,5));
+              } catch (err) {
+                console.debug("[UI] token resolver error:", err);
+                setTargetTokenCount(null);
+              } finally {
+                setResolvingTokens(false);
+              }
+            }}
             className="w-full p-2 rounded-md border border-slate-200 mb-2"
           >
             <option value="all">{isAr ? "كل العملاء" : "All Clients"}</option>
@@ -398,6 +434,19 @@ async function getActiveTokensForUser(userDocId) {
               </option>
             ))}
           </select>
+
+          <div className="text-xs text-slate-500 mb-3">
+            {selectedClientInfo ? (
+              selectedClientInfo.client ? (
+                <div>
+                  <div><strong>{isAr ? "محدَّد:" : "Selected:"}</strong> {clientLabel(selectedClientInfo.client)}</div>
+                  <div><strong>docId:</strong> {selectedClientInfo.key}</div>
+                </div>
+              ) : (
+                <div>{isAr ? "لم يتم إيجاد عميل مطابق للقيمة المحددة." : "No client object matched the selected value."}</div>
+              )
+            ) : null}
+          </div>
 
           <div className="flex items-center gap-2 mb-3">
             <button
