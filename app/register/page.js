@@ -273,11 +273,18 @@ export default function RegisterPage() {
 
       // 6. سجّل المستخدم في Firestore في users/{customerId}
       // هنا المفتاح الكبير اللي بقينا كلنا معتمدين عليه في كل النظام
-      await setDoc(
-        firestoreDoc(db, "users", customerId),
-        userPayload,
-        { merge: true }
-      );
+await setDoc(
+  firestoreDoc(db, "users", customerId),
+  userPayload,
+  { merge: true }
+);
+
+// اختياري: إنشاء خريطة للوصول عبر uid
+await setDoc(
+  firestoreDoc(db, "usersByUid", user.uid),
+  { customerId, uid: user.uid, email },
+  { merge: true }
+);
 
       // 7. UI state
       setRegSuccess(true);
