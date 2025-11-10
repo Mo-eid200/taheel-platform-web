@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useEffect, useMemo, useState } from "react";
 import {
   addDoc,
@@ -16,9 +18,9 @@ import {
 } from "firebase/firestore";
 import { firestore as db } from "@/lib/firebase.client";
 
-/* -------------------------
+/* =========================
    Helpers / Localization
-   ------------------------- */
+========================= */
 const DEFAULT_LANG = "ar";
 
 function formatDate(ts, lang = DEFAULT_LANG) {
@@ -42,7 +44,6 @@ function humanType(t, lang = DEFAULT_LANG) {
   return "-";
 }
 
-/* small presentational Badge */
 function Badge({ children, intent = "default" }) {
   const map = {
     success: "bg-emerald-100 text-emerald-800",
@@ -68,37 +69,42 @@ function clientLabel(c) {
 
 /* =========================
    Component
-   ========================= */
+========================= */
 export default function NotificationsSection({ lang = DEFAULT_LANG }) {
   const isAr = lang === "ar";
 
-  // data
+  // Data
   const [notifications, setNotifications] = useState([]);
   const [clients, setClients] = useState([]);
 
-  // compose state
+  // Compose state
   const [message, setMessage] = useState("");
   const [target, setTarget] = useState("all");
   const [scheduleAt, setScheduleAt] = useState("");
   const [priority, setPriority] = useState("high");
   const [loading, setLoading] = useState(false);
 
-  // filters & ui
+  // Filters & UI
   const [notifTypeFilter, setNotifTypeFilter] = useState("all");
   const [notifSearch, setNotifSearch] = useState("");
   const [clientSearch, setClientSearch] = useState("");
   const [clientTypeTab, setClientTypeTab] = useState("all");
 
-  // token hints / preview
+  // Token hints / preview
   const [targetTokenCount, setTargetTokenCount] = useState(null);
   const [resolvingTokens, setResolvingTokens] = useState(false);
   const [tokenPreviewOpen, setTokenPreviewOpen] = useState(false);
   const [tokenPreviewList, setTokenPreviewList] = useState([]);
 
-  // debug: selected client info for display
+  // Debug selection
   const [selectedClientInfo, setSelectedClientInfo] = useState(null);
 
-  // load realtime lists
+  // Pending counter per user (from collectionGroup)
+  const [pendingMap, setPendingMap] = useState(new Map());
+
+  /* =========================
+     Realtime subscriptions
+  ========================= */
   useEffect(() => {
     const qNotifs = query(collection(db, "notifications"), orderBy("timestamp", "desc"), limit(500));
     const unsubNotifs = onSnapshot(qNotifs, (snap) => {
@@ -113,13 +119,30 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
       setClients(list);
     });
 
+    // Pending from collectionGroup: users/*/pendingNotifications/*
+    const qPending = query(collectionGroup(db, "pendingNotifications"), orderBy("createdAt", "desc"));
+    const unsubPending = onSnapshot(qPending, (snap) => {
+      const m = new Map();
+      snap.forEach((d) => {
+        const parent = d.ref.parent; // pendingNotifications
+        const userDoc = parent?.parent; // users/{uid}
+        const uid = userDoc?.id;
+        if (!uid) return;
+        m.set(uid, (m.get(uid) || 0) + 1);
+      });
+      setPendingMap(m);
+    });
+
     return () => {
       unsubNotifs();
       unsubClients();
+      unsubPending();
     };
   }, []);
 
-  // Build clientsMap keyed by multiple ids: docId (userId), customerId, uid
+  /* =========================
+     Clients map (docId, customerId, uid)
+  ========================= */
   const clientsMap = useMemo(() => {
     const m = new Map();
     clients.forEach((c) => {
@@ -133,12 +156,12 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
 
   /* =========================
      Robust token resolver
-     - reads subcollections, root fields, then collectionGroup ownerDocId fallbacks
+     - subcollections -> root fields -> collectionGroup(ownerDocId)
   ========================= */
   async function readSubcollectionTokens(userDocId, subName, tokens) {
     try {
-      const q = query(collection(db, "users", userDocId, subName), where("active", "==", true));
-      const snap = await getDocs(q);
+      const qy = query(collection(db, "users", userDocId, subName), where("active", "==", true));
+      const snap = await getDocs(qy);
       snap.forEach((d) => {
         const v = d.data() || {};
         if (!v?.token) return;
@@ -146,7 +169,9 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
         tokens.add(v.token);
       });
     } catch (err) {
-      if (typeof __DEV__ !== "undefined" && __DEV__) console.debug(`[tokens] read ${subName} failed for ${userDocId}:`, err?.message || err);
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        console.debug(`[tokens] read ${subName} failed for ${userDocId}:`, err?.message || err);
+      }
     }
   }
 
@@ -179,7 +204,7 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
         if (typeof __DEV__ !== "undefined" && __DEV__) console.debug("[tokens] read pushTokens failed:", e);
       }
 
-      // 2) root fields fallback (legacy)
+      // 2) root fields (legacy)
       try {
         const userSnap = await getDoc(doc(db, "users", userDocId));
         if (userSnap.exists()) {
@@ -189,7 +214,7 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
           if (Array.isArray(u?.pushTokens)) u.pushTokens.forEach((t) => t && tokens.add(t));
           if (u?.pushToken) tokens.add(u.pushToken);
 
-          // try alternate ids saved in doc only if nothing found yet
+          // try alternate ids if nothing yet
           const altUid = u.uid || u.userId || null;
           const altCustomerId = u.customerId || null;
 
@@ -221,24 +246,32 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
           }
         }
       } catch (err) {
-        if (typeof __DEV__ !== "undefined" && __DEV__) console.debug("[tokens] root read failed for", userDocId, err?.message || err);
+        if (typeof __DEV__ !== "undefined" && __DEV__) {
+          console.debug("[tokens] root read failed for", userDocId, err?.message || err);
+        }
       }
 
-      // 3) collectionGroup fallback: find token docs stored under other users but owned by this user
+      // 3) collectionGroup fallback by ownerDocId
       try {
-        const cgPush = await getDocs(query(collectionGroup(db, "pushTokens"), where("ownerDocId", "==", userDocId), where("active", "==", true)));
+        const cgPush = await getDocs(
+          query(collectionGroup(db, "pushTokens"), where("ownerDocId", "==", userDocId), where("active", "==", true))
+        );
         cgPush.forEach((d) => {
           const v = d.data() || {};
           if (v?.token) tokens.add(v.token);
         });
 
-        const cgExpo = await getDocs(query(collectionGroup(db, "expoPushTokens"), where("ownerDocId", "==", userDocId), where("active", "==", true)));
+        const cgExpo = await getDocs(
+          query(collectionGroup(db, "expoPushTokens"), where("ownerDocId", "==", userDocId), where("active", "==", true))
+        );
         cgExpo.forEach((d) => {
           const v = d.data() || {};
           if (v?.token) tokens.add(v.token);
         });
       } catch (e) {
-        if (typeof __DEV__ !== "undefined" && __DEV__) console.debug("[tokens] collectionGroup fallback failed:", e?.message || e);
+        if (typeof __DEV__ !== "undefined" && __DEV__) {
+          console.debug("[tokens] collectionGroup fallback failed:", e?.message || e);
+        }
       }
     } finally {
       setResolvingTokens(false);
@@ -251,7 +284,9 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
     return out;
   }
 
-  // token count hint for selected target
+  /* =========================
+     Resolve token count for selected target
+  ========================= */
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -260,8 +295,6 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
         setSelectedClientInfo(null);
         return;
       }
-
-      // resolve a client object from multiple keys (docId, customerId, uid)
       const resolvedClient = clientsMap.get(String(target)) || null;
       if (resolvedClient) setSelectedClientInfo({ key: String(target), client: resolvedClient });
       else setSelectedClientInfo({ key: String(target), client: null });
@@ -275,7 +308,9 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
   }, [target, clientsMap]);
 
   /* =========================
-     Sending notifications (queue)
+     Queue notification
+     - client does NOT set "no_tokens"
+     - server will enqueue to pending if needed
   ========================= */
   async function sendNotification() {
     if (!message.trim()) {
@@ -304,8 +339,7 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
 
       if (target !== "all") {
         const toks = await getActiveTokensForUser(String(target));
-        if (toks?.length) payload.tokens = toks;
-        else payload.status = "no_tokens";
+        if (toks?.length) payload.tokens = toks; // let server decide if 0 tokens (pending/queued_for_user)
       }
 
       if (typeof __DEV__ !== "undefined" && __DEV__) {
@@ -318,7 +352,7 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
 
       await addDoc(collection(db, "notifications"), payload);
 
-      // reset UI
+      // Reset UI
       setMessage("");
       setTarget("all");
       setScheduleAt("");
@@ -335,7 +369,7 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
   }
 
   /* =========================
-     Filters / derived lists
+     Derived lists (filters)
   ========================= */
   const filteredNotifications = useMemo(() => {
     const search = notifSearch.trim().toLowerCase();
@@ -374,25 +408,31 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
   }, [clients, clientSearch, clientTypeTab]);
 
   /* =========================
-     UI rendering
+     UI
   ========================= */
   return (
     <div className="max-w-6xl mx-auto py-6 px-4 text-sm text-slate-900">
       <h2 className="text-2xl font-extrabold mb-2">{isAr ? "لوحة الإشعارات" : "Notifications"}</h2>
       <p className="text-sm text-slate-500 mb-6">
-        {isAr ? "أرسل إشعارات موجهة أو عامة للعملاء. يمكنك معاينة التوكنات النشطة قبل الإرسال." : "Send targeted or broadcast notifications to clients. Preview active tokens before sending."}
+        {isAr
+          ? "أرسل إشعارات موجهة أو عامة للعملاء. يمكنك معاينة التوكنات النشطة قبل الإرسال."
+          : "Send targeted or broadcast notifications to clients. Preview active tokens before sending."}
       </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Compose card (left) */}
-        <div className="col-span-1 lg:col-span-1 bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+        {/* Compose */}
+        <div className="col-span-1 bg-white rounded-xl shadow-sm border border-slate-200 p-4">
           <div className="flex items-start justify-between mb-3">
             <div>
               <h3 className="font-bold text-lg">{isAr ? "إنشاء إشعار" : "Compose Notification"}</h3>
-              <p className="text-xs text-slate-500 mt-1">{isAr ? "أضف نصًا واختر المستلم." : "Add message and pick recipient."}</p>
+              <p className="text-xs text-slate-500 mt-1">
+                {isAr ? "أضف نصًا واختر المستلم." : "Add message and pick recipient."}
+              </p>
             </div>
             <div className="text-xs text-slate-500">
-              <Badge intent="muted">{priority === "high" ? (isAr ? "عالية" : "High") : (isAr ? "عادية" : "Normal")}</Badge>
+              <Badge intent="muted">
+                {priority === "high" ? (isAr ? "عالية" : "High") : (isAr ? "عادية" : "Normal")}
+              </Badge>
             </div>
           </div>
 
@@ -408,18 +448,12 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
             value={target}
             onChange={async (e) => {
               const id = e.target.value;
-              console.debug("[UI] selected target:", id);
               setTarget(id);
-              const clientObj = clientsMap.get(String(id)) || null;
-              console.debug("[UI] clientsMap.get =>", clientObj);
-              // immediately resolve tokens for quick feedback
               try {
                 setResolvingTokens(true);
                 const toks = await getActiveTokensForUser(String(id));
                 setTargetTokenCount(toks.length);
-                console.debug("[UI] tokens preview:", toks.slice(0,5));
-              } catch (err) {
-                console.debug("[UI] token resolver error:", err);
+              } catch {
                 setTargetTokenCount(null);
               } finally {
                 setResolvingTokens(false);
@@ -436,16 +470,23 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
           </select>
 
           <div className="text-xs text-slate-500 mb-3">
-            {selectedClientInfo ? (
-              selectedClientInfo.client ? (
-                <div>
-                  <div><strong>{isAr ? "محدَّد:" : "Selected:"}</strong> {clientLabel(selectedClientInfo.client)}</div>
-                  <div><strong>docId:</strong> {selectedClientInfo.key}</div>
-                </div>
-              ) : (
-                <div>{isAr ? "لم يتم إيجاد عميل مطابق للقيمة المحددة." : "No client object matched the selected value."}</div>
-              )
-            ) : null}
+            {target !== "all" && (
+              <>
+                {clientsMap.get(String(target)) ? (
+                  <div>
+                    <div>
+                      <strong>{isAr ? "محدَّد:" : "Selected:"}</strong>{" "}
+                      {clientLabel(clientsMap.get(String(target)))}
+                    </div>
+                    <div>
+                      <strong>docId:</strong> {String(target)}
+                    </div>
+                  </div>
+                ) : (
+                  <div>{isAr ? "لم يتم إيجاد عميل مطابق للقيمة المحددة." : "No client matched the selected value."}</div>
+                )}
+              </>
+            )}
           </div>
 
           <div className="flex items-center gap-2 mb-3">
@@ -492,7 +533,7 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
 
           <div className="mt-4">
             <button
-              onClick={() => sendNotification()}
+              onClick={sendNotification}
               disabled={loading || !message.trim()}
               className="w-full px-4 py-3 rounded-lg bg-emerald-600 text-white font-bold disabled:opacity-60"
             >
@@ -501,7 +542,7 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
           </div>
         </div>
 
-        {/* Notifications list (center) */}
+        {/* List */}
         <div className="col-span-1 lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 p-4">
           <div className="flex items-center justify-between mb-3 gap-3">
             <div className="flex items-center gap-2">
@@ -529,7 +570,6 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
             </div>
           </div>
 
-          {/* table-like list */}
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-emerald-50 text-emerald-900">
@@ -539,154 +579,190 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
                   <th className="py-2 px-3 font-semibold">{isAr ? "الحالة" : "Status"}</th>
                   <th className="py-2 px-3 font-semibold">{isAr ? "إلى" : "To"}</th>
                   <th className="py-2 px-3 font-semibold">{isAr ? "التاريخ" : "Date"}</th>
+                  <th className="py-2 px-3 font-semibold">{isAr ? "أفعال" : "Actions"}</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredNotifications.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-6 text-slate-400 text-center">
+                    <td colSpan={6} className="py-6 text-slate-400 text-center">
                       {isAr ? "لا يوجد إشعارات" : "No notifications"}
                     </td>
                   </tr>
                 ) : (
-                  filteredNotifications.map((n) => (
-                    <tr key={n.id} className="border-b last:border-b-0 hover:bg-emerald-50/20">
-                      <td className="py-3 px-3 max-w-[480px] break-words">{n.body}</td>
-                      <td className="py-3 px-3">
-                        <Badge intent={n.type === "general" ? "success" : "default"}>
-                          {n.type === "general" ? (isAr ? "عام" : "General") : (isAr ? "مخصص" : "Custom")}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-3">
-                        {n.status === "sent" && <Badge intent="success">{isAr ? "مرسَل" : "sent"}</Badge>}
-                        {n.status === "queued" && <Badge intent="warn">{isAr ? "قيد الانتظار" : "queued"}</Badge>}
-                        {n.status === "sending" && <Badge intent="muted">{isAr ? "جاري الإرسال" : "sending"}</Badge>}
-                        {n.status === "no_tokens" && <Badge intent="muted">{isAr ? "لا يوجد توكنات" : "no_tokens"}</Badge>}
-                        {n.status === "failed" && <Badge intent="error">{isAr ? "فشل" : "failed"}</Badge>}
-                        {!n.status && <Badge>—</Badge>}
-                      </td>
-                      <td className="py-3 px-3">
-                        {n.targetId === "all" ? (
-                          <div className="font-medium">{isAr ? "كل العملاء" : "All Clients"}</div>
-                        ) : (
-                          (() => {
-                            const t = clientsMap.get(n.targetId || "");
-                            return t ? (
-                              <div className="flex items-center gap-3">
-                                <div>
-                                  <div className="font-medium">{t.name || t.displayName || t.userId}</div>
-                                  <div className="text-xs text-slate-500">#{t.customerId || t.userId}</div>
+                  filteredNotifications.map((n) => {
+                    const targetClient = n.targetId && n.targetId !== "all" ? clientsMap.get(n.targetId) : null;
+                    return (
+                      <tr key={n.id} className="border-b last:border-b-0 hover:bg-emerald-50/20">
+                        <td className="py-3 px-3 max-w-[480px] break-words">{n.body}</td>
+
+                        <td className="py-3 px-3">
+                          <Badge intent={n.type === "general" ? "success" : "default"}>
+                            {n.type === "general" ? (isAr ? "عام" : "General") : (isAr ? "مخصص" : "Custom")}
+                          </Badge>
+                        </td>
+
+                        <td className="py-3 px-3">
+                          {n.status === "sent" && <Badge intent="success">{isAr ? "مرسَل" : "sent"}</Badge>}
+                          {n.status === "queued" && <Badge intent="warn">{isAr ? "قيد الانتظار" : "queued"}</Badge>}
+                          {n.status === "queued_for_user" && <Badge intent="warn">{isAr ? "معلّق للمستخدم" : "queued_for_user"}</Badge>}
+                          {n.status === "scheduled" && <Badge intent="muted">{isAr ? "مجدول" : "scheduled"}</Badge>}
+                          {n.status === "sending" && <Badge intent="muted">{isAr ? "جاري الإرسال" : "sending"}</Badge>}
+                          {n.status === "no_tokens" && <Badge intent="muted">{isAr ? "لا يوجد توكنات" : "no_tokens"}</Badge>}
+                          {n.status === "no_response" && <Badge intent="muted">{isAr ? "لا استجابة" : "no_response"}</Badge>}
+                          {n.status === "failed" && <Badge intent="error">{isAr ? "فشل" : "failed"}</Badge>}
+                          {!n.status && <Badge>—</Badge>}
+                        </td>
+
+                        <td className="py-3 px-3">
+                          {n.targetId === "all" ? (
+                            <div className="font-medium">{isAr ? "كل العملاء" : "All Clients"}</div>
+                          ) : targetClient ? (
+                            <div className="flex items-center gap-3">
+                              <div>
+                                <div className="font-medium">
+                                  {targetClient.name || targetClient.displayName || targetClient.userId}
                                 </div>
-                                <Badge intent="muted">{humanType(t.accountType, lang)}</Badge>
+                                <div className="text-xs text-slate-500">#{targetClient.customerId || targetClient.userId}</div>
                               </div>
-                            ) : (
-                              <div>{n.targetId}</div>
-                            );
-                          })()
-                        )}
-                      </td>
-                      <td className="py-3 px-3 text-slate-500 text-xs whitespace-nowrap">
-                        {formatDate(n.timestamp, lang)}
-                        {n.pushAt && n.pushAt !== n.timestamp ? (
-                          <div className="text-[11px] text-slate-400 mt-1">
-                            {isAr ? "مجدول لِـ " : "Scheduled for "} {formatDate(n.pushAt, lang)}
+                              <Badge intent="muted">{humanType(targetClient.accountType, lang)}</Badge>
+                            </div>
+                          ) : (
+                            <div>{n.targetId}</div>
+                          )}
+                        </td>
+
+                        <td className="py-3 px-3 text-slate-500 text-xs whitespace-nowrap">
+                          {formatDate(n.timestamp, lang)}
+                          {n.pushAt && n.pushAt !== n.timestamp ? (
+                            <div className="text-[11px] text-slate-400 mt-1">
+                              {isAr ? "مجدول لِـ " : "Scheduled for "} {formatDate(n.pushAt, lang)}
+                            </div>
+                          ) : null}
+                          {n.sentAt ? (
+                            <div className="text-[11px] text-slate-400 mt-1">
+                              {isAr ? "أُرسل: " : "sentAt: "} {formatDate(n.sentAt, lang)}
+                            </div>
+                          ) : null}
+                        </td>
+
+                        <td className="py-3 px-3">
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              className="px-2 py-1 text-xs rounded border"
+                              title={isAr ? "إعادة إرسال فورية" : "Immediate re-send"}
+                              onClick={async () => {
+                                await addDoc(collection(db, "notifications"), {
+                                  title: n.title,
+                                  body: n.body,
+                                  data: n.data || {},
+                                  targetId: n.targetId || "all",
+                                  priority: n.priority || "high",
+                                  timestamp: serverTimestamp(),
+                                  pushAt: Timestamp.fromDate(new Date()),
+                                  type: n.type || (n.targetId === "all" ? "general" : "custom"),
+                                  status: "queued",
+                                  pushed: false,
+                                  attempts: 0,
+                                  lastError: null,
+                                });
+                                alert(isAr ? "تم إنشاء إعادة إرسال." : "Re-send enqueued.");
+                              }}
+                            >
+                              {isAr ? "إعادة إرسال" : "Re-send"}
+                            </button>
+
+                            {n.pushAt && (
+                              <button
+                                className="px-2 py-1 text-xs rounded border"
+                                title={isAr ? "إلغاء الجدولة عبر نسخة فورية" : "Cancel schedule via instant clone"}
+                                onClick={async () => {
+                                  await addDoc(collection(db, "notifications"), {
+                                    title: n.title,
+                                    body: n.body,
+                                    data: n.data || {},
+                                    targetId: n.targetId || "all",
+                                    priority: n.priority || "high",
+                                    timestamp: serverTimestamp(),
+                                    pushAt: Timestamp.fromDate(new Date()),
+                                    type: n.type || (n.targetId === "all" ? "general" : "custom"),
+                                    status: "queued",
+                                    pushed: false,
+                                    attempts: 0,
+                                    lastError: null,
+                                  });
+                                  alert(isAr ? "تم إلغاء الجدولة بإنشاء نسخة فورية." : "Schedule canceled via clone.");
+                                }}
+                              >
+                                {isAr ? "إلغاء الجدولة" : "Cancel schedule"}
+                              </button>
+                            )}
                           </div>
-                        ) : null}
-                        {n.sentAt ? (
-                          <div className="text-[11px] text-slate-400 mt-1">
-                            {isAr ? "أُرسل: " : "sentAt: "} {formatDate(n.sentAt, lang)}
-                          </div>
-                        ) : null}
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
           </div>
 
-          {/* bottom clients / search */}
-          <div className="mt-6">
-            <div className="flex items-center justify-between mb-3 gap-3">
-              <div className="flex items-center gap-2">
-                {[
-                  { k: "all", label: isAr ? "الكل" : "All" },
-                  { k: "resident", label: isAr ? "مقيم" : "Resident" },
-                  { k: "nonresident", label: isAr ? "غير مقيم" : "Non-resident" },
-                  { k: "company", label: isAr ? "شركة" : "Company" },
-                ].map((t) => (
-                  <button
-                    key={t.k}
-                    onClick={() => setClientTypeTab(t.k)}
-                    className={`px-3 py-1 rounded-md text-sm font-medium ${clientTypeTab === t.k ? "bg-emerald-700 text-white" : "bg-emerald-50 text-emerald-800 border border-emerald-200"}`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
+          {/* Pending widget */}
+          <div className="mt-6 bg-white rounded-xl border p-4">
+            <h4 className="font-bold mb-2">{isAr ? "إشعارات معلّقة" : "Pending Notifications"}</h4>
+            {pendingMap.size === 0 ? (
+              <div className="text-sm text-slate-500">
+                {isAr ? "لا يوجد إشعارات معلّقة." : "No pending notifications."}
               </div>
-
-              <input
-                value={clientSearch}
-                onChange={(e) => setClientSearch(e.target.value)}
-                placeholder={isAr ? "بحث بالاسم / الهاتف / الإيميل / رقم العميل..." : "Search name / phone / email / customerId..."}
-                className="p-2 border border-slate-200 rounded-md min-w-[220px]"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {filteredClients.length === 0 ? (
-                <div className="text-slate-400 text-center col-span-2 py-4">{isAr ? "لا يوجد عملاء" : "No clients found"}</div>
-              ) : (
-                filteredClients.map((client) => (
-                  <div key={client.userId} className="flex items-center justify-between bg-emerald-50 p-3 rounded-lg border border-emerald-200 shadow-sm">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <div className="font-medium text-slate-900 text-sm">
-                          {client.name || client.displayName || client.userId}
-                          <span className="ml-2 text-xs text-slate-500 font-mono">#{client.customerId || client.userId}</span>
-                        </div>
-                        <Badge intent="muted">{humanType(client.accountType, lang)}</Badge>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {Array.from(pendingMap.entries()).map(([uid, count]) => {
+                  const c = clientsMap.get(uid);
+                  return (
+                    <div
+                      key={uid}
+                      className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-lg p-3"
+                    >
+                      <div className="text-sm">
+                        <div className="font-medium">{c ? (c.name || c.displayName || uid) : uid}</div>
+                        <div className="text-xs text-slate-500">#{c?.customerId || uid}</div>
                       </div>
-                      <div className="text-xs text-slate-600 mt-1">
-                        {toE164(client.phone || client.phoneE164) || "-"}{client.email ? ` | ${client.email}` : ""}
-                      </div>
+                      <Badge intent="warn">{count}</Badge>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={async () => {
-                          setResolvingTokens(true);
-                          const toks = await getActiveTokensForUser(String(client.userId));
-                          setTokenPreviewList(toks);
-                          setTokenPreviewOpen(true);
-                          setResolvingTokens(false);
-                        }}
-                        className="px-3 py-2 rounded-md bg-slate-800 text-white text-sm"
-                      >
-                        {isAr ? "معاينة التوكن" : "Preview tokens"}
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Token preview panel (simple modal) */}
+      {/* Token preview modal */}
       {tokenPreviewOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-2xl bg-white rounded-xl shadow-lg p-4">
             <div className="flex items-center justify-between mb-3">
               <h4 className="font-bold">{isAr ? "التوكنات النشطة" : "Active tokens"}</h4>
               <div className="flex items-center gap-3">
-                <span className="text-sm text-slate-600">{tokenPreviewList.length} {isAr ? "توكن" : "tokens"}</span>
-                <button onClick={() => { setTokenPreviewOpen(false); setTokenPreviewList([]); }} className="px-3 py-1 rounded-md border">Close</button>
+                <span className="text-sm text-slate-600">
+                  {tokenPreviewList.length} {isAr ? "توكن" : "tokens"}
+                </span>
+                <button
+                  onClick={() => {
+                    setTokenPreviewOpen(false);
+                    setTokenPreviewList([]);
+                  }}
+                  className="px-3 py-1 rounded-md border"
+                >
+                  {isAr ? "إغلاق" : "Close"}
+                </button>
               </div>
             </div>
             <div className="max-h-64 overflow-auto border rounded-md p-3 bg-slate-50">
               {tokenPreviewList.length === 0 ? (
-                <div className="text-slate-500">{isAr ? "لا توجد توكنات نشطة لهذا المستخدم." : "No active tokens for this user."}</div>
+                <div className="text-slate-500">
+                  {isAr ? "لا توجد توكنات نشطة لهذا المستخدم." : "No active tokens for this user."}
+                </div>
               ) : (
                 tokenPreviewList.map((t, i) => (
                   <div key={i} className="mb-2 p-2 bg-white border rounded text-xs break-all">
