@@ -50,14 +50,6 @@ function Badge({ children, intent = "default" }) {
   );
 }
 
-function humanType(t, lang = DEFAULT_LANG) {
-  if (t === "company") return lang === "ar" ? "شركة" : "Company";
-  if (t === "resident") return lang === "ar" ? "مقيم" : "Resident";
-  if (t === "nonresident") return lang === "ar" ? "غير مقيم" : "Non-resident";
-  return "-";
-}
-
-/* Tabs */
 function Tabs({ value, onChange, isAr }) {
   const tabs = [
     { id: "all", label: isAr ? "الكل" : "All" },
@@ -88,7 +80,6 @@ function Tabs({ value, onChange, isAr }) {
   );
 }
 
-/* Client row */
 function ClientRow({ client, active, onSelect }) {
   const name = client?.name || client?.displayName || "-";
   const cid = client?.__cid || client?.customerId || "-";
@@ -97,8 +88,9 @@ function ClientRow({ client, active, onSelect }) {
   return (
     <button
       onClick={onSelect}
-      className={`w-full text-left px-3 py-3 rounded-lg border flex items-center justify-between transition-all duration-150 ease-in-out
-        ${active ? "border-emerald-500 bg-emerald-50 shadow-md" : "border-slate-200 bg-white hover:shadow-sm hover:scale-[1.01]"}`}
+      className={`w-full text-left px-3 py-3 rounded-lg border flex items-center justify-between transition-all duration-150 ease-in-out cursor-pointer ${
+        active ? "border-emerald-500 bg-emerald-50 shadow-md" : "border-slate-200 bg-white hover:shadow-sm hover:scale-[1.01]"
+      }`}
       aria-current={active ? "true" : "false"}
       title={name + " • #" + cid}
     >
@@ -123,7 +115,7 @@ function ClientRow({ client, active, onSelect }) {
 }
 
 /* =========================
-   Main Component
+   Main Component (JS only)
    ========================= */
 export default function NotificationsSection({ lang = DEFAULT_LANG }) {
   const isAr = lang === "ar";
@@ -221,26 +213,24 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
       s1.forEach((d) => {
         const v = d.data() || {};
         const fg = typeof v.foreground === "boolean" ? v.foreground : true;
-        if (!v?.token || !fg) return;
+        if (!v.token || !fg) return;
         const cid = d.ref?.parent?.parent?.id;
         if (!cid) return;
         m.set(cid, (m.get(cid) || 0) + 1);
       });
-    } catch (e) {
-      // ignore silently
-    }
+    } catch {}
 
     try {
       const s2 = await getDocs(query(collectionGroup(db, "pushTokens"), where("active", "==", true)));
       s2.forEach((d) => {
         const v = d.data() || {};
         const fg = typeof v.foreground === "boolean" ? v.foreground : true;
-        if (!v?.token || !fg) return;
+        if (!v.token || !fg) return;
         const cid = d.ref?.parent?.parent?.id;
         if (!cid) return;
         m.set(cid, (m.get(cid) || 0) + 1);
       });
-    } catch (e) {}
+    } catch {}
 
     setTokenCounts(m);
   }
@@ -262,7 +252,7 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
         s1.forEach((d) => {
           const v = d.data() || {};
           const fg = typeof v.foreground === "boolean" ? v.foreground : true;
-          if (fg && v?.token) tokens.add(v.token);
+          if (fg && v.token) tokens.add(v.token);
         });
       } catch {}
       try {
@@ -270,7 +260,7 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
         s2.forEach((d) => {
           const v = d.data() || {};
           const fg = typeof v.foreground === "boolean" ? v.foreground : true;
-          if (fg && v?.token) tokens.add(v.token);
+          if (fg && v.token) tokens.add(v.token);
         });
       } catch {}
     } finally {
@@ -384,159 +374,118 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
   }, [notifications, notifTypeFilter, notifSearch, clientsMap]);
 
   /* ============================
-     Render - professional, clean UI
-     - pointer cursors on interactive elements
-     - clear, consistent colors & spacing
+     Render (New Layout)
   ============================ */
   return (
-    <div className="max-w-7xl mx-auto py-8 px-6 text-sm text-slate-900">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-3xl font-extrabold tracking-tight">{isAr ? "لوحة الإشعارات" : "Notifications"}</h1>
-          <p className="text-slate-500 mt-1 max-w-xl">
-            {isAr
-              ? "أرسل إشعارات عامة أو موجهة للعملاء (بـ Customer ID). معاينة التوكنات الحيّة وإدارة الجداول."
-              : "Broadcast or target notifications to customers using Customer ID. Preview live tokens and manage scheduling."}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className="text-xs text-slate-600">
-            {isAr ? "الإجمالي" : "Total"}: <span className="font-semibold text-slate-900">{notifications.length}</span>
-          </div>
-          <button
-            onClick={() => {
-              // quick UI action - clear filters
-              setNotifTypeFilter("all");
-              setNotifSearch("");
-              setClientSearch("");
-              setClientTypeTab("all");
-            }}
-            className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-md shadow-sm hover:shadow-md transition text-sm"
-            title={isAr ? "إعادة ضبط الفلاتر" : "Reset filters"}
-          >
-            <svg className="w-4 h-4 text-slate-600" viewBox="0 0 20 20" fill="currentColor"><path d="M10 3v2a5 5 0 108 4h2A7 7 0 1110 3z"/></svg>
-            <span className="text-slate-700">{isAr ? "إعادة ضبط" : "Reset"}</span>
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Compose (left column - prominent) */}
-        <aside className="lg:col-span-1">
-          <div className="sticky top-6 bg-white rounded-2xl shadow-lg border border-slate-200 p-5">
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <h2 className="text-lg font-bold">{isAr ? "إنشاء إشعار" : "Compose Notification"}</h2>
-                <p className="text-xs text-slate-500 mt-1">{isAr ? "اكتب الرسالة واختر المستلم." : "Write message & choose recipient."}</p>
-              </div>
-              <div>
-                <Badge intent="muted">{priority === "high" ? (isAr ? "عالية" : "High") : (isAr ? "عادية" : "Normal")}</Badge>
-              </div>
-            </div>
-
+    <div className="max-w-7xl mx-auto py-6 px-6 text-sm text-slate-900">
+      {/* ===== Top Compose Bar ===== */}
+      <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 mb-6">
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+          {/* Message */}
+          <div className="xl:col-span-5">
+            <label className="block text-xs text-slate-600 mb-1">{isAr ? "نص الإشعار" : "Message"}</label>
             <textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               placeholder={isAr ? "اكتب نص الإشعار..." : "Write notification message..."}
-              className="w-full p-3 rounded-lg border border-slate-200 text-sm resize-none min-h-[140px] focus:outline-none focus:ring-2 focus:ring-emerald-200"
+              className="w-full p-3 rounded-lg border border-slate-200 text-sm resize-none min-h-[96px] focus:outline-none focus:ring-2 focus:ring-emerald-200"
             />
+          </div>
 
-            <div className="mt-3 space-y-3">
-              <label className="block text-xs text-slate-600">{isAr ? "المستلم" : "Recipient"}</label>
-
-              <div className="flex gap-2 items-center">
-                <button
-                  onClick={() => setTarget("all")}
-                  className={`cursor-pointer px-3 py-2 rounded-lg text-sm font-medium flex-1 text-center ${target === "all" ? "bg-emerald-700 text-white shadow-md" : "bg-white border border-slate-200 hover:shadow-sm"}`}
-                >
-                  {isAr ? "كل العملاء" : "All Clients"}
-                </button>
-                <div className="w-1/2">
-                  <input
-                    value={clientSearch}
-                    onChange={(e) => setClientSearch(e.target.value)}
-                    placeholder={isAr ? "ابحث عن عميل..." : "Search client..."}
-                    className="w-full p-2 rounded-lg border border-slate-200 text-sm focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Tabs value={clientTypeTab} onChange={setClientTypeTab} isAr={isAr} />
-              </div>
-
-              <div className="flex items-center gap-2 justify-between">
-                <label className="inline-flex items-center gap-2 text-xs text-slate-600">
-                  <input type="checkbox" checked={onlyWithTokens} onChange={(e) => setOnlyWithTokens(e.target.checked)} className="cursor-pointer" />
-                  {isAr ? "اظهر فقط من لديه توكنات" : "Only clients with tokens"}
-                </label>
-
-                <label className="inline-flex items-center gap-2 text-xs text-slate-600">
-                  <input type="checkbox" checked={tokensFirst} onChange={(e) => setTokensFirst(e.target.checked)} className="cursor-pointer" />
-                  {isAr ? "رتّب التوكنات أولاً" : "Sort tokens first"}
-                </label>
-              </div>
-
-              <div className="max-h-56 overflow-auto border rounded-lg p-2 bg-slate-50 space-y-2">
-                {filteredClients.slice(0, 200).map((cl) => (
-                  <ClientRow
-                    key={cl.__cid}
-                    client={cl}
-                    active={target === cl.__cid}
-                    onSelect={() => setTarget(cl.__cid)}
-                  />
-                ))}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={async () => {
-                    if (!target || target === "all") return;
-                    setResolvingTokens(true);
-                    const toks = await getActiveTokensForUserDoc(String(target));
-                    setTokenPreviewList(toks);
-                    setTokenPreviewOpen(true);
-                    setResolvingTokens(false);
-                  }}
-                  disabled={!target || target === "all" || resolvingTokens}
-                  className="cursor-pointer px-4 py-2 rounded-lg bg-white border border-slate-200 text-sm hover:shadow-sm transition flex-1"
-                >
-                  {resolvingTokens ? (isAr ? "جاري التحضير..." : "Preparing...") : (isAr ? "عرض التوكنات" : "View tokens")}
-                </button>
-
-                <div className="ml-auto text-xs text-slate-600">
-                  {isAr ? "توكنات نشطة:" : "Active tokens:"} <strong>{targetTokenCount === null ? "—" : targetTokenCount}</strong>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 mt-2">
-                <select value={priority} onChange={(e) => setPriority(e.target.value)} className="p-2 rounded-lg border border-slate-200 text-sm">
-                  <option value="high">{isAr ? "عالية" : "High"}</option>
-                  <option value="normal">{isAr ? "عادية" : "Normal"}</option>
-                </select>
-
-                <input
-                  type="datetime-local"
-                  value={scheduleAt}
-                  onChange={(e) => setScheduleAt(e.target.value)}
-                  className="p-2 rounded-lg border border-slate-200 text-sm ml-auto"
-                  title={isAr ? "موعد الإرسال" : "Schedule send time"}
-                />
-              </div>
-
+          {/* Recipient + client filters */}
+          <div className="xl:col-span-5">
+            <div className="flex items-center gap-2 mb-2">
               <button
-                onClick={sendNotification}
-                disabled={loading || !message.trim()}
-                className="cursor-pointer w-full py-3 rounded-xl text-white font-bold text-sm bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-700 hover:to-emerald-600 shadow-lg transition disabled:opacity-60"
+                onClick={() => setTarget("all")}
+                className={`cursor-pointer px-3 py-2 rounded-lg text-sm font-medium ${
+                  target === "all" ? "bg-emerald-700 text-white shadow-md" : "bg-white border border-slate-200 hover:shadow-sm"
+                }`}
               >
-                {loading ? (isAr ? "جارٍ الإرسال..." : "Sending...") : (isAr ? "إرسال إشعار" : "Send Notification")}
+                {isAr ? "كل العملاء" : "All Clients"}
               </button>
+              <input
+                value={clientSearch}
+                onChange={(e) => setClientSearch(e.target.value)}
+                placeholder={isAr ? "ابحث عن عميل..." : "Search client..."}
+                className="w-full p-2 rounded-lg border border-slate-200 text-sm focus:outline-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-between mb-2">
+              <Tabs value={clientTypeTab} onChange={setClientTypeTab} isAr={isAr} />
+              <div className="flex items-center gap-4">
+                <label className="inline-flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
+                  <input type="checkbox" checked={onlyWithTokens} onChange={(e) => setOnlyWithTokens(e.target.checked)} className="cursor-pointer" />
+                  {isAr ? "توكنات فقط" : "With tokens only"}
+                </label>
+                <label className="inline-flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
+                  <input type="checkbox" checked={tokensFirst} onChange={(e) => setTokensFirst(e.target.checked)} className="cursor-pointer" />
+                  {isAr ? "رتّب التوكنات أولاً" : "Tokens first"}
+                </label>
+              </div>
+            </div>
+
+            <div className="max-h-40 overflow-auto border rounded-lg p-2 bg-slate-50 space-y-2">
+              {filteredClients.slice(0, 120).map((cl) => (
+                <ClientRow key={cl.__cid} client={cl} active={target === cl.__cid} onSelect={() => setTarget(cl.__cid)} />
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2 mt-2">
+              <button
+                onClick={async () => {
+                  if (!target || target === "all") return;
+                  setResolvingTokens(true);
+                  const toks = await getActiveTokensForUserDoc(String(target));
+                  setTokenPreviewList(toks);
+                  setTokenPreviewOpen(true);
+                  setResolvingTokens(false);
+                }}
+                disabled={!target || target === "all" || resolvingTokens}
+                className="cursor-pointer px-4 py-2 rounded-lg bg-white border border-slate-200 text-sm hover:shadow-sm transition"
+              >
+                {resolvingTokens ? (isAr ? "جاري التحضير..." : "Preparing...") : (isAr ? "عرض التوكنات" : "View tokens")}
+              </button>
+
+              <div className="ml-auto text-xs text-slate-600">
+                {isAr ? "توكنات نشطة:" : "Active tokens:"} <strong>{targetTokenCount === null ? "—" : targetTokenCount}</strong>
+              </div>
             </div>
           </div>
-        </aside>
 
-        {/* Main list (right - wide) */}
+          {/* Priority / schedule / send */}
+          <div className="xl:col-span-2 flex flex-col justify-between">
+            <div className="flex flex-col gap-2">
+              <label className="text-xs text-slate-600">{isAr ? "الأولوية" : "Priority"}</label>
+              <select value={priority} onChange={(e) => setPriority(e.target.value)} className="p-2 rounded-lg border border-slate-200 text-sm cursor-pointer">
+                <option value="high">{isAr ? "عالية" : "High"}</option>
+                <option value="normal">{isAr ? "عادية" : "Normal"}</option>
+              </select>
+
+              <label className="text-xs text-slate-600 mt-2">{isAr ? "موعد الإرسال (اختياري)" : "Schedule (optional)"}</label>
+              <input
+                type="datetime-local"
+                value={scheduleAt}
+                onChange={(e) => setScheduleAt(e.target.value)}
+                className="p-2 rounded-lg border border-slate-200 text-sm cursor-pointer"
+              />
+            </div>
+
+            <button
+              onClick={sendNotification}
+              disabled={loading || !message.trim()}
+              className="cursor-pointer w-full mt-3 py-3 rounded-xl text-white font-bold text-sm bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-700 hover:to-emerald-600 shadow-lg transition disabled:opacity-60"
+              title={isAr ? "إرسال إشعار" : "Send notification"}
+            >
+              {loading ? (isAr ? "جارٍ الإرسال..." : "Sending...") : (isAr ? "إرسال" : "Send")}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ===== Content Row ===== */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left (wide): Notifications table */}
         <main className="lg:col-span-2 space-y-6">
           <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-4">
             <div className="flex items-center justify-between mb-4 gap-4">
@@ -544,7 +493,7 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
                 <select
                   value={notifTypeFilter}
                   onChange={(e) => setNotifTypeFilter(e.target.value)}
-                  className="p-2 rounded-lg border border-slate-200 text-sm"
+                  className="p-2 rounded-lg border border-slate-200 text-sm cursor-pointer"
                 >
                   <option value="all">{isAr ? "الكل" : "All"}</option>
                   <option value="general">{isAr ? "عام" : "General"}</option>
@@ -559,8 +508,8 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
                 />
               </div>
 
-              <div className="flex items-center gap-3">
-                <div className="text-xs text-slate-600">{isAr ? "العرض" : "Showing"}: <strong>{filteredNotifications.length}</strong></div>
+              <div className="text-xs text-slate-600">
+                {isAr ? "العرض" : "Showing"}: <strong>{filteredNotifications.length}</strong>
               </div>
             </div>
 
@@ -568,15 +517,14 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
               <table className="w-full text-left table-fixed">
                 <thead className="bg-emerald-50 text-emerald-900">
                   <tr>
-                    <th className="py-3 px-4 font-semibold w-1/3"> {isAr ? "النص" : "Message"} </th>
-                    <th className="py-3 px-4 font-semibold"> {isAr ? "النوع" : "Type"} </th>
-                    <th className="py-3 px-4 font-semibold"> {isAr ? "الحالة" : "Status"} </th>
-                    <th className="py-3 px-4 font-semibold"> {isAr ? "إلى" : "To"} </th>
-                    <th className="py-3 px-4 font-semibold"> {isAr ? "التواريخ" : "Dates"} </th>
-                    <th className="py-3 px-4 font-semibold"> {isAr ? "إجراءات" : "Actions"} </th>
+                    <th className="py-3 px-4 font-semibold w-1/3">{isAr ? "النص" : "Message"}</th>
+                    <th className="py-3 px-4 font-semibold">{isAr ? "النوع" : "Type"}</th>
+                    <th className="py-3 px-4 font-semibold">{isAr ? "الحالة" : "Status"}</th>
+                    <th className="py-3 px-4 font-semibold">{isAr ? "إلى" : "To"}</th>
+                    <th className="py-3 px-4 font-semibold">{isAr ? "التواريخ" : "Dates"}</th>
+                    <th className="py-3 px-4 font-semibold">{isAr ? "إجراءات" : "Actions"}</th>
                   </tr>
                 </thead>
-
                 <tbody>
                   {filteredNotifications.length === 0 ? (
                     <tr>
@@ -646,7 +594,6 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
 
                               <button
                                 onClick={async () => {
-                                  if (!n.id) return;
                                   await addDoc(collection(db, "notifications"), {
                                     title: n.title,
                                     body: n.body,
@@ -677,50 +624,50 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
               </table>
             </div>
           </div>
+        </main>
 
-          {/* Pending & Summary */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="col-span-2 bg-white rounded-2xl shadow-lg border border-slate-200 p-4">
-              <h3 className="font-bold mb-3">{isAr ? "الإشعارات المعلّقة حسب العميل" : "Pending by customer"}</h3>
-              {pendingMap.size === 0 ? (
-                <div className="text-slate-500">{isAr ? "لا يوجد إشعارات معلّقة." : "No pending notifications."}</div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {Array.from(pendingMap.entries()).map(([cid, count]) => {
-                    const c = clientsMap.get(cid);
-                    return (
-                      <div key={cid} className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-                        <div>
-                          <div className="font-medium">{c ? (c.name || c.displayName || cid) : cid}</div>
-                          <div className="text-xs font-mono text-emerald-700 mt-1">#{c?.__cid || cid}</div>
-                        </div>
-                        <Badge intent="warn">{count}</Badge>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div className="col-span-1 bg-white rounded-2xl shadow-lg border border-slate-200 p-4">
-              <h3 className="font-bold mb-3">{isAr ? "ملخص سريع" : "Quick summary"}</h3>
-              <div className="space-y-2 text-sm text-slate-700">
-                <div className="flex justify-between">
-                  <span>{isAr ? "عملاء مسجلين" : "Clients"}</span>
-                  <span className="font-semibold">{clients.length}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>{isAr ? "إجمالي توكنات نشطة" : "Total active tokens"}</span>
-                  <span className="font-semibold">{Array.from(tokenCounts.values()).reduce((a, b) => a + b, 0)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>{isAr ? "إشعارات في الطابور" : "Notifications queued"}</span>
-                  <span className="font-semibold">{notifications.filter((n) => n.status === "queued").length}</span>
-                </div>
+        {/* Right (narrow): summary + pending */}
+        <aside className="lg:col-span-1 space-y-6">
+          <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-4">
+            <h3 className="font-bold mb-3">{isAr ? "ملخص سريع" : "Quick summary"}</h3>
+            <div className="space-y-2 text-sm text-slate-700">
+              <div className="flex justify-between">
+                <span>{isAr ? "عملاء مسجلين" : "Clients"}</span>
+                <span className="font-semibold">{clients.length}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>{isAr ? "إجمالي توكنات نشطة" : "Total active tokens"}</span>
+                <span className="font-semibold">{Array.from(tokenCounts.values()).reduce((a, b) => a + b, 0)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>{isAr ? "إشعارات في الطابور" : "Notifications queued"}</span>
+                <span className="font-semibold">{notifications.filter((n) => n.status === "queued").length}</span>
               </div>
             </div>
           </div>
-        </main>
+
+          <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-4">
+            <h3 className="font-bold mb-3">{isAr ? "الإشعارات المعلّقة حسب العميل" : "Pending by customer"}</h3>
+            {pendingMap.size === 0 ? (
+              <div className="text-slate-500">{isAr ? "لا يوجد إشعارات معلّقة." : "No pending notifications."}</div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3">
+                {Array.from(pendingMap.entries()).map(([cid, count]) => {
+                  const c = clientsMap.get(cid);
+                  return (
+                    <div key={cid} className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                      <div>
+                        <div className="font-medium">{c ? (c.name || c.displayName || cid) : cid}</div>
+                        <div className="text-xs font-mono text-emerald-700 mt-1">#{c?.__cid || cid}</div>
+                      </div>
+                      <Badge intent="warn">{count}</Badge>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </aside>
       </div>
 
       {/* Token preview modal */}
