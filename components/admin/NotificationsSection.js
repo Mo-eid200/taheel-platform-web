@@ -5,8 +5,6 @@ import {
   addDoc,
   collection,
   collectionGroup,
-  doc,
-  getDoc,
   getDocs,
   limit,
   onSnapshot,
@@ -57,11 +55,59 @@ function humanType(t, lang = DEFAULT_LANG) {
   return "-";
 }
 
-function clientLabel(c) {
-  const name = c?.name || c?.displayName || c?.userId || "-";
-  const cid = c?.customerId ? `#${c.customerId}` : c?.userId ? `#${c.userId}` : "";
-  const phone = toE164(c?.phone || c?.phoneE164);
-  return `${name} ${cid}${phone ? ` • ${phone}` : ""}`;
+/* تبويب بسيط */
+function Tabs({ value, onChange, isAr }) {
+  const tabs = [
+    { id: "all", label: isAr ? "الكل" : "All" },
+    { id: "resident", label: isAr ? "مقيم" : "Resident" },
+    { id: "nonresident", label: isAr ? "غير مقيم" : "Non-resident" },
+    { id: "company", label: isAr ? "شركة" : "Company" },
+  ];
+  return (
+    <div className="flex gap-2 flex-wrap">
+      {tabs.map((t) => {
+        const active = value === t.id;
+        return (
+          <button
+            key={t.id}
+            onClick={() => onChange(t.id)}
+            className={`px-3 py-1.5 rounded-full text-sm border transition
+              ${active ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"}`}
+          >
+            {t.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/* عنصر عميل لعرض اسم + رقم فقط بألوان */
+function ClientRow({ client, active, onSelect }) {
+  const name = client?.name || client?.displayName || "-";
+  const cid = client?.customerId || client?.userId || "-";
+  const tokens = client.__tokens || 0;
+
+  return (
+    <button
+      onClick={onSelect}
+      className={`w-full text-left px-3 py-2 rounded-lg border flex items-center justify-between
+        ${active ? "border-emerald-500 bg-emerald-50" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+    >
+      <div className="flex items-baseline gap-2">
+        <span className="font-semibold text-slate-800">{name}</span>
+        <span className="text-xs font-mono text-emerald-700">#{cid}</span>
+      </div>
+
+      {tokens > 0 ? (
+        <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+          {tokens}
+        </span>
+      ) : (
+        <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">0</span>
+      )}
+    </button>
+  );
 }
 
 /* ============ Component ============ */
@@ -74,28 +120,38 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
 
   // Compose state
   const [message, setMessage] = useState("");
-  const [target, setTarget] = useState("all");
+  const [target, setTarget] = useState("all"); // userId | "all"
   const [scheduleAt, setScheduleAt] = useState("");
   const [priority, setPriority] = useState("high");
   const [loading, setLoading] = useState(false);
 
   // Filters
-  const [notifTypeFilter, setNotifTypeFilter] = useState("all");
+  const [notifTypeFilter, setNotifTypeFilter] = useState("all"); // all | general | custom
   const [notifSearch, setNotifSearch] = useState("");
-  const [clientSearch, setClientSearch] = useState("");
-  const [clientTypeTab, setClientTypeTab] = useState("all");
 
-  // Tokens preview
+  // Clients filtering
+  const [clientSearch, setClientSearch] = useState("");
+  const [clientTypeTab, setClientTypeTab] = useState("all"); // all | resident | nonresident | company
+
+  // Token UX
   const [targetTokenCount, setTargetTokenCount] = useState(null);
   const [resolvingTokens, setResolvingTokens] = useState(false);
   const [tokenPreviewOpen, setTokenPreviewOpen] = useState(false);
   const [tokenPreviewList, setTokenPreviewList] = useState([]);
 
-  // Pending count (collectionGroup)
+  // Pending count per user
   const [pendingMap, setPendingMap] = useState(new Map());
+
+  // Active tokens per user (live)
+  const [tokenCounts, setTokenCounts] = useState(new Map());
+
+  // Extra filters
+  const [onlyWithTokens, setOnlyWithTokens] = useState(false);
+  const [tokensFirst, setTokensFirst] = useState(true);
 
   /* ============ Subscriptions ============ */
   useEffect(() => {
+    // Notifications list
     const qNotifs = query(collection(db, "notifications"), orderBy("timestamp", "desc"), limit(500));
     const unsubNotifs = onSnapshot(qNotifs, (snap) => {
       const list = [];
@@ -103,17 +159,19 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
       setNotifications(list);
     });
 
+    // Clients list
     const unsubClients = onSnapshot(collection(db, "users"), (snap) => {
       const list = [];
       snap.forEach((d) => list.push({ userId: d.id, ...d.data() }));
       setClients(list);
     });
 
+    // Pending per user
     const qPending = query(collectionGroup(db, "pendingNotifications"), orderBy("createdAt", "desc"));
     const unsubPending = onSnapshot(qPending, (snap) => {
       const m = new Map();
       snap.forEach((d) => {
-        const userDoc = d.ref.parent?.parent; // users/{docId}
+        const userDoc = d.ref?.parent?.parent; // users/{docId}
         const uid = userDoc?.id;
         if (!uid) return;
         m.set(uid, (m.get(uid) || 0) + 1);
@@ -121,21 +179,74 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
       setPendingMap(m);
     });
 
+    // Token listeners (expo + push)
+    const expoQ = query(collectionGroup(db, "expoPushTokens"), where("active", "==", true));
+    const unsubExpo = onSnapshot(expoQ, () => {
+      rebuildAllTokenCounts();
+    });
+
+    const pushQ = query(collectionGroup(db, "pushTokens"), where("active", "==", true));
+    const unsubPush = onSnapshot(pushQ, () => {
+      rebuildAllTokenCounts();
+    });
+
     return () => {
       unsubNotifs();
       unsubClients();
       unsubPending();
+      unsubExpo();
+      unsubPush();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ============ Clients map ============ */
-  const clientsMap = useMemo(() => {
+  // Centralized recount of active tokens per user
+  async function rebuildAllTokenCounts() {
     const m = new Map();
-    clients.forEach((c) => m.set(String(c.userId), c));
-    return m;
-  }, [clients]);
 
-  /* ============ Tokens (docId-only) ============ */
+    // expoPushTokens
+    try {
+      const s1 = await getDocs(
+        query(collectionGroup(db, "expoPushTokens"), where("active", "==", true))
+      );
+      s1.forEach((d) => {
+        const v = d.data() || {};
+        const fg = typeof v.foreground === "boolean" ? v.foreground : true;
+        if (!v?.token || !fg) return;
+        const uid = d.ref?.parent?.parent?.id;
+        if (!uid) return;
+        m.set(uid, (m.get(uid) || 0) + 1);
+      });
+    } catch {}
+
+    // pushTokens
+    try {
+      const s2 = await getDocs(
+        query(collectionGroup(db, "pushTokens"), where("active", "==", true))
+      );
+      s2.forEach((d) => {
+        const v = d.data() || {};
+        const fg = typeof v.foreground === "boolean" ? v.foreground : true;
+        if (!v?.token || !fg) return;
+        const uid = d.ref?.parent?.parent?.id;
+        if (!uid) return;
+        m.set(uid, (m.get(uid) || 0) + 1);
+      });
+    } catch {}
+
+    setTokenCounts(m);
+  }
+
+  /* ============ Quick count when target changes ============ */
+  useEffect(() => {
+    if (!target || target === "all") {
+      setTargetTokenCount(null);
+    } else {
+      setTargetTokenCount(tokenCounts.get(String(target)) || 0);
+    }
+  }, [target, tokenCounts]);
+
+  /* ============ Token preview for a specific user ============ */
   async function getActiveTokensForUserDoc(docId) {
     if (!docId) return [];
     setResolvingTokens(true);
@@ -143,29 +254,24 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
     try {
       // expoPushTokens
       try {
-        const q1 = query(
-          collection(db, "users", docId, "expoPushTokens"),
-          where("active", "==", true)
+        const s1 = await getDocs(
+          query(collection(db, "users", docId, "expoPushTokens"), where("active", "==", true))
         );
-        const s1 = await getDocs(q1);
         s1.forEach((d) => {
           const v = d.data() || {};
-          // foreground: treat missing as true (توافُق)
-          const fg = (typeof v.foreground === "boolean") ? v.foreground : true;
+          const fg = typeof v.foreground === "boolean" ? v.foreground : true;
           if (fg && v?.token) tokens.add(v.token);
         });
       } catch {}
 
-      // pushTokens (اختياري)
+      // pushTokens
       try {
-        const q2 = query(
-          collection(db, "users", docId, "pushTokens"),
-          where("active", "==", true)
+        const s2 = await getDocs(
+          query(collection(db, "users", docId, "pushTokens"), where("active", "==", true))
         );
-        const s2 = await getDocs(q2);
         s2.forEach((d) => {
           const v = d.data() || {};
-          const fg = (typeof v.foreground === "boolean") ? v.foreground : true;
+          const fg = typeof v.foreground === "boolean" ? v.foreground : true;
           if (fg && v?.token) tokens.add(v.token);
         });
       } catch {}
@@ -174,22 +280,6 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
     }
     return Array.from(tokens);
   }
-
-  /* ============ Resolve token count when target changes ============ */
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!target || target === "all") {
-        setTargetTokenCount(null);
-        return;
-      }
-      const toks = await getActiveTokensForUserDoc(String(target));
-      if (!cancelled) setTargetTokenCount(toks.length);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [target]);
 
   /* ============ Send notification (targetId only) ============ */
   async function sendNotification() {
@@ -231,6 +321,59 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
   }
 
   /* ============ Derived lists ============ */
+  const clientsMap = useMemo(() => {
+    const m = new Map();
+    clients.forEach((c) => m.set(String(c.userId), c));
+    return m;
+  }, [clients]);
+
+  // Inject live token counts into clients for sorting/display
+  const clientsWithTokens = useMemo(() => {
+    return clients.map((c) => ({
+      ...c,
+      __tokens: tokenCounts.get(String(c.userId)) || 0,
+    }));
+  }, [clients, tokenCounts]);
+
+  const filteredClients = useMemo(() => {
+    const s = clientSearch.trim().toLowerCase();
+
+    let list = clientsWithTokens.filter((c) => {
+      if (clientTypeTab !== "all" && (c.accountType || "") !== clientTypeTab) return false;
+      if (onlyWithTokens && (c.__tokens || 0) === 0) return false;
+      if (!s) return true;
+      const name = (c.name || c.displayName || "").toLowerCase();
+      const email = (c.email || "").toLowerCase();
+      const phone = String(c.phone || c.phoneE164 || "");
+      const customerId = (c.customerId || "").toLowerCase();
+      return (
+        (name && name.includes(s)) ||
+        (email && email.includes(s)) ||
+        (phone && phone.includes(s)) ||
+        (customerId && customerId.includes(s))
+      );
+    });
+
+    if (tokensFirst) {
+      list = list.sort((a, b) => {
+        const ta = a.__tokens || 0;
+        const tb = b.__tokens || 0;
+        if (tb !== ta) return tb - ta;
+        const na = (a.name || a.displayName || "").toLowerCase();
+        const nb = (b.name || b.displayName || "").toLowerCase();
+        return na.localeCompare(nb);
+      });
+    } else {
+      list = list.sort((a, b) => {
+        const na = (a.name || a.displayName || "").toLowerCase();
+        const nb = (b.name || b.displayName || "").toLowerCase();
+        return na.localeCompare(nb);
+      });
+    }
+
+    return list;
+  }, [clientsWithTokens, clientSearch, clientTypeTab, onlyWithTokens, tokensFirst]);
+
   const filteredNotifications = useMemo(() => {
     const search = notifSearch.trim().toLowerCase();
     return notifications.filter((n) => {
@@ -249,24 +392,6 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
     });
   }, [notifications, notifTypeFilter, notifSearch, clientsMap]);
 
-  const filteredClients = useMemo(() => {
-    const s = clientSearch.trim().toLowerCase();
-    return clients.filter((c) => {
-      if (clientTypeTab !== "all" && (c.accountType || "") !== clientTypeTab) return false;
-      if (!s) return true;
-      const name = (c.name || c.displayName || "").toLowerCase();
-      const email = (c.email || "").toLowerCase();
-      const phone = String(c.phone || c.phoneE164 || "");
-      const customerId = (c.customerId || "").toLowerCase();
-      return (
-        (name && name.includes(s)) ||
-        (email && email.includes(s)) ||
-        (phone && phone.includes(s)) ||
-        (customerId && customerId.includes(s))
-      );
-    });
-  }, [clients, clientSearch, clientTypeTab]);
-
   /* ============ UI ============ */
   return (
     <div className="max-w-7xl mx-auto py-6 px-4 text-sm text-slate-900">
@@ -282,7 +407,7 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        {/* LEFT: List (takes 2 cols) */}
+        {/* LEFT: List (2 cols) */}
         <div className="xl:col-span-2 space-y-4">
           {/* Toolbar */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-3 flex flex-wrap gap-3 items-center">
@@ -364,10 +489,8 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
                             ) : targetClient ? (
                               <div className="flex items-center gap-3">
                                 <div>
-                                  <div className="font-medium">
-                                    {targetClient.name || targetClient.displayName || targetClient.userId}
-                                  </div>
-                                  <div className="text-xs text-slate-500">#{targetClient.customerId || targetClient.userId}</div>
+                                  <div className="font-medium">{targetClient.name || targetClient.displayName || targetClient.userId}</div>
+                                  <div className="text-xs font-mono text-emerald-700">#{targetClient.customerId || targetClient.userId}</div>
                                 </div>
                                 <Badge intent="muted">{humanType(targetClient.accountType, lang)}</Badge>
                               </div>
@@ -465,7 +588,7 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
                     <div key={docId} className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-lg p-3">
                       <div className="text-sm">
                         <div className="font-medium">{c ? (c.name || c.displayName || docId) : docId}</div>
-                        <div className="text-xs text-slate-500">#{c?.customerId || docId}</div>
+                        <div className="text-xs font-mono text-emerald-700">#{c?.customerId || docId}</div>
                       </div>
                       <Badge intent="warn">{count}</Badge>
                     </div>
@@ -498,40 +621,59 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
               onChange={(e) => setMessage(e.target.value)}
             />
 
+            {/* Recipient */}
             <label className="block text-xs text-slate-600 mb-2">{isAr ? "المستلم" : "Recipient"}</label>
-            <div className="mb-2">
+
+            {/* Clients filters */}
+            <div className="flex items-center gap-3 mb-2">
+              <label className="inline-flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={onlyWithTokens}
+                  onChange={(e) => setOnlyWithTokens(e.target.checked)}
+                />
+                {isAr ? "اظهر فقط من لديه توكنات" : "Only clients with tokens"}
+              </label>
+              <label className="inline-flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={tokensFirst}
+                  onChange={(e) => setTokensFirst(e.target.checked)}
+                />
+                {isAr ? "رتّب التوكنات أولاً" : "Sort tokens first"}
+              </label>
+            </div>
+
+            <div className="mb-2 space-y-2">
+              <Tabs value={clientTypeTab} onChange={setClientTypeTab} isAr={isAr} />
               <input
                 value={clientSearch}
                 onChange={(e) => setClientSearch(e.target.value)}
-                className="w-full p-2 border border-slate-200 rounded-md mb-2"
+                className="w-full p-2 border border-slate-200 rounded-md"
                 placeholder={isAr ? "ابحث عن عميل..." : "Search client..."}
               />
-              <select
-                value={target}
-                onChange={async (e) => {
-                  const id = e.target.value;
-                  setTarget(id);
-                  if (id && id !== "all") {
-                    setResolvingTokens(true);
-                    const toks = await getActiveTokensForUserDoc(String(id));
-                    setTargetTokenCount(toks.length);
-                    setResolvingTokens(false);
-                  } else {
-                    setTargetTokenCount(null);
-                  }
-                }}
-                className="w-full p-2 rounded-md border border-slate-200"
-              >
-                <option value="all">{isAr ? "كل العملاء" : "All clients"}</option>
-                {filteredClients.slice(0, 300).map((cl) => (
-                  <option key={cl.userId} value={cl.userId}>
-                    {clientLabel(cl)}
-                  </option>
-                ))}
-              </select>
             </div>
 
-            <div className="flex items-center gap-2 mb-3">
+            {/* Custom selectable list (name + #customerId only with colors) */}
+            <div className="border rounded-lg p-2 max-h-64 overflow-auto space-y-2 bg-slate-50">
+              <button
+                className={`w-full text-left px-3 py-2 rounded-lg border ${target === "all" ? "border-emerald-500 bg-emerald-50" : "border-slate-200 bg-white hover:bg-slate-100"}`}
+                onClick={() => setTarget("all")}
+              >
+                <span className="font-semibold text-slate-800">{isAr ? "كل العملاء" : "All Clients"}</span>
+              </button>
+
+              {filteredClients.slice(0, 500).map((cl) => (
+                <ClientRow
+                  key={cl.userId}
+                  client={cl}
+                  active={target === cl.userId}
+                  onSelect={() => setTarget(cl.userId)}
+                />
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2 mt-3">
               <button
                 type="button"
                 onClick={async () => {
@@ -554,7 +696,7 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
               </div>
             </div>
 
-            <div className="flex gap-2 items-center mb-3">
+            <div className="flex gap-2 items-center mt-3">
               <select
                 value={priority}
                 onChange={(e) => setPriority(e.target.value)}
@@ -576,7 +718,7 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
             <button
               onClick={sendNotification}
               disabled={loading || !message.trim()}
-              className="w-full px-4 py-3 rounded-lg bg-emerald-600 text-white font-bold disabled:opacity-60"
+              className="w-full mt-3 px-4 py-3 rounded-lg bg-emerald-600 text-white font-bold disabled:opacity-60"
             >
               {loading ? (isAr ? "جارٍ الإرسال..." : "Sending...") : (isAr ? "إرسال إشعار" : "Send Notification")}
             </button>
