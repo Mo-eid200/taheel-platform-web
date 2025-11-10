@@ -16,7 +16,9 @@ import {
 } from "firebase/firestore";
 import { firestore as db } from "@/lib/firebase.client";
 
-/* ============ Helpers ============ */
+/* =========================
+   Helpers & Small UI Bits
+   ========================= */
 const DEFAULT_LANG = "ar";
 
 function formatDate(ts, lang = DEFAULT_LANG) {
@@ -55,7 +57,7 @@ function humanType(t, lang = DEFAULT_LANG) {
   return "-";
 }
 
-/* تبويب بسيط */
+/* Tabs */
 function Tabs({ value, onChange, isAr }) {
   const tabs = [
     { id: "all", label: isAr ? "الكل" : "All" },
@@ -71,8 +73,12 @@ function Tabs({ value, onChange, isAr }) {
           <button
             key={t.id}
             onClick={() => onChange(t.id)}
-            className={`px-3 py-1.5 rounded-full text-sm border transition
-              ${active ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"}`}
+            className={`cursor-pointer px-3 py-1.5 rounded-full text-sm transition duration-150 ease-in-out focus:outline-none ${
+              active
+                ? "bg-emerald-700 text-white shadow-md"
+                : "bg-white text-slate-700 border border-slate-200 hover:shadow-sm"
+            }`}
+            aria-pressed={active}
           >
             {t.label}
           </button>
@@ -82,7 +88,7 @@ function Tabs({ value, onChange, isAr }) {
   );
 }
 
-/* عنصر عميل لعرض اسم + رقم فقط بألوان (customerId) */
+/* Client row */
 function ClientRow({ client, active, onSelect }) {
   const name = client?.name || client?.displayName || "-";
   const cid = client?.__cid || client?.customerId || "-";
@@ -91,26 +97,34 @@ function ClientRow({ client, active, onSelect }) {
   return (
     <button
       onClick={onSelect}
-      className={`w-full text-left px-3 py-2 rounded-lg border flex items-center justify-between
-        ${active ? "border-emerald-500 bg-emerald-50" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+      className={`w-full text-left px-3 py-3 rounded-lg border flex items-center justify-between transition-all duration-150 ease-in-out
+        ${active ? "border-emerald-500 bg-emerald-50 shadow-md" : "border-slate-200 bg-white hover:shadow-sm hover:scale-[1.01]"}`}
+      aria-current={active ? "true" : "false"}
+      title={name + " • #" + cid}
     >
-      <div className="flex items-baseline gap-2">
-        <span className="font-semibold text-slate-800">{name}</span>
-        <span className="text-xs font-mono text-emerald-700">#{cid}</span>
+      <div>
+        <div className="flex items-baseline gap-2">
+          <span className="font-semibold text-slate-900 text-sm">{name}</span>
+          <span className="text-xs font-mono text-emerald-700">#{cid}</span>
+        </div>
+        <div className="text-xs text-slate-500 mt-1">{client.email ? client.email : toE164(client.phone || client.phoneE164) || "-"}</div>
       </div>
 
-      {tokens > 0 ? (
-        <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+      <div className="flex items-center gap-2">
+        <span className={`text-[12px] px-2 py-0.5 rounded-full ${tokens > 0 ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"}`}>
           {tokens}
         </span>
-      ) : (
-        <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">0</span>
-      )}
+        <svg className="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+          <path d="M7 7l5 3-5 3V7z" />
+        </svg>
+      </div>
     </button>
   );
 }
 
-/* ============ Component ============ */
+/* =========================
+   Main Component
+   ========================= */
 export default function NotificationsSection({ lang = DEFAULT_LANG }) {
   const isAr = lang === "ar";
 
@@ -118,20 +132,20 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
   const [notifications, setNotifications] = useState([]);
   const [clients, setClients] = useState([]);
 
-  // Compose state
+  // Compose
   const [message, setMessage] = useState("");
-  const [target, setTarget] = useState("all"); // <-- will hold customerId | "all"
+  const [target, setTarget] = useState("all"); // customerId | "all"
   const [scheduleAt, setScheduleAt] = useState("");
   const [priority, setPriority] = useState("high");
   const [loading, setLoading] = useState(false);
 
-  // Filters
-  const [notifTypeFilter, setNotifTypeFilter] = useState("all"); // all | general | custom
+  // Filters & UI
+  const [notifTypeFilter, setNotifTypeFilter] = useState("all");
   const [notifSearch, setNotifSearch] = useState("");
-
-  // Clients filtering
   const [clientSearch, setClientSearch] = useState("");
-  const [clientTypeTab, setClientTypeTab] = useState("all"); // all | resident | nonresident | company
+  const [clientTypeTab, setClientTypeTab] = useState("all");
+  const [onlyWithTokens, setOnlyWithTokens] = useState(false);
+  const [tokensFirst, setTokensFirst] = useState(true);
 
   // Token UX
   const [targetTokenCount, setTargetTokenCount] = useState(null);
@@ -139,19 +153,12 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
   const [tokenPreviewOpen, setTokenPreviewOpen] = useState(false);
   const [tokenPreviewList, setTokenPreviewList] = useState([]);
 
-  // Pending count per user (keyed by customerId)
+  // Live counts
+  const [tokenCounts, setTokenCounts] = useState(new Map());
   const [pendingMap, setPendingMap] = useState(new Map());
 
-  // Active tokens per user (keyed by customerId)
-  const [tokenCounts, setTokenCounts] = useState(new Map());
-
-  // Extra filters
-  const [onlyWithTokens, setOnlyWithTokens] = useState(false);
-  const [tokensFirst, setTokensFirst] = useState(true);
-
-  /* ============ Subscriptions ============ */
+  /* Subscriptions */
   useEffect(() => {
-    // Notifications list
     const qNotifs = query(collection(db, "notifications"), orderBy("timestamp", "desc"), limit(500));
     const unsubNotifs = onSnapshot(qNotifs, (snap) => {
       const list = [];
@@ -159,28 +166,26 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
       setNotifications(list);
     });
 
-    // Clients list (احرص إن users/{docId} هو customerId)
     const unsubClients = onSnapshot(collection(db, "users"), (snap) => {
       const list = [];
       snap.forEach((d) => {
         const data = d.data() || {};
-        const cid = data.customerId || d.id; // <-- الحاسم
+        const cid = data.customerId || d.id;
         list.push({
-          userId: d.id,          // doc id (قد يساوي customerId)
+          userId: d.id,
           customerId: data.customerId || "",
-          __cid: cid,            // المفتاح المعتمد
+          __cid: cid,
           ...data,
         });
       });
       setClients(list);
     });
 
-    // Pending per user (group) keyed by users/{docId} === customerId
     const qPending = query(collectionGroup(db, "pendingNotifications"), orderBy("createdAt", "desc"));
     const unsubPending = onSnapshot(qPending, (snap) => {
       const m = new Map();
       snap.forEach((d) => {
-        const userDoc = d.ref?.parent?.parent; // users/{docId}
+        const userDoc = d.ref?.parent?.parent;
         const cid = userDoc?.id;
         if (!cid) return;
         m.set(cid, (m.get(cid) || 0) + 1);
@@ -188,16 +193,14 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
       setPendingMap(m);
     });
 
-    // Token listeners (expo + web/app push)
+    // token watchers - rebuild counts when tokens change
     const expoQ = query(collectionGroup(db, "expoPushTokens"), where("active", "==", true));
-    const unsubExpo = onSnapshot(expoQ, () => {
-      rebuildAllTokenCounts();
-    });
-
+    const unsubExpo = onSnapshot(expoQ, () => rebuildAllTokenCounts());
     const pushQ = query(collectionGroup(db, "pushTokens"), where("active", "==", true));
-    const unsubPush = onSnapshot(pushQ, () => {
-      rebuildAllTokenCounts();
-    });
+    const unsubPush = onSnapshot(pushQ, () => rebuildAllTokenCounts());
+
+    // initial build
+    rebuildAllTokenCounts();
 
     return () => {
       unsubNotifs();
@@ -209,75 +212,61 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Centralized recount of active tokens per customerId
+  /* Rebuild token counts (collectionGroup) */
   async function rebuildAllTokenCounts() {
     const m = new Map();
 
-    // expoPushTokens
     try {
-      const s1 = await getDocs(
-        query(collectionGroup(db, "expoPushTokens"), where("active", "==", true))
-      );
+      const s1 = await getDocs(query(collectionGroup(db, "expoPushTokens"), where("active", "==", true)));
       s1.forEach((d) => {
         const v = d.data() || {};
         const fg = typeof v.foreground === "boolean" ? v.foreground : true;
         if (!v?.token || !fg) return;
-        const cid = d.ref?.parent?.parent?.id; // users/{customerId}/expoPushTokens
+        const cid = d.ref?.parent?.parent?.id;
         if (!cid) return;
         m.set(cid, (m.get(cid) || 0) + 1);
       });
-    } catch {}
+    } catch (e) {
+      // ignore silently
+    }
 
-    // pushTokens
     try {
-      const s2 = await getDocs(
-        query(collectionGroup(db, "pushTokens"), where("active", "==", true))
-      );
+      const s2 = await getDocs(query(collectionGroup(db, "pushTokens"), where("active", "==", true)));
       s2.forEach((d) => {
         const v = d.data() || {};
         const fg = typeof v.foreground === "boolean" ? v.foreground : true;
         if (!v?.token || !fg) return;
-        const cid = d.ref?.parent?.parent?.id; // users/{customerId}/pushTokens
+        const cid = d.ref?.parent?.parent?.id;
         if (!cid) return;
         m.set(cid, (m.get(cid) || 0) + 1);
       });
-    } catch {}
+    } catch (e) {}
 
     setTokenCounts(m);
   }
 
-  /* ============ Quick count when target changes ============ */
+  /* Quick token count for selected target */
   useEffect(() => {
-    if (!target || target === "all") {
-      setTargetTokenCount(null);
-    } else {
-      setTargetTokenCount(tokenCounts.get(String(target)) || 0);
-    }
+    if (!target || target === "all") setTargetTokenCount(null);
+    else setTargetTokenCount(tokenCounts.get(String(target)) || 0);
   }, [target, tokenCounts]);
 
-  /* ============ Token preview for a specific customerId ============ */
+  /* Preview tokens for a given customerId */
   async function getActiveTokensForUserDoc(customerId) {
     if (!customerId) return [];
     setResolvingTokens(true);
     const tokens = new Set();
     try {
-      // expoPushTokens
       try {
-        const s1 = await getDocs(
-          query(collection(db, "users", customerId, "expoPushTokens"), where("active", "==", true))
-        );
+        const s1 = await getDocs(query(collection(db, "users", customerId, "expoPushTokens"), where("active", "==", true)));
         s1.forEach((d) => {
           const v = d.data() || {};
           const fg = typeof v.foreground === "boolean" ? v.foreground : true;
           if (fg && v?.token) tokens.add(v.token);
         });
       } catch {}
-
-      // pushTokens
       try {
-        const s2 = await getDocs(
-          query(collection(db, "users", customerId, "pushTokens"), where("active", "==", true))
-        );
+        const s2 = await getDocs(query(collection(db, "users", customerId, "pushTokens"), where("active", "==", true)));
         s2.forEach((d) => {
           const v = d.data() || {};
           const fg = typeof v.foreground === "boolean" ? v.foreground : true;
@@ -290,7 +279,7 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
     return Array.from(tokens);
   }
 
-  /* ============ Send notification (target by customerId) ============ */
+  /* Send notification (uses customerId as targetId) */
   async function sendNotification() {
     if (!message.trim()) {
       alert(isAr ? "من فضلك اكتب نص الإشعار." : "Please write a message.");
@@ -298,17 +287,14 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
     }
     setLoading(true);
     try {
-      const pushAtValue = scheduleAt
-        ? Timestamp.fromDate(new Date(scheduleAt))
-        : Timestamp.fromDate(new Date());
+      const pushAtValue = scheduleAt ? Timestamp.fromDate(new Date(scheduleAt)) : Timestamp.fromDate(new Date());
 
-      // لو target === "all" هيعمل بث عام، غير كدة بنرسل على customerId
       await addDoc(collection(db, "notifications"), {
         title: isAr ? "إشعار جديد" : "New Notification",
         body: message.trim(),
         data: {},
         priority,
-        targetId: target === "all" ? "all" : String(target), // <-- customerId here
+        targetId: target === "all" ? "all" : String(target),
         type: target === "all" ? "general" : "custom",
         timestamp: serverTimestamp(),
         pushAt: pushAtValue,
@@ -318,6 +304,7 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
         lastError: null,
       });
 
+      // UX reset
       setMessage("");
       setTarget("all");
       setScheduleAt("");
@@ -333,7 +320,7 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
     }
   }
 
-  /* ============ Derived lists keyed by customerId ============ */
+  /* Derived / filtered lists */
   const clientsMap = useMemo(() => {
     const m = new Map();
     clients.forEach((c) => {
@@ -341,22 +328,17 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
       if (cid) m.set(String(cid), c);
     });
     return m;
-  }, [clients]);
+  }, [clients, tokenCounts]);
 
-  // Inject live token counts into clients for sorting/display (by customerId)
   const clientsWithTokens = useMemo(() => {
     return clients.map((c) => {
       const cid = c.__cid || c.customerId || c.userId;
-      return {
-        ...c,
-        __tokens: tokenCounts.get(String(cid)) || 0,
-      };
+      return { ...c, __tokens: tokenCounts.get(String(cid)) || 0 };
     });
   }, [clients, tokenCounts]);
 
   const filteredClients = useMemo(() => {
     const s = clientSearch.trim().toLowerCase();
-
     let list = clientsWithTokens.filter((c) => {
       if (clientTypeTab !== "all" && (c.accountType || "") !== clientTypeTab) return false;
       if (onlyWithTokens && (c.__tokens || 0) === 0) return false;
@@ -365,12 +347,7 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
       const email = (c.email || "").toLowerCase();
       const phone = String(c.phone || c.phoneE164 || "");
       const customerId = (c.__cid || c.customerId || "").toLowerCase();
-      return (
-        (name && name.includes(s)) ||
-        (email && email.includes(s)) ||
-        (phone && phone.includes(s)) ||
-        (customerId && customerId.includes(s))
-      );
+      return (name && name.includes(s)) || (email && email.includes(s)) || phone.includes(s) || customerId.includes(s);
     });
 
     if (tokensFirst) {
@@ -402,79 +379,208 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
       const name = (client?.name || client?.displayName || "").toLowerCase();
       const phone = String(client?.phone || client?.phoneE164 || "");
       const cid = (client?.__cid || client?.customerId || "").toLowerCase();
-      return (
-        (n.body || "").toLowerCase().includes(search) ||
-        name.includes(search) ||
-        phone.includes(search) ||
-        cid.includes(search)
-      );
+      return (n.body || "").toLowerCase().includes(search) || name.includes(search) || phone.includes(search) || cid.includes(search);
     });
   }, [notifications, notifTypeFilter, notifSearch, clientsMap]);
 
-  /* ============ UI ============ */
+  /* ============================
+     Render - professional, clean UI
+     - pointer cursors on interactive elements
+     - clear, consistent colors & spacing
+  ============================ */
   return (
-    <div className="max-w-7xl mx-auto py-6 px-4 text-sm text-slate-900">
-      <div className="flex items-center justify-between mb-4">
+    <div className="max-w-7xl mx-auto py-8 px-6 text-sm text-slate-900">
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-2xl font-extrabold">{isAr ? "لوحة الإشعارات" : "Notifications"}</h2>
-          <p className="text-slate-500 mt-1">
+          <h1 className="text-3xl font-extrabold tracking-tight">{isAr ? "لوحة الإشعارات" : "Notifications"}</h1>
+          <p className="text-slate-500 mt-1 max-w-xl">
             {isAr
-              ? "أرسل إشعارات عامة أو موجهة لعملائك. الإرسال هنا يعتمد على رقم العميل (Customer ID)."
-              : "Send broadcast or targeted notifications. Targeting uses Customer ID."}
+              ? "أرسل إشعارات عامة أو موجهة للعملاء (بـ Customer ID). معاينة التوكنات الحيّة وإدارة الجداول."
+              : "Broadcast or target notifications to customers using Customer ID. Preview live tokens and manage scheduling."}
           </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="text-xs text-slate-600">
+            {isAr ? "الإجمالي" : "Total"}: <span className="font-semibold text-slate-900">{notifications.length}</span>
+          </div>
+          <button
+            onClick={() => {
+              // quick UI action - clear filters
+              setNotifTypeFilter("all");
+              setNotifSearch("");
+              setClientSearch("");
+              setClientTypeTab("all");
+            }}
+            className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-md shadow-sm hover:shadow-md transition text-sm"
+            title={isAr ? "إعادة ضبط الفلاتر" : "Reset filters"}
+          >
+            <svg className="w-4 h-4 text-slate-600" viewBox="0 0 20 20" fill="currentColor"><path d="M10 3v2a5 5 0 108 4h2A7 7 0 1110 3z"/></svg>
+            <span className="text-slate-700">{isAr ? "إعادة ضبط" : "Reset"}</span>
+          </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        {/* LEFT: List (2 cols) */}
-        <div className="xl:col-span-2 space-y-4">
-          {/* Toolbar */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-3 flex flex-wrap gap-3 items-center">
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-slate-600">{isAr ? "نوع:" : "Type:"}</label>
-              <select
-                value={notifTypeFilter}
-                onChange={(e) => setNotifTypeFilter(e.target.value)}
-                className="p-2 border border-slate-200 rounded-md"
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Compose (left column - prominent) */}
+        <aside className="lg:col-span-1">
+          <div className="sticky top-6 bg-white rounded-2xl shadow-lg border border-slate-200 p-5">
+            <div className="flex items-start justify-between mb-3">
+              <div>
+                <h2 className="text-lg font-bold">{isAr ? "إنشاء إشعار" : "Compose Notification"}</h2>
+                <p className="text-xs text-slate-500 mt-1">{isAr ? "اكتب الرسالة واختر المستلم." : "Write message & choose recipient."}</p>
+              </div>
+              <div>
+                <Badge intent="muted">{priority === "high" ? (isAr ? "عالية" : "High") : (isAr ? "عادية" : "Normal")}</Badge>
+              </div>
+            </div>
+
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder={isAr ? "اكتب نص الإشعار..." : "Write notification message..."}
+              className="w-full p-3 rounded-lg border border-slate-200 text-sm resize-none min-h-[140px] focus:outline-none focus:ring-2 focus:ring-emerald-200"
+            />
+
+            <div className="mt-3 space-y-3">
+              <label className="block text-xs text-slate-600">{isAr ? "المستلم" : "Recipient"}</label>
+
+              <div className="flex gap-2 items-center">
+                <button
+                  onClick={() => setTarget("all")}
+                  className={`cursor-pointer px-3 py-2 rounded-lg text-sm font-medium flex-1 text-center ${target === "all" ? "bg-emerald-700 text-white shadow-md" : "bg-white border border-slate-200 hover:shadow-sm"}`}
+                >
+                  {isAr ? "كل العملاء" : "All Clients"}
+                </button>
+                <div className="w-1/2">
+                  <input
+                    value={clientSearch}
+                    onChange={(e) => setClientSearch(e.target.value)}
+                    placeholder={isAr ? "ابحث عن عميل..." : "Search client..."}
+                    className="w-full p-2 rounded-lg border border-slate-200 text-sm focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Tabs value={clientTypeTab} onChange={setClientTypeTab} isAr={isAr} />
+              </div>
+
+              <div className="flex items-center gap-2 justify-between">
+                <label className="inline-flex items-center gap-2 text-xs text-slate-600">
+                  <input type="checkbox" checked={onlyWithTokens} onChange={(e) => setOnlyWithTokens(e.target.checked)} className="cursor-pointer" />
+                  {isAr ? "اظهر فقط من لديه توكنات" : "Only clients with tokens"}
+                </label>
+
+                <label className="inline-flex items-center gap-2 text-xs text-slate-600">
+                  <input type="checkbox" checked={tokensFirst} onChange={(e) => setTokensFirst(e.target.checked)} className="cursor-pointer" />
+                  {isAr ? "رتّب التوكنات أولاً" : "Sort tokens first"}
+                </label>
+              </div>
+
+              <div className="max-h-56 overflow-auto border rounded-lg p-2 bg-slate-50 space-y-2">
+                {filteredClients.slice(0, 200).map((cl) => (
+                  <ClientRow
+                    key={cl.__cid}
+                    client={cl}
+                    active={target === cl.__cid}
+                    onSelect={() => setTarget(cl.__cid)}
+                  />
+                ))}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={async () => {
+                    if (!target || target === "all") return;
+                    setResolvingTokens(true);
+                    const toks = await getActiveTokensForUserDoc(String(target));
+                    setTokenPreviewList(toks);
+                    setTokenPreviewOpen(true);
+                    setResolvingTokens(false);
+                  }}
+                  disabled={!target || target === "all" || resolvingTokens}
+                  className="cursor-pointer px-4 py-2 rounded-lg bg-white border border-slate-200 text-sm hover:shadow-sm transition flex-1"
+                >
+                  {resolvingTokens ? (isAr ? "جاري التحضير..." : "Preparing...") : (isAr ? "عرض التوكنات" : "View tokens")}
+                </button>
+
+                <div className="ml-auto text-xs text-slate-600">
+                  {isAr ? "توكنات نشطة:" : "Active tokens:"} <strong>{targetTokenCount === null ? "—" : targetTokenCount}</strong>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 mt-2">
+                <select value={priority} onChange={(e) => setPriority(e.target.value)} className="p-2 rounded-lg border border-slate-200 text-sm">
+                  <option value="high">{isAr ? "عالية" : "High"}</option>
+                  <option value="normal">{isAr ? "عادية" : "Normal"}</option>
+                </select>
+
+                <input
+                  type="datetime-local"
+                  value={scheduleAt}
+                  onChange={(e) => setScheduleAt(e.target.value)}
+                  className="p-2 rounded-lg border border-slate-200 text-sm ml-auto"
+                  title={isAr ? "موعد الإرسال" : "Schedule send time"}
+                />
+              </div>
+
+              <button
+                onClick={sendNotification}
+                disabled={loading || !message.trim()}
+                className="cursor-pointer w-full py-3 rounded-xl text-white font-bold text-sm bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-700 hover:to-emerald-600 shadow-lg transition disabled:opacity-60"
               >
-                <option value="all">{isAr ? "الكل" : "All"}</option>
-                <option value="general">{isAr ? "عام" : "General"}</option>
-                <option value="custom">{isAr ? "مخصص" : "Custom"}</option>
-              </select>
-            </div>
-
-            <div className="flex-1 min-w-[200px]">
-              <input
-                value={notifSearch}
-                onChange={(e) => setNotifSearch(e.target.value)}
-                className="w-full p-2 border border-slate-200 rounded-md"
-                placeholder={isAr ? "بحث في الإشعارات..." : "Search notifications..."}
-              />
-            </div>
-
-            <div className="text-xs text-slate-500">
-              {isAr ? "إجمالي:" : "Total:"} <strong>{notifications.length}</strong>
+                {loading ? (isAr ? "جارٍ الإرسال..." : "Sending...") : (isAr ? "إرسال إشعار" : "Send Notification")}
+              </button>
             </div>
           </div>
+        </aside>
 
-          {/* List */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
+        {/* Main list (right - wide) */}
+        <main className="lg:col-span-2 space-y-6">
+          <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-4">
+            <div className="flex items-center justify-between mb-4 gap-4">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <select
+                  value={notifTypeFilter}
+                  onChange={(e) => setNotifTypeFilter(e.target.value)}
+                  className="p-2 rounded-lg border border-slate-200 text-sm"
+                >
+                  <option value="all">{isAr ? "الكل" : "All"}</option>
+                  <option value="general">{isAr ? "عام" : "General"}</option>
+                  <option value="custom">{isAr ? "مخصص" : "Custom"}</option>
+                </select>
+
+                <input
+                  value={notifSearch}
+                  onChange={(e) => setNotifSearch(e.target.value)}
+                  placeholder={isAr ? "بحث في الإشعارات..." : "Search notifications..."}
+                  className="w-full p-2 rounded-lg border border-slate-200 text-sm focus:outline-none"
+                />
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="text-xs text-slate-600">{isAr ? "العرض" : "Showing"}: <strong>{filteredNotifications.length}</strong></div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-md">
+              <table className="w-full text-left table-fixed">
                 <thead className="bg-emerald-50 text-emerald-900">
                   <tr>
-                    <th className="py-2 px-3 font-semibold">{isAr ? "النص" : "Message"}</th>
-                    <th className="py-2 px-3 font-semibold">{isAr ? "النوع" : "Type"}</th>
-                    <th className="py-2 px-3 font-semibold">{isAr ? "الحالة" : "Status"}</th>
-                    <th className="py-2 px-3 font-semibold">{isAr ? "إلى" : "To"}</th>
-                    <th className="py-2 px-3 font-semibold">{isAr ? "التواريخ" : "Dates"}</th>
-                    <th className="py-2 px-3 font-semibold">{isAr ? "إجراءات" : "Actions"}</th>
+                    <th className="py-3 px-4 font-semibold w-1/3"> {isAr ? "النص" : "Message"} </th>
+                    <th className="py-3 px-4 font-semibold"> {isAr ? "النوع" : "Type"} </th>
+                    <th className="py-3 px-4 font-semibold"> {isAr ? "الحالة" : "Status"} </th>
+                    <th className="py-3 px-4 font-semibold"> {isAr ? "إلى" : "To"} </th>
+                    <th className="py-3 px-4 font-semibold"> {isAr ? "التواريخ" : "Dates"} </th>
+                    <th className="py-3 px-4 font-semibold"> {isAr ? "إجراءات" : "Actions"} </th>
                   </tr>
                 </thead>
+
                 <tbody>
                   {filteredNotifications.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-6 text-slate-400 text-center">
+                      <td colSpan={6} className="py-8 text-center text-slate-400">
                         {isAr ? "لا يوجد إشعارات" : "No notifications"}
                       </td>
                     </tr>
@@ -482,66 +588,46 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
                     filteredNotifications.map((n) => {
                       const targetClient = n.targetId && n.targetId !== "all" ? clientsMap.get(n.targetId) : null;
                       return (
-                        <tr key={n.id} className="border-b last:border-b-0 hover:bg-emerald-50/20">
-                          <td className="py-3 px-3 max-w-[520px] break-words">{n.body}</td>
-
-                          <td className="py-3 px-3">
+                        <tr key={n.id} className="hover:bg-emerald-50/30 transition">
+                          <td className="py-3 px-4 align-top max-w-[420px] break-words text-slate-800">{n.body}</td>
+                          <td className="py-3 px-4 align-top">
                             <Badge intent={n.type === "general" ? "success" : "default"}>
                               {n.type === "general" ? (isAr ? "عام" : "General") : (isAr ? "مخصص" : "Custom")}
                             </Badge>
                           </td>
-
-                          <td className="py-3 px-3">
+                          <td className="py-3 px-4 align-top">
                             {n.status === "sent" && <Badge intent="success">{isAr ? "مرسل" : "sent"}</Badge>}
                             {n.status === "queued" && <Badge intent="warn">{isAr ? "قيد الانتظار" : "queued"}</Badge>}
-                            {n.status === "queued_for_user" && <Badge intent="warn">{isAr ? "معلّق للمستخدم" : "queued_for_user"}</Badge>}
-                            {n.status === "scheduled" && <Badge intent="muted">{isAr ? "مجدول" : "scheduled"}</Badge>}
                             {n.status === "sending" && <Badge intent="muted">{isAr ? "جاري الإرسال" : "sending"}</Badge>}
-                            {n.status === "no_response" && <Badge intent="muted">{isAr ? "لا استجابة" : "no_response"}</Badge>}
                             {n.status === "failed" && <Badge intent="error">{isAr ? "فشل" : "failed"}</Badge>}
                             {!n.status && <Badge>—</Badge>}
                           </td>
-
-                          <td className="py-3 px-3">
+                          <td className="py-3 px-4 align-top">
                             {n.targetId === "all" ? (
                               <div className="font-medium">{isAr ? "كل العملاء" : "All Clients"}</div>
                             ) : targetClient ? (
-                              <div className="flex items-center gap-3">
-                                <div>
-                                  <div className="font-medium">{targetClient.name || targetClient.displayName || targetClient.__cid}</div>
-                                  <div className="text-xs font-mono text-emerald-700">#{targetClient.__cid}</div>
-                                </div>
-                                <Badge intent="muted">{humanType(targetClient.accountType, lang)}</Badge>
+                              <div>
+                                <div className="font-medium">{targetClient.name || targetClient.displayName || targetClient.__cid}</div>
+                                <div className="text-xs font-mono text-emerald-700">#{targetClient.__cid}</div>
                               </div>
                             ) : (
                               <div className="text-xs">{n.targetId}</div>
                             )}
                           </td>
-
-                          <td className="py-3 px-3 text-slate-600 text-xs whitespace-nowrap">
+                          <td className="py-3 px-4 text-xs text-slate-500 align-top whitespace-nowrap">
                             <div>{formatDate(n.timestamp, lang)}</div>
-                            {n.pushAt && (
-                              <div className="text-[11px] text-slate-400 mt-1">
-                                {isAr ? "مجدول: " : "Scheduled: "} {formatDate(n.pushAt, lang)}
-                              </div>
-                            )}
-                            {n.sentAt && (
-                              <div className="text-[11px] text-slate-400 mt-1">
-                                {isAr ? "أُرسل: " : "Sent: "} {formatDate(n.sentAt, lang)}
-                              </div>
-                            )}
+                            {n.pushAt && <div className="mt-1">{isAr ? "مجدول: " : "Scheduled: "}{formatDate(n.pushAt, lang)}</div>}
+                            {n.sentAt && <div className="mt-1">{isAr ? "أُرسل: " : "Sent: "}{formatDate(n.sentAt, lang)}</div>}
                           </td>
-
-                          <td className="py-3 px-3">
-                            <div className="flex flex-wrap gap-2">
+                          <td className="py-3 px-4 align-top">
+                            <div className="flex flex-col sm:flex-row gap-2">
                               <button
-                                className="px-2 py-1 text-xs rounded border"
                                 onClick={async () => {
                                   await addDoc(collection(db, "notifications"), {
                                     title: n.title,
                                     body: n.body,
                                     data: n.data || {},
-                                    targetId: n.targetId || "all", // يفضل إبقاءه كما هو (customerId)
+                                    targetId: n.targetId || "all",
                                     priority: n.priority || "high",
                                     timestamp: serverTimestamp(),
                                     pushAt: Timestamp.fromDate(new Date()),
@@ -553,34 +639,34 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
                                   });
                                   alert(isAr ? "تم إنشاء إعادة إرسال." : "Re-send enqueued.");
                                 }}
+                                className="cursor-pointer px-3 py-2 rounded-md bg-white border border-slate-200 hover:shadow-sm text-sm"
                               >
                                 {isAr ? "إعادة إرسال" : "Re-send"}
                               </button>
 
-                              {n.pushAt && (
-                                <button
-                                  className="px-2 py-1 text-xs rounded border"
-                                  onClick={async () => {
-                                    await addDoc(collection(db, "notifications"), {
-                                      title: n.title,
-                                      body: n.body,
-                                      data: n.data || {},
-                                      targetId: n.targetId || "all",
-                                      priority: n.priority || "high",
-                                      timestamp: serverTimestamp(),
-                                      pushAt: Timestamp.fromDate(new Date()),
-                                      type: n.type || (n.targetId === "all" ? "general" : "custom"),
-                                      status: "queued",
-                                      pushed: false,
-                                      attempts: 0,
-                                      lastError: null,
-                                    });
-                                    alert(isAr ? "تم إلغاء الجدولة بإنشاء نسخة فورية." : "Schedule canceled via clone.");
-                                  }}
-                                >
-                                  {isAr ? "إلغاء الجدولة" : "Cancel schedule"}
-                                </button>
-                              )}
+                              <button
+                                onClick={async () => {
+                                  if (!n.id) return;
+                                  await addDoc(collection(db, "notifications"), {
+                                    title: n.title,
+                                    body: n.body,
+                                    data: n.data || {},
+                                    targetId: n.targetId || "all",
+                                    priority: n.priority || "high",
+                                    timestamp: serverTimestamp(),
+                                    pushAt: Timestamp.fromDate(new Date()),
+                                    type: n.type || (n.targetId === "all" ? "general" : "custom"),
+                                    status: "queued",
+                                    pushed: false,
+                                    attempts: 0,
+                                    lastError: null,
+                                  });
+                                  alert(isAr ? "تم إلغاء الجدولة بإنشاء نسخة فورية." : "Schedule canceled via clone.");
+                                }}
+                                className="cursor-pointer px-3 py-2 rounded-md bg-white border border-slate-200 hover:shadow-sm text-sm"
+                              >
+                                {isAr ? "نسخ فوري" : "Clone (now)"}
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -592,182 +678,68 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
             </div>
           </div>
 
-          {/* Pending widget */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
-            <h4 className="font-bold mb-2">{isAr ? "الإشعارات المعلّقة" : "Pending notifications"}</h4>
-            {pendingMap.size === 0 ? (
-              <div className="text-sm text-slate-500">
-                {isAr ? "لا يوجد إشعارات معلّقة." : "No pending notifications."}
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                {Array.from(pendingMap.entries()).map(([cid, count]) => {
-                  const c = clientsMap.get(cid);
-                  return (
-                    <div key={cid} className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-                      <div className="text-sm">
-                        <div className="font-medium">{c ? (c.name || c.displayName || cid) : cid}</div>
-                        <div className="text-xs font-mono text-emerald-700">#{c?.__cid || cid}</div>
+          {/* Pending & Summary */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="col-span-2 bg-white rounded-2xl shadow-lg border border-slate-200 p-4">
+              <h3 className="font-bold mb-3">{isAr ? "الإشعارات المعلّقة حسب العميل" : "Pending by customer"}</h3>
+              {pendingMap.size === 0 ? (
+                <div className="text-slate-500">{isAr ? "لا يوجد إشعارات معلّقة." : "No pending notifications."}</div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {Array.from(pendingMap.entries()).map(([cid, count]) => {
+                    const c = clientsMap.get(cid);
+                    return (
+                      <div key={cid} className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                        <div>
+                          <div className="font-medium">{c ? (c.name || c.displayName || cid) : cid}</div>
+                          <div className="text-xs font-mono text-emerald-700 mt-1">#{c?.__cid || cid}</div>
+                        </div>
+                        <Badge intent="warn">{count}</Badge>
                       </div>
-                      <Badge intent="warn">{count}</Badge>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="col-span-1 bg-white rounded-2xl shadow-lg border border-slate-200 p-4">
+              <h3 className="font-bold mb-3">{isAr ? "ملخص سريع" : "Quick summary"}</h3>
+              <div className="space-y-2 text-sm text-slate-700">
+                <div className="flex justify-between">
+                  <span>{isAr ? "عملاء مسجلين" : "Clients"}</span>
+                  <span className="font-semibold">{clients.length}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>{isAr ? "إجمالي توكنات نشطة" : "Total active tokens"}</span>
+                  <span className="font-semibold">{Array.from(tokenCounts.values()).reduce((a, b) => a + b, 0)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>{isAr ? "إشعارات في الطابور" : "Notifications queued"}</span>
+                  <span className="font-semibold">{notifications.filter((n) => n.status === "queued").length}</span>
+                </div>
               </div>
-            )}
+            </div>
           </div>
-        </div>
-
-        {/* RIGHT: Compose (sticky) */}
-        <div className="xl:col-span-1">
-          <div className="xl:sticky xl:top-6 bg-white rounded-xl shadow-sm border border-slate-200 p-4">
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <h3 className="font-bold text-lg">{isAr ? "إنشاء إشعار" : "Compose"}</h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  {isAr ? "اكتب الرسالة واختر المستلم." : "Write message & choose recipient."}
-                </p>
-              </div>
-              <Badge intent="muted">
-                {priority === "high" ? (isAr ? "عالية" : "High") : (isAr ? "عادية" : "Normal")}
-              </Badge>
-            </div>
-
-            <textarea
-              className="w-full min-h-[110px] p-3 rounded-md border border-slate-200 text-sm mb-3 resize-none focus:outline-none focus:ring-2 focus:ring-emerald-200"
-              placeholder={isAr ? "اكتب نص الإشعار..." : "Write notification message..."}
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-            />
-
-            {/* Recipient */}
-            <label className="block text-xs text-slate-600 mb-2">{isAr ? "المستلم" : "Recipient"}</label>
-
-            {/* Clients filters */}
-            <div className="flex items-center gap-3 mb-2">
-              <label className="inline-flex items-center gap-2 text-xs">
-                <input
-                  type="checkbox"
-                  checked={onlyWithTokens}
-                  onChange={(e) => setOnlyWithTokens(e.target.checked)}
-                />
-                {isAr ? "اظهر فقط من لديه توكنات" : "Only clients with tokens"}
-              </label>
-              <label className="inline-flex items-center gap-2 text-xs">
-                <input
-                  type="checkbox"
-                  checked={tokensFirst}
-                  onChange={(e) => setTokensFirst(e.target.checked)}
-                />
-                {isAr ? "رتّب التوكنات أولاً" : "Sort tokens first"}
-              </label>
-            </div>
-
-            <div className="mb-2 space-y-2">
-              <Tabs value={clientTypeTab} onChange={setClientTypeTab} isAr={isAr} />
-              <input
-                value={clientSearch}
-                onChange={(e) => setClientSearch(e.target.value)}
-                className="w-full p-2 border border-slate-200 rounded-md"
-                placeholder={isAr ? "ابحث عن عميل (بالاسم/البريد/الهاتف/CustomerID)..." : "Search client (name/email/phone/CustomerID)..."}
-              />
-            </div>
-
-            {/* Custom selectable list keyed by customerId */}
-            <div className="border rounded-lg p-2 max-h-64 overflow-auto space-y-2 bg-slate-50">
-              <button
-                className={`w-full text-left px-3 py-2 rounded-lg border ${target === "all" ? "border-emerald-500 bg-emerald-50" : "border-slate-200 bg-white hover:bg-slate-100"}`}
-                onClick={() => setTarget("all")}
-              >
-                <span className="font-semibold text-slate-800">{isAr ? "كل العملاء" : "All Clients"}</span>
-              </button>
-
-              {filteredClients.slice(0, 500).map((cl) => (
-                <ClientRow
-                  key={cl.__cid}
-                  client={cl}
-                  active={target === cl.__cid}
-                  onSelect={() => setTarget(cl.__cid)}
-                />
-              ))}
-            </div>
-
-            <div className="flex items-center gap-2 mt-3">
-              <button
-                type="button"
-                onClick={async () => {
-                  if (!target || target === "all") return;
-                  setResolvingTokens(true);
-                  const toks = await getActiveTokensForUserDoc(String(target)); // customerId
-                  setTokenPreviewList(toks);
-                  setTokenPreviewOpen(true);
-                  setResolvingTokens(false);
-                }}
-                disabled={!target || target === "all" || resolvingTokens}
-                className="px-3 py-2 rounded-md bg-emerald-600 text-white font-semibold text-sm disabled:opacity-60"
-              >
-                {resolvingTokens ? (isAr ? "جاري التحضير..." : "Preparing...") : (isAr ? "عرض التوكنات" : "View tokens")}
-              </button>
-
-              <div className="ml-auto text-xs text-slate-600">
-                {isAr ? "توكنات نشطة:" : "Active tokens:"}{" "}
-                <strong>{targetTokenCount === null ? "—" : targetTokenCount}</strong>
-              </div>
-            </div>
-
-            <div className="flex gap-2 items-center mt-3">
-              <select
-                value={priority}
-                onChange={(e) => setPriority(e.target.value)}
-                className="p-2 rounded-md border border-slate-200"
-              >
-                <option value="high">{isAr ? "عالية" : "High"}</option>
-                <option value="normal">{isAr ? "عادية" : "Normal"}</option>
-              </select>
-
-              <input
-                type="datetime-local"
-                value={scheduleAt}
-                onChange={(e) => setScheduleAt(e.target.value)}
-                className="p-2 rounded-md border border-slate-200 ml-auto"
-                title={isAr ? "موعد الإرسال" : "Schedule send time"}
-              />
-            </div>
-
-            <button
-              onClick={sendNotification}
-              disabled={loading || !message.trim()}
-              className="w-full mt-3 px-4 py-3 rounded-lg bg-emerald-600 text-white font-bold disabled:opacity-60"
-            >
-              {loading ? (isAr ? "جارٍ الإرسال..." : "Sending...") : (isAr ? "إرسال إشعار" : "Send Notification")}
-            </button>
-          </div>
-        </div>
+        </main>
       </div>
 
       {/* Token preview modal */}
       {tokenPreviewOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-2xl bg-white rounded-xl shadow-lg p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl p-5">
             <div className="flex items-center justify-between mb-3">
               <h4 className="font-bold">{isAr ? "التوكنات النشطة" : "Active tokens"}</h4>
               <div className="flex items-center gap-3">
-                <span className="text-sm text-slate-600">
-                  {tokenPreviewList.length} {isAr ? "توكن" : "tokens"}
-                </span>
-                <button
-                  onClick={() => { setTokenPreviewOpen(false); setTokenPreviewList([]); }}
-                  className="px-3 py-1 rounded-md border"
-                >
+                <span className="text-sm text-slate-600">{tokenPreviewList.length} {isAr ? "توكن" : "tokens"}</span>
+                <button onClick={() => { setTokenPreviewOpen(false); setTokenPreviewList([]); }} className="cursor-pointer px-3 py-1 rounded-md border">
                   {isAr ? "إغلاق" : "Close"}
                 </button>
               </div>
             </div>
-            <div className="max-h-64 overflow-auto border rounded-md p-3 bg-slate-50">
+
+            <div className="max-h-72 overflow-auto border rounded-lg p-3 bg-slate-50">
               {tokenPreviewList.length === 0 ? (
-                <div className="text-slate-500">
-                  {isAr ? "لا توجد توكنات نشطة لهذا العميل." : "No active tokens for this customer."}
-                </div>
+                <div className="text-slate-500">{isAr ? "لا توجد توكنات نشطة لهذا العميل." : "No active tokens for this customer."}</div>
               ) : (
                 tokenPreviewList.map((t, i) => (
                   <div key={i} className="mb-2 p-2 bg-white border rounded text-xs break-all">
