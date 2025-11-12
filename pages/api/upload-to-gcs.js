@@ -28,7 +28,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const form = formidable({ maxFileSize: 5 * 1024 * 1024, multiples: false });
+    const form = formidable({ maxFileSize: 10 * 1024 * 1024, multiples: false });
     const { fields, files } = await new Promise((resolve, reject) =>
       form.parse(req, (err, fields, files) =>
         err ? reject(err) : resolve({ fields, files })
@@ -74,6 +74,7 @@ export default async function handler(req, res) {
 
     const publicUrl = `https://storage.googleapis.com/${bucketName}/${uniqueName}`;
     res.status(200).json({ success: true, url: publicUrl });
+
   } catch (error) {
     console.error("Upload API error:", error);
     res.status(500).json({ error: "Failed to upload file", details: error.message });
