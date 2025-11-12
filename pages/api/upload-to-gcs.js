@@ -3,6 +3,7 @@ import { Storage } from "@google-cloud/storage";
 import fs from "fs";
 
 export const config = { api: { bodyParser: false } };
+export const runtime = "nodejs"; // ✅ مهم جدًا لو على Vercel
 
 const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
 const storage = new Storage({
@@ -12,13 +13,21 @@ const storage = new Storage({
 const bucketName = process.env.GCLOUD_STORAGE_BUCKET;
 
 export default async function handler(req, res) {
+  // ✅ دعم CORS
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") {
+    res.status(204).end();
+    return;
+  }
+
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method Not Allowed" });
     return;
   }
 
   try {
-    // Parse form data
     const form = formidable({ maxFileSize: 5 * 1024 * 1024, multiples: false });
     const { fields, files } = await new Promise((resolve, reject) =>
       form.parse(req, (err, fields, files) =>
@@ -26,7 +35,6 @@ export default async function handler(req, res) {
       )
     );
 
-    // "file" must be the key in your FormData from frontend
     const fileArr = files.file;
     const file = Array.isArray(fileArr) ? fileArr[0] : fileArr;
 
@@ -44,7 +52,6 @@ export default async function handler(req, res) {
       return;
     }
 
-    // Upload file to GCS
     await new Promise((resolve, reject) => {
       const writeStream = blob.createWriteStream({
         contentType: file.mimetype,
@@ -57,15 +64,12 @@ export default async function handler(req, res) {
       readStream.pipe(writeStream);
     });
 
-    // Make file public (optional, but needed for direct access)
     try {
       await blob.makePublic();
     } catch (makePublicError) {
       console.error("GCS makePublic error:", makePublicError);
-      // Continue even if makePublic fails
     }
 
-    // Remove temp file
     fs.unlink(filePath, () => {});
 
     const publicUrl = `https://storage.googleapis.com/${bucketName}/${uniqueName}`;
