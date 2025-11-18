@@ -5,15 +5,15 @@ import { useSearchParams } from "next/navigation";
 
 /*
   Mohamed Kasteero • VIP Artist Profile (single-file, JS only)
-  - Animated neon background (music / club vibe)
-  - Sections: Artist Snapshot, Story, Style, Live & Tours, Discography, Collabs, Press, Testimonials
+  - Animated neon background (music / club vibe + golden notes)
+  - Sections: Artist Snapshot, Story, Style, Live & Tours, Discography, Collabs, Press, Highlights, Testimonials
   - AR/EN via ?lang=ar|en (default: en)
   - Tailwind only
 */
 
 export default function MohamedKasteero() {
   const params = useSearchParams();
-  const initialParam = (params?.get("lang") || "en").toLowerCase();
+  const initialParam = (params?.get("lang") || "ar").toLowerCase();
 
   const [lang, setLang] = useState(sanitizeLang(initialParam));
   const [motionOK, setMotionOK] = useState(true);
@@ -27,7 +27,7 @@ export default function MohamedKasteero() {
     return () => mq.removeEventListener?.("change", onChange);
   }, []);
 
-  // animated bg (music neon)
+  // animated bg (music neon + golden notes)
   const canvasRef = useRef(null);
   const rafRef = useRef(null);
 
@@ -42,12 +42,14 @@ export default function MohamedKasteero() {
 
     let w = 0,
       h = 0;
-    const C1 = "#050716"; // dark purple/blue
+    const C1 = "#050716";
     const C2 = "#050311";
     const NEON_PINK = "rgba(255, 71, 204, 0.9)";
     const NEON_CYAN = "rgba(0, 255, 214, 0.9)";
+    const GOLD = "rgba(255, 215, 0, 0.9)";
 
-    let P = [];
+    let P = []; // particles
+    let NOTES = []; // musical notes
     let t = 0;
 
     const baseCount = () => {
@@ -74,6 +76,15 @@ export default function MohamedKasteero() {
         vx: (Math.random() - 0.5) * 0.4,
         vy: (Math.random() - 0.5) * 0.4,
       }));
+
+      const NOTE_COUNT = Math.floor(COUNT / 3);
+      NOTES = Array.from({ length: NOTE_COUNT }, () => ({
+        x: Math.random() * w,
+        y: Math.random() * h,
+        vy: 0.35 + Math.random() * 0.45,
+        size: 0.8 + Math.random() * 1.4,
+        wobble: Math.random() * Math.PI * 2,
+      }));
     };
 
     const drawBackground = () => {
@@ -85,7 +96,6 @@ export default function MohamedKasteero() {
     };
 
     const drawRibbons = () => {
-      // مثل إضاءة ليزر في حفلة
       const cx1 = w * 0.3 + Math.cos(t * 0.001) * (w * 0.25);
       const cy1 = h * 0.3 + Math.sin(t * 0.0014) * (h * 0.25);
       const cx2 = w * 0.7 + Math.cos(-t * 0.0011) * (w * 0.28);
@@ -116,8 +126,7 @@ export default function MohamedKasteero() {
     };
 
     const drawParticles = () => {
-      // كأنها نقاط إضاءة في السقف + مؤشرات صوت
-      ctx.shadowBlur = 12;
+      ctx.shadowBlur = 10;
       for (let i = 0; i < P.length; i++) {
         const p = P[i];
         p.x += p.vx;
@@ -126,7 +135,7 @@ export default function MohamedKasteero() {
         if (p.x > w + 5) p.x = -5;
         if (p.y < -5) p.y = h + 5;
         if (p.y > h + 5) p.y = -5;
-        const beat = (Math.sin(t * 0.004 + i * 0.8) + 1) / 2; // شبه نبض موسيقي
+        const beat = (Math.sin(t * 0.004 + i * 0.8) + 1) / 2;
         const r = p.r * (0.8 + beat * 0.8);
         const usePink = beat > 0.5;
         ctx.fillStyle = usePink ? NEON_PINK : NEON_CYAN;
@@ -138,10 +147,51 @@ export default function MohamedKasteero() {
       ctx.shadowBlur = 0;
     };
 
+    const drawNotes = () => {
+      ctx.shadowBlur = 14;
+      ctx.fillStyle = GOLD;
+      ctx.shadowColor = GOLD;
+
+      for (let i = 0; i < NOTES.length; i++) {
+        const n = NOTES[i];
+        n.y += n.vy;
+        n.wobble += 0.01;
+        n.x += Math.sin(n.wobble) * 0.15;
+
+        if (n.y > h + 20) {
+          n.y = -20;
+          n.x = Math.random() * w;
+        }
+
+        const s = n.size;
+        ctx.save();
+        ctx.translate(n.x, n.y);
+        ctx.scale(s, s);
+
+        // simple music note: circle + stem + small head
+        ctx.beginPath();
+        ctx.arc(0, 0, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(4, -0.5);
+        ctx.lineTo(4, -18);
+        ctx.lineTo(7, -16);
+        ctx.lineTo(7, -14);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.restore();
+      }
+
+      ctx.shadowBlur = 0;
+    };
+
     const tick = (now) => {
       t = now || t + 16;
       drawBackground();
       drawRibbons();
+      drawNotes();
       drawParticles();
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -199,9 +249,9 @@ export default function MohamedKasteero() {
     const vcf =
       "BEGIN:VCARD\n" +
       "VERSION:3.0\n" +
-      "N:Kasteero;Mohamed;;;\n" +
+      "N:Abdelghafar;Mohamed;;;\n" +
       "FN:Mohamed Kasteero\n" +
-      "TITLE:Singer • Performer\n" +
+      "TITLE:Egyptian Singer • Shaabi & Tarab Artist\n" +
       "ORG:TAHEEL Artist Circle\n" +
       `EMAIL;TYPE=INTERNET;TYPE=WORK:${LINKS.emailOfficial}\n` +
       `TEL;TYPE=CELL:${LINKS.phone}\n` +
@@ -257,11 +307,17 @@ export default function MohamedKasteero() {
       <section className="relative mx-auto max-w-[min(94rem,94vw)] px-4 sm:px-6 md:px-8 lg:px-10 py-8 sm:py-10 md:py-14">
         {/* Header */}
         <div className="flex items-center justify-between gap-4 sm:gap-6">
-          <img
-            src="/logo-transparent-large.png"
-            alt="TAHEEL Logo"
-            className="h-10 sm:h-12 md:h-14 drop-shadow-[0_0_20px_rgba(0,255,214,.65)]"
-          />
+          <div
+            className="relative flex h-10 w-10 sm:h-12 sm:w-12 md:h-14 md:w-14 items-center justify-center rounded-2xl bg-white shadow-[0_0_0_1px_rgba(0,0,0,.12),0_10px_30px_rgba(0,0,0,.35)] animate-pulse"
+            aria-hidden={false}
+          >
+            <img
+              src="/logo-transparent-large.png"
+              alt="TAHEEL Logo"
+              className="h-7 sm:h-9 md:h-10 w-auto drop-shadow-[0_0_14px_rgba(0,255,214,.55)]"
+            />
+          </div>
+
           <div className="flex items-center gap-2 sm:gap-3">
             <LangToggle
               lang={lang}
@@ -286,10 +342,14 @@ export default function MohamedKasteero() {
             <div className="flex flex-col md:flex-row items-center md:items-end gap-5 sm:gap-6">
               {/* Avatar */}
               <div className="relative shrink-0">
-                <div className="h-[90px] w-[90px] sm:h-28 sm:w-28 md:h-32 md:w-32 lg:h-36 lg:w-36 rounded-2xl bg-gradient-to-br from-fuchsia-500/40 via-purple-500/40 to-cyan-400/40 border border-white/25 backdrop-blur-sm grid place-items-center overflow-hidden">
+                <div className="h-[120px] w-[120px] sm:h-32 sm:w-32 md:h-36 md:w-36 lg:h-40 lg:w-40 rounded-2xl bg-gradient-to-br from-fuchsia-500/40 via-purple-500/40 to-cyan-400/40 border border-white/25 backdrop-blur-sm grid place-items-center overflow-hidden">
                   <img
                     src="/kasteero.jpg"
-                    alt="Mohamed Kasteero — Artist Portrait"
+                    alt={
+                      lang === "ar"
+                        ? "محمد كستيرو — صورة الفنان"
+                        : "Mohamed Kasteero — Artist Portrait"
+                    }
                     className="h-full w-full object-cover"
                     onError={(e) => {
                       const img = e?.currentTarget;
@@ -331,12 +391,18 @@ export default function MohamedKasteero() {
                 </p>
 
                 {/* Small equalizer style bar */}
-                <div className="mt-3 flex justify-center md:justify-start gap-1.5" aria-hidden>
-                  {[10, 18, 14, 22, 16].map((h, i) => (
+                <div
+                  className="mt-3 flex justify-center md:justify-start gap-1.5"
+                  aria-hidden
+                >
+                  {[12, 22, 16, 26, 18].map((h, i) => (
                     <span
                       key={i}
                       className="w-1.5 rounded-full bg-gradient-to-b from-fuchsia-400 to-cyan-300 animate-pulse"
-                      style={{ height: `${h}px`, animationDelay: `${i * 0.12}s` }}
+                      style={{
+                        height: `${h}px`,
+                        animationDelay: `${i * 0.12}s`,
+                      }}
                     />
                   ))}
                 </div>
@@ -419,7 +485,7 @@ export default function MohamedKasteero() {
           </div>
         </div>
 
-        {/* KPI Bar (streams / shows / countries / years) */}
+        {/* KPI Bar */}
         <div className="mt-8 grid gap-4 sm:gap-5 md:grid-cols-4">
           {t.kpis.map((k, i) => (
             <Stat key={i} value={k.value} label={k.label} />
@@ -618,14 +684,14 @@ export default function MohamedKasteero() {
 
 /* ---------- helpers ---------- */
 function sanitizeLang(v) {
-  return v === "ar" || v === "en" ? v : "en";
+  return v === "ar" || v === "en" ? v : "ar";
 }
 
 /* ---------- Localized copy ---------- */
 const COPY = {
   en: {
     verified: "Verified Artist",
-    title: "Singer • Performer • Live Act",
+    title: "Egyptian singer • Shaabi & tarab vocalist • Music producer & arranger",
     ctaEmail: "Booking & Management",
     ctaVCF: "Save Contact",
     mediaTitle: "Music & Social",
@@ -637,80 +703,85 @@ const COPY = {
 
     hl1Title: "Sound",
     hl1Body:
-      "A modern Arabic pop sound with global production and hooks built for live shows and streaming.",
+      "Classic Arabic tarab and popular Egyptian sound with modern arrangements built for both festivals and digital platforms.",
     hl2Title: "Stage",
     hl2Body:
-      "High-energy performance, live crowd interaction, and visual moments tailored for social clips.",
-    hl3Title: "Audience",
-    hl3Body: "Young, digital-first listeners across the GCC, North Africa, and beyond.",
+      "A live-first artist: strong presence, audience interaction, and moments that translate into TV and social media.",
+    hl3Title: "Roots & Reach",
+    hl3Body:
+      "From Cairo’s stages to regional festivals — with a growing audience across Egypt, the Gulf, and Arab communities abroad.",
 
     kpis: [
-      { value: "Millions+", label: "Total streams & views (cumulative)" },
-      { value: "50+ shows", label: "Live performances regionally" },
-      { value: "10+ cities", label: "Regional reach (GCC & MENA)" },
-      { value: "🎛 Live-ready", label: "Band / playback / hybrid formats" },
+      { value: "15+ years", label: "Experience in Arabic singing & music" },
+      { value: "50+ shows", label: "Concerts, festivals & official events" },
+      { value: "10+ cities", label: "Performances across Egypt & the region" },
+      { value: "Golden Residency", label: "Prepared file • UAE candidate 2025" },
     ],
 
     aboutTitle: "Artist Story",
     aboutBody:
-      "Mohamed Kasteero is a contemporary Arabic singer who blends melodic hooks with modern production, balancing emotional lyrics with a sound that works equally well on stage and on streaming platforms. His performances are built around energy, audience connection, and unforgettable choruses that stay with the crowd long after the show ends.",
+      "Mohamed Abdelghafar (stage name: Mohamed Kasteero) is an Egyptian singer, producer, and music arranger who has spent more than fifteen years in the world of Arabic tarab and popular music. Starting from Cairo in the mid-2000s, he built a career through concerts, major festivals, and televised appearances, becoming part of the contemporary Egyptian music scene while staying loyal to authentic melodies and live performance. TAHEEL manages his artistic brand and has prepared his profile as a Golden Residency candidate for the UAE Ministry of Culture (2025).",
 
     style: {
-      title: "Musical DNA",
+      title: "Musical Identity",
       items: [
-        "Arabic pop sound with influences from global R&B and dance.",
-        "Topline-focused writing with memorable hooks and strong choruses.",
-        "Stage presence built around crowd participation and sing-along moments.",
-        "Flexible live setup: full band, semi-playback, or club-ready performance.",
+        "Egyptian tarab and shaabi with strong melodic lines and emotional delivery.",
+        "Arrangements that blend authentic orchestration with modern sounds and rhythms.",
+        "Lyrics and performances that speak to social, human, and patriotic themes.",
+        "Comfortable in full-orchestra stages, club settings, and intimate cultural nights.",
       ],
     },
 
     live: {
-      title: "Live Shows & Events",
+      title: "Live Shows & National Events",
       items: [
         {
-          title: "Concerts & Festivals",
-          metric: "Full live set",
-          body: "Curated setlists for festivals, city events, and brand stages — from opening acts to headliner-style shows.",
+          title: "National & Patriotic Events",
+          metric: "Major stages",
+          body: "Participated in large national celebrations, charitable events, and cultural evenings, including Ramadan nights, Eid concerts, and performances honoring the Egyptian army and police.",
         },
         {
-          title: "Private & Corporate",
-          metric: "Custom formats",
-          body: "Tailored performances for private events, launches, and corporate galas with curated tracklists and timings.",
+          title: "Opera & Festivals",
+          metric: "Cairo & beyond",
+          body: "Appeared in concerts at the Egyptian Opera House and multiple festivals in Egypt and abroad, including evenings dedicated to the legacy of Umm Kulthum and other icons.",
         },
       ],
     },
 
     disco: {
-      title: "Selected Tracks / Releases",
+      title: "Selected Works",
       items: [
-        "Lead singles and collaborations available across major platforms (Spotify, Anghami, Apple Music, YouTube).",
-        "Mix of emotional ballads and high-energy tracks suitable for live performances and club play.",
-        "Ongoing pipeline of new material aligned with a modern, visual-first release strategy.",
+        "“Lams Ketafak” — an influential song about willpower and overcoming hardship, honored by the producing entity for its message and impact.",
+        "“Ala Baladi Albi” — a patriotic work recorded specially for Egypt and upcoming national occasions.",
+        "Duets and collaborations, including “Laali El Saqat” with the artist Nannar El-Behairy and performances in Lebanon celebrating the heritage of Umm Kulthum.",
       ],
     },
 
     collabs: {
       title: "Collaborations",
       items: [
-        "Open to featuring with producers, rappers, and DJs across the region.",
-        "Flexible on original tracks, acoustic sessions, and remix-ready vocals.",
+        "Worked with a range of Egyptian and Arab writers, composers, and arrangers.",
+        "Open to new musical collaborations with producers, rappers, and DJs in Egypt, the Gulf, and internationally.",
       ],
     },
 
     press: {
-      title: "Press & Positioning",
+      title: "Media Presence",
       items: [
-        "Positioned as a new-wave Arabic voice with a live-first mentality.",
-        "Strong visual identity suitable for campaigns, brand work, and digital storytelling.",
+        "Extensive coverage in major Egyptian newspapers and digital platforms, with interviews highlighting his artistic journey and social contributions.",
+        "TV appearances on leading satellite channels such as MBC Masr, Egyptian TV, and other regional broadcasters.",
+        "Features within reports and special episodes focusing on independent art, patriotic music, and community initiatives.",
       ],
     },
 
     highlights: {
-      title: "Booking Highlights",
+      title: "Professional & Cultural Highlights",
       items: [
-        "Available for festivals, city events, club nights, and private occasions.",
-        "Professional communication, clear technical rider, and punctual show delivery.",
+        "Legal name: Mohamed Abdelghafar Abd Mostafa El-Shafey Ibrahim.",
+        "Official member of the Egyptian Musicians Syndicate (registration no. 1855), classified as a popular-song artist.",
+        "Bachelor’s degree in Civil & Construction Engineering from the Arab Academy for Science, Technology & Maritime Transport; member of the Egyptian Engineers Syndicate.",
+        "Active member of Rotary International (membership no. 12238885) and the “Mostaqbal Watan” party, participating in development and charity initiatives.",
+        "Owns a private property in the United Arab Emirates and seeks to continue his artistic and community work from within the UAE.",
       ],
     },
 
@@ -719,21 +790,21 @@ const COPY = {
       items: [
         {
           quote:
-            "A fresh voice with the kind of choruses that audiences remember.",
-          name: "Event Organizer",
-          title: "Regional Festival",
+            "A charismatic Egyptian voice that carries both the nostalgia of classic tarab and the energy of today’s stages.",
+          name: "Festival Director",
+          title: "National Event",
         },
         {
           quote:
-            "Delivers the energy brands need on stage and on social media.",
-          name: "Brand Manager",
-          title: "Lifestyle Partner",
+            "His songs deliver clear human and patriotic messages that connect with wide audiences.",
+          name: "TV Producer",
+          title: "Cultural Program",
         },
         {
           quote:
-            "His live presence turns a normal night into a highlight moment.",
-          name: "Club Promoter",
-          title: "GCC Venue",
+            "On stage, Kasteero turns each concert into a shared story between him and the crowd.",
+          name: "Music Critic",
+          title: "Arts Columnist",
         },
       ],
     },
@@ -741,7 +812,8 @@ const COPY = {
 
   ar: {
     verified: "فنان موثَّق",
-    title: "مطرب • مؤدّي لايف • صوت عربي معاصر",
+    title:
+      "مطرب مصري معاصر • مطرب شعبي وطربي • منتج وموزع موسيقي",
     ctaEmail: "للحجوزات والإدارة",
     ctaVCF: "حفظ جهة الاتصال",
     mediaTitle: "الموسيقى والسوشيال",
@@ -753,81 +825,86 @@ const COPY = {
 
     hl1Title: "الصوت",
     hl1Body:
-      "لون غنائي عربي حديث بإنتاج عالمي وكلمات تعلق في الأذن ومناسبة للمنصات والحفلات.",
+      "لون غنائي مصري يجمع بين الطرب الأصيل والغناء الشعبي، بتوزيعات حديثة جاهزة للمهرجانات والمنصات الرقمية.",
     hl2Title: "الاستعراض",
     hl2Body:
-      "حضور لايف قوي، تفاعل مباشر مع الجمهور، ولحظات بصرية جاهزة للريلز والتيك توك.",
-    hl3Title: "الجمهور",
+      "حضور لايف قوي وتفاعل مباشر مع الجمهور، ولحظات تصنع مادة غنية للتلفزيون والسوشيال ميديا.",
+    hl3Title: "الجذور والانتشار",
     hl3Body:
-      "قاعدة جماهيرية شابة ورقمية في الخليج وشمال أفريقيا وجاليات عربية حول العالم.",
+      "من مسارح القاهرة إلى المهرجانات والفعاليات في مصر وخارجها، مع جمهور متزايد في الخليج والجاليات العربية.",
 
     kpis: [
-      { value: "ملايين+", label: "إجمالي الاستماعات والمشاهدات (تراكمي)" },
-      { value: "50+ حفل", label: "حفلات وعروض في المنطقة" },
-      { value: "10+ مدن", label: "انتشار في الخليج والمنطقة" },
-      { value: "🎛 جاهز لايف", label: "فرقة / بلاي باك / فورمات مختلطة" },
+      { value: "15+ سنة", label: "خبرة في الغناء العربي والموسيقى" },
+      { value: "50+ حفل", label: "حفلات ومهرجانات وفعاليات رسمية" },
+      { value: "10+ مدن", label: "مشاركات في مصر والمنطقة" },
+      { value: "إقامة ذهبية", label: "مرشح لدى الإمارات | 2025" },
     ],
 
-    aboutTitle: "قصة الفنان",
+    aboutTitle: "النبذة الفنية",
     aboutBody:
-      "محمد كستيرو صوت عربي معاصر يمزج بين اللحن القريب من القلب والإنتاج الحديث، فيوازن بين الإحساس وبين السهولة في الحفظ والغناء مع الجمهور. حفلاته مبنية على طاقة عالية وتفاعل مباشر، وكلمات تظل في ذهن الناس بعد انتهاء الليلة.",
+      "الاسم القانوني الكامل للفنان هو «محمد رافغلا دبع ىفطصم يعفاشلا ميهاربإ»، والاسم الفني: «محمد كستيرو». يعد نموذجًا لفنان عربي ملتزم يمتلك خبرة تتجاوز خمسة عشر عامًا في الغناء العربي الأصيل والشعبي والتوزيع الموسيقي. انطلقت رحلته من القاهرة منذ منتصف الثمانينيات/التسعينيات عبر الحفلات والمهرجانات حتى أصبح حضورًا ثابتًا في المشهد الموسيقي المصري. تم إعداد هذا الملف خصيصًا لوزارة الثقافة في دولة الإمارات ضمن مرشحي الإقامة الذهبية لعام 2025، وتقوم شركة تأهيل بإدارة علامته التجارية الفنية وتمثيله في المنطقة.",
 
     style: {
       title: "ملامح الهوية الموسيقية",
       items: [
-        "بوب عربي بلمسات عالمية من الـ R&B والهاوس.",
-        "تركيز على اللوازم (الهُوك) والكوبليه الذي يحفظه الجمهور بسرعة.",
-        "حضور مسرحي يعتمد على التفاعل والهتاف والـ sing along.",
-        "مرونة في فورمات اللايف: فرقة كاملة، بلاي باك، أو فورمات مناسب للنوادي.",
+        "غناء طربي وشعبي مصري يعتمد على اللحن الواضح والأداء الإحساسي المباشر.",
+        "توزيعات تجمع بين الآلات الشرقية الكلاسيكية والصوت العصري في الإيقاع والخلفية الموسيقية.",
+        "أغانٍ تعبر عن قضايا اجتماعية وإنسانية ووطنية، مع قدرة على تحريك وجدان الجمهور.",
+        "مرونة في فورمات اللايف: أوركسترا كاملة، فرق صغيرة، أو فورمات مناسب للمسرح والنوادي.",
       ],
     },
 
     live: {
-      title: "الحفلات والعروض",
+      title: "الحفلات والفعاليات",
       items: [
         {
-          title: "مهرجانات وحفلات عامة",
-          metric: "ست لايف كامل",
-          body: "قوائم أغاني مصممة للمهرجانات والفعاليات الرسمية وحفلات المدن — من افتتاحيات إلى فقرات رئيسية.",
+          title: "الفعاليات الوطنية والرسميّة",
+          metric: "منصات كبرى",
+          body: "مشاركات في حفلات وفعاليات وطنية وخيرية عديدة داخل مصر، بما في ذلك أمسيات رمضانية وحفلات العيد وأنشطة داعمة للجيش والشرطة والأسر.",
         },
         {
-          title: "مناسبات خاصة وشركات",
-          metric: "فورمات حسب الطلب",
-          body: "عروض للمناسبات الخاصة، إطلاق العلامات التجارية، والفعاليات المؤسسية بقوائم وأزمنة مخصصة.",
+          title: "الأوبرا والمهرجانات",
+          metric: "القاهرة وخارجها",
+          body: "مشاركات في حفلات بدار الأوبرا المصرية وعدد من المهرجانات في مصر وخارجها، إلى جانب أمسيات غنائية لإحياء تراث كوكب الشرق وغيرها من الرموز.",
         },
       ],
     },
 
     disco: {
-      title: "أعمال مختارة",
+      title: "أعمال بارزة",
       items: [
-        "أغانٍ منفردة وتعاونات متاحة على المنصات الكبرى (Spotify، Anghami، Apple Music، YouTube).",
-        "مزيج بين أغاني إحساس وتراكات حماسية مناسبة للنادي والحفلات.",
-        "خطة مستمرة لإصدار أعمال جديدة بأسلوب بصري يناسب المنصات الرقمية.",
+        "أغنية «لمس كتافك» — عمل مؤثر عن الإرادة والتحدي، حاز على تكريم خاص من الجهة المنتجة تقديرًا لرسالته وتأثيره.",
+        "أغنية وطنية «قلبي على بلدي» تم تسجيلها خصيصًا للتعبير عن الانتماء لمصر والاستعداد لعرضها في مناسبات وطنية.",
+        "تعاونات غنائية أبرزها المشاركة مع الفنانة نانار البحيري في عمل مصوّر لاقى صدى واسعًا ومشاهدات مرتفعة.",
       ],
     },
 
     collabs: {
       title: "التعاونات",
       items: [
-        "منفتح على التعاون مع منتجين، رابرز، و DJs من المنطقة.",
-        "مرن في تقديم أصوات أصلية، جلسات أكوستيك، وتراكات جاهزة للريمكس.",
+        "تعاون مع عدد من الشعراء والملحنين والموزعين في الساحة المصرية والعربية.",
+        "منفتح على التعاون مع منتجين ورابرز ودي جي في مصر والخليج لتقديم ألوان معاصرة مع الحفاظ على الهوية المصرية.",
       ],
     },
 
     press: {
-      title: "المشهد والصورة الإعلامية",
+      title: "الظهور الإعلامي",
       items: [
-        "مطرب عربي بموجة جديدة وصوت يناسب الجيل الرقمي.",
-        "هوية بصرية قوية وقابلة للتوظيف في الحملات والـ storytelling الرقمي.",
+        "تغطيات في صحف ومواقع كبرى مثل الأهرام ومصر اليوم ومجلات فنية متخصصة، ركّزت على مسيرته ورسائله الإنسانية.",
+        "ظهور تلفزيوني على قنوات رائدة من بينها MBC مصر وقنوات مصرية وعربية أخرى في برامج فنية وحوارية.",
+        "استضافات في مهرجانات وفعاليات فنية داخل مصر وخارجها، مع تكريمات لجهوده في دعم الفن المستقل والرسالة الوطنية.",
       ],
     },
 
     highlights: {
-      title: "نِقَاط مهمّة للحجوزات",
+      title: "المعلومات الرسمية والمهنيّة",
       items: [
-        "متاح للمهرجانات، حفلات المدن، النوادي، والمناسبات الخاصة.",
-        "التزام مهني، رايدر فني واضح، وتنفيذ ملتزم بالوقت.",
+        "الاسم القانوني الكامل: محمد رافغلا دبع ىفطصم يعفاشلا ميهاربإ.",
+        "الاسم الفني والشهرة: محمد كستيرو / عبدالغفار.",
+        "عضو عامل في نقابة المهن الموسيقية المصرية (رقم القيد 1855) بتصنيف «فنان – غناء شعبي».",
+        "حاصل على بكالوريوس هندسة تشييد وبناء – الأكاديمية العربية للعلوم والتكنولوجيا والنقل البحري، وعضو في نقابة المهندسين المصرية.",
+        "عضو فعّال في نادي روتاري الدولي (رقم العضوية 12238885) وعضو في حزب مستقبل وطن، مع مساهمات مستمرة في مبادرات تنموية وخيرية.",
+        "يمتلك مسكنًا خاصًا في دولة الإمارات العربية المتحدة، ويعمل على ربط خبرته الفنية والمجتمعية بالمشهد الثقافي الإماراتي.",
       ],
     },
 
@@ -835,19 +912,22 @@ const COPY = {
       title: "قالوا عنه",
       items: [
         {
-          quote: "صوت جديد، وكوبليهات تفضل على لسان الجمهور بعد الحفلة.",
-          name: "منظّم حفلات",
-          title: "مهرجان إقليمي",
+          quote:
+            "صوت مصري يجمع بين أصالة الطرب وروح الجيل الجديد، ويعرف كيف يحوّل الليلة إلى حالة جماعية.",
+          name: "منظّم مهرجان",
+          title: "فعالية وطنية",
         },
         {
-          quote: "يعطي الطاقة التي تحتاجها العلامة على المسرح وعلى السوشيال.",
-          name: "مدير علامة تجارية",
-          title: "شريك لايفستайл",
+          quote:
+            "أغانيه تحمل رسائل إنسانية ووطنية واضحة وتصل بسهولة إلى الجمهور.",
+          name: "مُعدّ برامج",
+          title: "برنامج ثقافي",
         },
         {
-          quote: "وجوده على المسرح يحوّل الليلة من عادية لـ highlight في الموسم.",
-          name: "منسّق حفلات",
-          title: "نادي في الخليج",
+          quote:
+            "حضوره على المسرح يشبه حوارًا مفتوحًا مع الجمهور أكثر منه حفلًا عاديًا.",
+          name: "ناقد فني",
+          title: "كاتب عن الفن المصري",
         },
       ],
     },
@@ -856,9 +936,9 @@ const COPY = {
 
 const LINKS = {
   site: "https://www.taheel.ae",
-  emailOfficial: "booking@taheel.ae", // عدّلها لو عندكم إيميل خاص
+  emailOfficial: "booking@taheel.ae", // عدّلها لو عندكم إيميل إدارة مختلف
   phone: "+971 55 000 0000", // رقم الإدارة / الحجوزات
-  instagram: "https://www.instagram.com/", // عدّل لينكات السوشيال لما تبقى جاهزة
+  instagram: "https://www.instagram.com/", // حدّث لينكات السوشيال
   youtube: "https://www.youtube.com/",
   spotify: "https://open.spotify.com/",
 };
@@ -884,7 +964,10 @@ function BadgeCard({ title, children }) {
       </div>
       <div
         className="text-fuchsia-50/85"
-        style={{ lineHeight: "1.85", fontSize: "clamp(0.92rem, 1.05vw, 1.05rem)" }}
+        style={{
+          lineHeight: "1.85",
+          fontSize: "clamp(0.92rem, 1.05vw, 1.05rem)",
+        }}
       >
         {children}
       </div>
