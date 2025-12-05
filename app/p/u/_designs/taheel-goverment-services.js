@@ -262,22 +262,24 @@ export default function TaheelSmartLink() {
   style={{ transitionDelay: "320ms" }}
   aria-label={t.openWeb}
 >
-  <div className="relative h-16 w-full max-w-[190px] sm:h-20 sm:max-w-[220px] rounded-2xl bg-emerald-500/10 border border-emerald-300/70 
-                  flex items-center justify-center shadow-[0_10px_30px_rgba(16,185,129,0.8)] 
-                  group-hover:bg-emerald-500/20 group-active:scale-95 
+  <div className="relative h-16 w-16 sm:h-20 sm:w-20 rounded-2xl 
+                  bg-white/5 border border-emerald-300/70 
+                  flex items-center justify-center 
+                  shadow-[0_10px_30px_rgba(16,185,129,0.8)] 
+                  group-hover:bg-emerald-500/10 
+                  group-active:scale-95 
                   group-active:shadow-[0_4px_16px_rgba(16,185,129,0.9)] 
                   transition-all overflow-hidden">
     <img
       src="/icon-taheel-web.png"
       alt="TAHEEL Web"
-      className="h-12 sm:h-14 object-contain drop-shadow-[0_0_16px_rgba(16,185,129,0.9)]"
+      className="h-10 w-10 sm:h-12 sm:w-12 object-contain drop-shadow-[0_0_16px_rgba(16,185,129,0.9)]"
     />
   </div>
   <span className="text-[11px] sm:text-xs text-emerald-100/80">
     {t.webLabel}
   </span>
 </a>
-
 
             </div>
           </div>
