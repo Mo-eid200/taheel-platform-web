@@ -215,74 +215,65 @@ export default function TaheelSmartLink() {
             </div>
 
             <div className="flex items-center justify-center gap-4 sm:gap-6">
-              {/* Google Play */}
-              <a
-                href={ANDROID_URL}
-                className={`group inline-flex flex-col items-center gap-1 transition-all duration-700 ${
-                  mounted
-                    ? "opacity-100 translate-y-0"
-                    : "opacity-0 translate-y-4"
-                }`}
-                style={{ transitionDelay: "120ms" }}
-                aria-label="Google Play"
-              >
-                <div className="relative h-14 w-14 sm:h-16 sm:w-16 rounded-2xl bg-white/5 border border-white/20 flex items-center justify-center shadow-[0_10px_30px_rgba(15,23,42,0.8)] group-hover:bg-white/10 group-hover:border-emerald-300/70 group-active:scale-95 group-active:shadow-[0_4px_16px_rgba(16,185,129,0.7)] transition-all">
-                  <img
-                    src="/icon-google-play.png"
-                    alt="Google Play"
-                    className="h-9 sm:h-10 object-contain drop-shadow-[0_0_16px_rgba(56,189,248,0.8)]"
-                  />
-                </div>
-                <span className="text-[11px] sm:text-xs text-emerald-100/80">
-                  Google Play
-                </span>
-              </a>
+{/* Google Play */}
+<a
+  href={ANDROID_URL}
+  className={`group inline-flex flex-col items-center gap-1 transition-all duration-700 ${
+    mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+  }`}
+  style={{ transitionDelay: "120ms" }}
+  aria-label="Google Play"
+>
+  <div className="relative h-16 w-16 sm:h-20 sm:w-20 rounded-2xl bg-white/5 border border-white/20 shadow-[0_10px_30px_rgba(15,23,42,0.8)] group-hover:bg-white/10 group-hover:border-emerald-300/70 group-active:scale-95 group-active:shadow-[0_4px_16px_rgba(16,185,129,0.7)] transition-all overflow-hidden">
+    <img
+      src="/icon-google-play.png"
+      alt="Google Play"
+      className="h-full w-full object-contain drop-shadow-[0_0_16px_rgba(56,189,248,0.8)]"
+    />
+  </div>
+  <span className="text-[11px] sm:text-xs text-emerald-100/80">Google Play</span>
+</a>
 
-              {/* App Store */}
-              <a
-                href={IOS_URL}
-                className={`group inline-flex flex-col items-center gap-1 transition-all duration-700 ${
-                  mounted
-                    ? "opacity-100 translate-y-0"
-                    : "opacity-0 translate-y-4"
-                }`}
-                style={{ transitionDelay: "220ms" }}
-                aria-label="App Store"
-              >
-                <div className="relative h-14 w-14 sm:h-16 sm:w-16 rounded-2xl bg-white/5 border border-white/20 flex items-center justify-center shadow-[0_10px_30px_rgba(15,23,42,0.8)] group-hover:bg-white/10 group-hover:border-sky-300/70 group-active:scale-95 group-active:shadow-[0_4px_16px_rgba(59,130,246,0.7)] transition-all">
-                  <img
-                    src="/icon-app-store.png"
-                    alt="App Store"
-                    className="h-9 sm:h-10 object-contain drop-shadow-[0_0_16px_rgba(96,165,250,0.9)]"
-                  />
-                </div>
-                <span className="text-[11px] sm:text-xs text-emerald-100/80">
-                  App Store
-                </span>
-              </a>
+{/* App Store */}
+<a
+  href={IOS_URL}
+  className={`group inline-flex flex-col items-center gap-1 transition-all duration-700 ${
+    mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+  }`}
+  style={{ transitionDelay: "220ms" }}
+  aria-label="App Store"
+>
+  <div className="relative h-16 w-16 sm:h-20 sm:w-20 rounded-2xl bg-white/5 border border-white/20 shadow-[0_10px_30px_rgba(15,23,42,0.8)] group-hover:bg-white/10 group-hover:border-sky-300/70 group-active:scale-95 group-active:shadow-[0_4px_16px_rgba(59,130,246,0.7)] transition-all overflow-hidden">
+    <img
+      src="/icon-app-store.png"
+      alt="App Store"
+      className="h-full w-full object-contain drop-shadow-[0_0_16px_rgba(96,165,250,0.9)]"
+    />
+  </div>
+  <span className="text-[11px] sm:text-xs text-emerald-100/80">App Store</span>
+</a>
 
-              {/* TAHEEL Web */}
-              <a
-                href={WEB_URL}
-                className={`group inline-flex flex-col items-center gap-1 transition-all duration-700 ${
-                  mounted
-                    ? "opacity-100 translate-y-0"
-                    : "opacity-0 translate-y-4"
-                }`}
-                style={{ transitionDelay: "320ms" }}
-                aria-label={t.openWeb}
-              >
-                <div className="relative h-14 w-14 sm:h-16 sm:w-16 rounded-2xl bg-emerald-500/10 border border-emerald-300/70 flex items-center justify-center shadow-[0_10px_30px_rgba(16,185,129,0.8)] group-hover:bg-emerald-500/20 group-active:scale-95 group-active:shadow-[0_4px_16px_rgba(16,185,129,0.9)] transition-all">
-                  <img
-                    src="/icon-taheel-web.png"
-                    alt="TAHEEL Web"
-                    className="h-8 sm:h-9 object-contain drop-shadow-[0_0_16px_rgba(16,185,129,0.9)]"
-                  />
-                </div>
-                <span className="text-[11px] sm:text-xs text-emerald-100/80">
-                  {t.webLabel}
-                </span>
-              </a>
+{/* TAHEEL Web */}
+<a
+  href={WEB_URL}
+  className={`group inline-flex flex-col items-center gap-1 transition-all duration-700 ${
+    mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+  }`}
+  style={{ transitionDelay: "320ms" }}
+  aria-label={t.openWeb}
+>
+  <div className="relative h-16 w-16 sm:h-20 sm:w-20 rounded-2xl bg-emerald-500/10 border border-emerald-300/70 shadow-[0_10px_30px_rgba(16,185,129,0.8)] group-hover:bg-emerald-500/20 group-active:scale-95 group-active:shadow-[0_4px_16px_rgba(16,185,129,0.9)] transition-all overflow-hidden">
+    <img
+      src="/icon-taheel-web.png"
+      alt="TAHEEL Web"
+      className="h-full w-full object-contain drop-shadow-[0_0_16px_rgba(16,185,129,0.9)]"
+    />
+  </div>
+  <span className="text-[11px] sm:text-xs text-emerald-100/80">
+    {t.webLabel}
+  </span>
+</a>
+
             </div>
           </div>
 
