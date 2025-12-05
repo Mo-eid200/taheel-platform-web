@@ -231,36 +231,62 @@ export default function ArchiveSection({ lang = "ar" }) {
   ========================== */
   const qrRef = useRef(null);
 
-  const downloadFromRef = (ref, filename) => {
-    const root = ref.current;
-    if (!root) return;
+const downloadFromRef = (ref, filename) => {
+  const root = ref.current;
+  if (!root) return;
 
-    // 1) Canvas → PNG
-    const canvas = root.querySelector("canvas");
-    if (canvas) {
-      const url = canvas.toDataURL("image/png");
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      a.click();
-      return;
-    }
+  // 1) لو Canvas → PNG مباشر
+  const canvas = root.querySelector("canvas");
+  if (canvas) {
+    const url = canvas.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename.endsWith(".png") ? filename : `${filename}.png`;
+    a.click();
+    return;
+  }
 
-    // 2) SVG → SVG file (fallback)
-    const svg = root.querySelector("svg");
-    if (svg) {
-      const data = new XMLSerializer().serializeToString(svg);
-      const blob = new Blob([data], {
-        type: "image/svg+xml;charset=utf-8",
-      });
-      const url = URL.createObjectURL(blob);
+  // 2) لو SVG → نحوله الأول لـ PNG عن طريق Canvas
+  const svg = root.querySelector("svg");
+  if (svg) {
+    const svgData = new XMLSerializer().serializeToString(svg);
+    const svgBlob = new Blob([svgData], {
+      type: "image/svg+xml;charset=utf-8",
+    });
+    const DOMURL = window.URL || window.webkitURL || window;
+    const url = DOMURL.createObjectURL(svgBlob);
+
+    const img = new Image();
+    img.onload = () => {
+      const canvasEl = document.createElement("canvas");
+      const width =
+        svg.clientWidth ||
+        parseInt(svg.getAttribute("width") || "260", 10) ||
+        260;
+      const height =
+        svg.clientHeight ||
+        parseInt(svg.getAttribute("height") || "260", 10) ||
+        260;
+
+      canvasEl.width = width;
+      canvasEl.height = height;
+
+      const ctx = canvasEl.getContext("2d");
+      ctx.drawImage(img, 0, 0, width, height);
+
+      DOMURL.revokeObjectURL(url);
+
+      const pngData = canvasEl.toDataURL("image/png");
       const a = document.createElement("a");
-      a.href = url;
-      a.download = filename.replace(".png", ".svg");
+      a.href = pngData;
+      a.download = filename.endsWith(".png") ? filename : `${filename}.png`;
       a.click();
-      URL.revokeObjectURL(url);
-    }
-  };
+    };
+
+    img.src = url;
+  }
+};
+
 
   const handleDownloadQR = (qrKey) => {
     if (!qrKey) return;
