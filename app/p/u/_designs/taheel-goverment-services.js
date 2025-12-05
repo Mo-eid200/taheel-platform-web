@@ -12,14 +12,13 @@ export default function TaheelSmartLink() {
   const [platform, setPlatform] = useState("other"); // android | ios | other
   const [lang, setLang] = useState("en"); // ar | en
   const [motionOK, setMotionOK] = useState(true);
-  const [angle, setAngle] = useState(140); // لخلفية متحركة
-  const [mounted, setMounted] = useState(false); // للتحكم في ظهور العناصر بالتدريج
+  const [angle, setAngle] = useState(140);
+  const [mounted, setMounted] = useState(false);
 
-  // كشف نوع الجهاز + لغة الجهاز + تفضيل الحركة
+  // كشف نوع الجهاز + اللغة + تفضيل الحركة
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    // Detect platform
     const ua = navigator.userAgent || navigator.vendor || window.opera;
     if (/android/i.test(ua)) {
       setPlatform("android");
@@ -29,14 +28,12 @@ export default function TaheelSmartLink() {
       setPlatform("other");
     }
 
-    // Detect language
     const navLang =
       navigator.language ||
       (navigator.languages && navigator.languages[0]) ||
       "en";
     setLang(navLang.toLowerCase().startsWith("ar") ? "ar" : "en");
 
-    // Motion preference
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
     setMotionOK(!mq.matches);
     const onChange = (e) => setMotionOK(!e.matches);
@@ -44,7 +41,7 @@ export default function TaheelSmartLink() {
     return () => mq.removeEventListener?.("change", onChange);
   }, []);
 
-  // تحريك خفيف لخلفية الكونِك-جراديانت
+  // حركة الخلفية
   useEffect(() => {
     if (!motionOK) return;
     let frame;
@@ -56,7 +53,7 @@ export default function TaheelSmartLink() {
     return () => cancelAnimationFrame(frame);
   }, [motionOK]);
 
-  // تشغيل الأنيميشن التدريجي بعد الماونت
+  // تشغيل أنيميشن الدخول
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -159,7 +156,6 @@ export default function TaheelSmartLink() {
               </div>
             </div>
 
-            {/* زر تبديل اللغة */}
             <button
               onClick={() => setLang(lang === "ar" ? "en" : "ar")}
               className="rounded-full border border-white/25 bg-white/10 px-3 py-1 text-[11px] sm:text-xs font-bold hover:bg-white/20 transition active:scale-95"
@@ -185,19 +181,17 @@ export default function TaheelSmartLink() {
             {platformText}
           </div>
 
-          {/* الزرار الرئيسي الديناميكي + أنيميشن دخول */}
+          {/* الزر الرئيسي */}
           <a
             href={mainHref}
             className={`mt-2 block w-full rounded-full bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-sm sm:text-base py-3.5 text-center shadow-[0_18px_55px_rgba(16,185,129,0.6)] transition-all duration-700 active:scale-95 ${
-              mounted
-                ? "opacity-100 translate-y-0"
-                : "opacity-0 translate-y-4"
+              mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
             }`}
           >
             {mainLabel}
           </a>
 
-          {/* خط فاصل */}
+          {/* فاصل */}
           <div className="flex items-center gap-3 my-5">
             <div className="h-px flex-1 bg-gradient-to-r from-transparent via-emerald-400/60 to-transparent" />
             <span className="text-[11px] sm:text-xs text-emerald-100/70 uppercase tracking-[0.22em]">
@@ -206,7 +200,7 @@ export default function TaheelSmartLink() {
             <div className="h-px flex-1 bg-gradient-to-r from-transparent via-sky-400/60 to-transparent" />
           </div>
 
-          {/* لوجوهات المتاجر + الويب مع ظهور تدريجي وحركة ديناميكية عند الضغط */}
+          {/* لوجوهات المتاجر + الويب */}
           <div className="mt-2 flex flex-col gap-4">
             <div
               className={`text-[11px] sm:text-xs text-emerald-100/75 ${align}`}
@@ -215,72 +209,74 @@ export default function TaheelSmartLink() {
             </div>
 
             <div className="flex items-center justify-center gap-4 sm:gap-6">
-{/* Google Play */}
-<a
-  href={ANDROID_URL}
-  className={`group inline-flex flex-col items-center gap-1 transition-all duration-700 ${
-    mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
-  }`}
-  style={{ transitionDelay: "120ms" }}
-  aria-label="Google Play"
->
-  <div className="relative h-16 w-16 sm:h-20 sm:w-20 rounded-2xl bg-white/5 border border-white/20 shadow-[0_10px_30px_rgba(15,23,42,0.8)] group-hover:bg-white/10 group-hover:border-emerald-300/70 group-active:scale-95 group-active:shadow-[0_4px_16px_rgba(16,185,129,0.7)] transition-all overflow-hidden">
-    <img
-      src="/icon-google-play.png"
-      alt="Google Play"
-      className="h-full w-full object-contain drop-shadow-[0_0_16px_rgba(56,189,248,0.8)]"
-    />
-  </div>
-  <span className="text-[11px] sm:text-xs text-emerald-100/80">Google Play</span>
-</a>
+              {/* Google Play */}
+              <a
+                href={ANDROID_URL}
+                className={`group inline-flex flex-col items-center gap-1 transition-all duration-700 ${
+                  mounted
+                    ? "opacity-100 translate-y-0"
+                    : "opacity-0 translate-y-4"
+                }`}
+                style={{ transitionDelay: "120ms" }}
+                aria-label="Google Play"
+              >
+                <div className="relative h-16 w-16 sm:h-20 sm:w-20 rounded-2xl bg-white/5 border border-white/20 shadow-[0_10px_30px_rgba(15,23,42,0.8)] group-hover:bg-white/10 group-hover:border-emerald-300/70 group-active:scale-95 group-active:shadow-[0_4px_16px_rgba(16,185,129,0.7)] transition-all overflow-hidden flex items-center justify-center">
+                  <img
+                    src="/icon-google-play.png"
+                    alt="Google Play"
+                    className="h-full w-full object-contain drop-shadow-[0_0_16px_rgba(56,189,248,0.8)]"
+                  />
+                </div>
+                <span className="text-[11px] sm:text-xs text-emerald-100/80">
+                  Google Play
+                </span>
+              </a>
 
-{/* App Store */}
-<a
-  href={IOS_URL}
-  className={`group inline-flex flex-col items-center gap-1 transition-all duration-700 ${
-    mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
-  }`}
-  style={{ transitionDelay: "220ms" }}
-  aria-label="App Store"
->
-  <div className="relative h-16 w-16 sm:h-20 sm:w-20 rounded-2xl bg-white/5 border border-white/20 shadow-[0_10px_30px_rgba(15,23,42,0.8)] group-hover:bg-white/10 group-hover:border-sky-300/70 group-active:scale-95 group-active:shadow-[0_4px_16px_rgba(59,130,246,0.7)] transition-all overflow-hidden">
-    <img
-      src="/icon-app-store.png"
-      alt="App Store"
-      className="h-full w-full object-contain drop-shadow-[0_0_16px_rgba(96,165,250,0.9)]"
-    />
-  </div>
-  <span className="text-[11px] sm:text-xs text-emerald-100/80">App Store</span>
-</a>
+              {/* App Store */}
+              <a
+                href={IOS_URL}
+                className={`group inline-flex flex-col items-center gap-1 transition-all duration-700 ${
+                  mounted
+                    ? "opacity-100 translate-y-0"
+                    : "opacity-0 translate-y-4"
+                }`}
+                style={{ transitionDelay: "220ms" }}
+                aria-label="App Store"
+              >
+                <div className="relative h-16 w-16 sm:h-20 sm:w-20 rounded-2xl bg-white/5 border border-white/20 shadow-[0_10px_30px_rgba(15,23,42,0.8)] group-hover:bg-white/10 group-hover:border-sky-300/70 group-active:scale-95 group-active:shadow-[0_4px_16px_rgba(59,130,246,0.7)] transition-all overflow-hidden flex items-center justify-center">
+                  <img
+                    src="/icon-app-store.png"
+                    alt="App Store"
+                    className="h-full w-full object-contain drop-shadow-[0_0_16px_rgba(96,165,250,0.9)]"
+                  />
+                </div>
+                <span className="text-[11px] sm:text-xs text-emerald-100/80">
+                  App Store
+                </span>
+              </a>
 
-{/* TAHEEL Web */}
-<a
-  href={WEB_URL}
-  className={`group inline-flex flex-col items-center gap-1 transition-all duration-700 ${
-    mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
-  }`}
-  style={{ transitionDelay: "320ms" }}
-  aria-label={t.openWeb}
->
-  <div className="relative h-16 w-16 sm:h-20 sm:w-20 rounded-2xl 
-                  bg-white/5 border border-emerald-300/70 
-                  flex items-center justify-center 
-                  shadow-[0_10px_30px_rgba(16,185,129,0.8)] 
-                  group-hover:bg-emerald-500/10 
-                  group-active:scale-95 
-                  group-active:shadow-[0_4px_16px_rgba(16,185,129,0.9)] 
-                  transition-all overflow-hidden">
-    <img
-      src="/icon-taheel-web.png"
-      alt="TAHEEL Web"
-      className="h-10 w-10 sm:h-12 sm:w-12 object-contain drop-shadow-[0_0_16px_rgba(16,185,129,0.9)]"
-    />
-  </div>
-  <span className="text-[11px] sm:text-xs text-emerald-100/80">
-    {t.webLabel}
-  </span>
-</a>
-
+              {/* TAHEEL Web */}
+              <a
+                href={WEB_URL}
+                className={`group inline-flex flex-col items-center gap-1 transition-all duration-700 ${
+                  mounted
+                    ? "opacity-100 translate-y-0"
+                    : "opacity-0 translate-y-4"
+                }`}
+                style={{ transitionDelay: "320ms" }}
+                aria-label={t.openWeb}
+              >
+                <div className="relative h-16 w-16 sm:h-20 sm:w-20 rounded-2xl bg-white/5 border border-emerald-300/70 shadow-[0_10px_30px_rgba(16,185,129,0.8)] group-hover:bg-emerald-500/10 group-active:scale-95 group-active:shadow-[0_4px_16px_rgba(16,185,129,0.9)] transition-all overflow-hidden flex items-center justify-center">
+                  <img
+                    src="/icon-taheel-web.png"
+                    alt="TAHEEL Web"
+                    className="h-full w-full object-contain drop-shadow-[0_0_16px_rgba(16,185,129,0.9)]"
+                  />
+                </div>
+                <span className="text-[11px] sm:text-xs text-emerald-100/80">
+                  {t.webLabel}
+                </span>
+              </a>
             </div>
           </div>
 
