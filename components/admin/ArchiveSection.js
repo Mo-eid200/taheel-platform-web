@@ -350,7 +350,7 @@ export default function ArchiveSection({ lang = "ar" }) {
             <div className="font-bold mb-1 text-emerald-600">
               {lang === "ar" ? "الكود" : "QR Code"}
             </div>
-            <StyledQRCode value={getSmartQrUrl(qrFor)} size={140} />
+            <StyledQRCode value={getSmartQrUrl(qrFor)} size={300} />
             <a
               href={getSmartQrUrl(qrFor)}
               target="_blank"
@@ -396,7 +396,7 @@ export default function ArchiveSection({ lang = "ar" }) {
         {quickSlug && (
           <div ref={quickQrRef} className="mt-5 flex flex-col items-center gap-2 bg-[#101b15] border border-emerald-400 rounded-xl p-5">
             <div className="font-bold mb-1 text-emerald-600">{lang === "ar" ? "كود الصفحة" : "Page QR"}</div>
-            <StyledQRCode value={getPageUrl(quickSlug)} size={140} />
+            <StyledQRCode value={getPageUrl(quickSlug)} size={300} />
             <a href={getPageUrl(quickSlug)} target="_blank" rel="noopener noreferrer" className="text-emerald-400 underline break-all font-bold mt-2">
               {getPageUrl(quickSlug)}
             </a>
