@@ -174,56 +174,76 @@ export default function ArchiveSection({ lang = "ar" }) {
     }
 
     // رفع ملف للأرشيف
-    if (!file || !nameAr || !nameEn) {
-      setMsg(
-        lang === "ar" ? "كل الحقول مطلوبة!" : "All fields are required!"
-      );
-      return;
-    }
+// رفع ملف للأرشيف
+if (!file || !nameAr || !nameEn) {
+  setMsg(
+    lang === "ar" ? "كل الحقول مطلوبة!" : "All fields are required!"
+  );
+  return;
+}
 
-    setUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("category", category);
+setUploading(true);
+try {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("category", category);
 
-      const uploadRes = await fetch("/api/upload-to-gcs", {
-        method: "POST",
-        body: formData,
-      });
-      const uploadJson = await uploadRes.json();
-      if (!uploadJson.url) throw new Error("Upload failed");
+  const uploadRes = await fetch("/api/upload-to-gcs", {
+    method: "POST",
+    body: formData,
+  });
 
-      const docRef = await addDoc(collection(firestore, "archiveFiles"), {
-        nameAr,
-        nameEn,
-        descAr,
-        descEn,
-        category,
-        link: uploadJson.url,
-        createdAt: Timestamp.now(),
-      });
+  // 👈 هنا التعديل
+  if (!uploadRes.ok) {
+    const errorText = await uploadRes.text(); // بس للـ log
+    console.error("Upload error:", uploadRes.status, errorText);
 
-      setQrFor(docRef.id);
-      setMsg(
-        lang === "ar"
-          ? "تم رفع الملف بنجاح ✅"
-          : "File uploaded successfully ✅"
-      );
+    setMsg(
+      lang === "ar"
+        ? "حجم الملف كبير أو حدث خطأ أثناء الرفع."
+        : "File is too large or upload failed."
+    );
+    throw new Error("UPLOAD_FAILED");
+  }
 
-      // reset
-      setFile(null);
-      setNameAr("");
-      setNameEn("");
-      setDescAr("");
-      setDescEn("");
-      setReloadKey((k) => k + 1);
-    } catch (err) {
-      console.error(err);
-      setMsg(lang === "ar" ? "خطأ أثناء الرفع!" : "Upload error!");
-    } finally {
-      setUploading(false);
-    }
+  const uploadJson = await uploadRes.json();
+  if (!uploadJson?.url) {
+    throw new Error("NO_URL");
+  }
+
+  const docRef = await addDoc(collection(firestore, "archiveFiles"), {
+    nameAr,
+    nameEn,
+    descAr,
+    descEn,
+    category,
+    link: uploadJson.url,
+    createdAt: Timestamp.now(),
+  });
+
+  setQrFor(docRef.id);
+  setMsg(
+    lang === "ar"
+      ? "تم رفع الملف بنجاح ✅"
+      : "File uploaded successfully ✅"
+  );
+
+  // reset
+  setFile(null);
+  setNameAr("");
+  setNameEn("");
+  setDescAr("");
+  setDescEn("");
+  setReloadKey((k) => k + 1);
+} catch (err) {
+  console.error(err);
+  if (!msg) {
+    setMsg(lang === "ar" ? "خطأ أثناء الرفع!" : "Upload error!");
+  }
+} finally {
+  setUploading(false);
+}
+
   };
 
   /* =========================
