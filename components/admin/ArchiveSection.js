@@ -487,7 +487,7 @@ const downloadFromRef = (ref, filename) => {
                 type="file"
                 className="file:rounded-lg file:bg-emerald-600 file:text-white file:font-bold file:px-3 file:py-2 file:border-0 file:cursor-pointer col-span-2"
                 accept="application/pdf,image/*"
-                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                onChange={handleFileChange}
                 required
               />
             </>
