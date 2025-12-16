@@ -41,13 +41,9 @@ const slugify = (s) =>
 const getVerifyUrl = (id) => `https://www.taheel.ae/verify/${id}`;
 const getPageUrl = (slug) => `https://www.taheel.ae/p/u/${slug}`;
 const getSmartQrUrl = (qrKey) => {
-  if (qrKey?.startsWith("PAGE::")) {
-    return getPageUrl(qrKey.replace("PAGE::", ""));
-  }
+  if (qrKey?.startsWith("PAGE::")) return getPageUrl(qrKey.replace("PAGE::", ""));
   return getVerifyUrl(qrKey);
 };
-
-/* ========================================================= */
 
 export default function ArchiveSection({ lang = "ar" }) {
   const [category, setCategory] = useState("translation");
@@ -81,21 +77,40 @@ export default function ArchiveSection({ lang = "ar" }) {
   const [reloadKey, setReloadKey] = useState(0);
 
   /* =========================
-     جلب البيانات حسب التصنيف
+     File change
+  ========================== */
+  const MAX_MB = 8; // غيّرها حسب limit في API
+  const handleFileChange = (e) => {
+    const f = e.target.files?.[0] || null;
+    if (!f) {
+      setFile(null);
+      return;
+    }
+    const sizeMb = f.size / (1024 * 1024);
+    if (sizeMb > MAX_MB) {
+      setMsg(lang === "ar" ? `الملف أكبر من ${MAX_MB}MB` : `File exceeds ${MAX_MB}MB`);
+      e.target.value = "";
+      setFile(null);
+      return;
+    }
+    setMsg("");
+    setFile(f);
+  };
+
+  /* =========================
+     Fetch list by category
   ========================== */
   useEffect(() => {
+    let mounted = true;
+
     async function fetchList() {
       setLoading(true);
-
       try {
         if (isVip) {
-          const qy = query(
-            collection(firestore, "client_pages"),
-            orderBy("createdAt", "desc")
-          );
+          const qy = query(collection(firestore, "client_pages"), orderBy("createdAt", "desc"));
           const snap = await getDocs(qy);
           const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          setFiles(docs);
+          if (mounted) setFiles(docs);
         } else {
           const qy = query(
             collection(firestore, "archiveFiles"),
@@ -104,16 +119,19 @@ export default function ArchiveSection({ lang = "ar" }) {
           );
           const snap = await getDocs(qy);
           const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          setFiles(docs);
+          if (mounted) setFiles(docs);
         }
       } catch (err) {
         console.error("Fetch error:", err);
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     }
 
     fetchList();
+    return () => {
+      mounted = false;
+    };
   }, [category, isVip, reloadKey]);
 
   /* =========================
@@ -123,21 +141,16 @@ export default function ArchiveSection({ lang = "ar" }) {
     e.preventDefault();
     setMsg("");
 
+    // ========= VIP Page =========
     if (isVip) {
-      // إنشاء صفحة VIP
       if (!clientName || !clientNumber) {
-        setMsg(
-          lang === "ar"
-            ? "اسم ورقم العميل مطلوبان."
-            : "Client name & number are required."
-        );
+        setMsg(lang === "ar" ? "اسم ورقم العميل مطلوبان." : "Client name & number are required.");
         return;
       }
 
       setUploading(true);
       try {
-        const finalSlug =
-          vipSlug || slugify(clientName) || `vip-${Date.now().toString(36)}`;
+        const finalSlug = vipSlug || slugify(clientName) || `vip-${Date.now().toString(36)}`;
 
         const pageRef = doc(collection(firestore, "client_pages"), finalSlug);
         await setDoc(pageRef, {
@@ -155,169 +168,129 @@ export default function ArchiveSection({ lang = "ar" }) {
         });
 
         setQrFor(`PAGE::${finalSlug}`);
-        setMsg(
-          lang === "ar" ? "تم إنشاء صفحة VIP ✅" : "VIP page created ✅"
-        );
+        setMsg(lang === "ar" ? "تم إنشاء صفحة VIP ✅" : "VIP page created ✅");
         setReloadKey((k) => k + 1);
       } catch (err) {
         console.error(err);
-        setMsg(
-          lang === "ar"
-            ? "خطأ أثناء إنشاء الصفحة!"
-            : "Error creating VIP page!"
-        );
+        setMsg(lang === "ar" ? "خطأ أثناء إنشاء الصفحة!" : "Error creating VIP page!");
       } finally {
         setUploading(false);
       }
-
       return;
     }
 
-    // رفع ملف للأرشيف
-// رفع ملف للأرشيف
-if (!file || !nameAr || !nameEn) {
-  setMsg(
-    lang === "ar" ? "كل الحقول مطلوبة!" : "All fields are required!"
-  );
-  return;
-}
+    // ========= Archive File =========
+    if (!file || !nameAr || !nameEn) {
+      setMsg(lang === "ar" ? "كل الحقول مطلوبة!" : "All fields are required!");
+      return;
+    }
 
-setUploading(true);
-try {
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("category", category);
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("category", category);
 
-  const uploadRes = await fetch("/api/upload-to-gcs", {
-    method: "POST",
-    body: formData,
-  });
+      const uploadRes = await fetch("/api/upload-to-gcs", {
+        method: "POST",
+        body: formData,
+      });
 
-  // 👈 هنا التعديل
-  if (!uploadRes.ok) {
-    const errorText = await uploadRes.text(); // بس للـ log
-    console.error("Upload error:", uploadRes.status, errorText);
+      if (!uploadRes.ok) {
+        const errorText = await uploadRes.text();
+        console.error("Upload error:", uploadRes.status, errorText);
+        setMsg(lang === "ar" ? "حجم الملف كبير أو حدث خطأ أثناء الرفع." : "File is too large or upload failed.");
+        throw new Error("UPLOAD_FAILED");
+      }
 
-    setMsg(
-      lang === "ar"
-        ? "حجم الملف كبير أو حدث خطأ أثناء الرفع."
-        : "File is too large or upload failed."
-    );
-    throw new Error("UPLOAD_FAILED");
-  }
+      const uploadJson = await uploadRes.json();
+      if (!uploadJson?.url) throw new Error("NO_URL");
 
-  const uploadJson = await uploadRes.json();
-  if (!uploadJson?.url) {
-    throw new Error("NO_URL");
-  }
+      const docRef = await addDoc(collection(firestore, "archiveFiles"), {
+        nameAr,
+        nameEn,
+        descAr,
+        descEn,
+        category,
+        link: uploadJson.url,
+        createdAt: Timestamp.now(),
+      });
 
-  const docRef = await addDoc(collection(firestore, "archiveFiles"), {
-    nameAr,
-    nameEn,
-    descAr,
-    descEn,
-    category,
-    link: uploadJson.url,
-    createdAt: Timestamp.now(),
-  });
+      setQrFor(docRef.id);
+      setMsg(lang === "ar" ? "تم رفع الملف بنجاح ✅" : "File uploaded successfully ✅");
 
-  setQrFor(docRef.id);
-  setMsg(
-    lang === "ar"
-      ? "تم رفع الملف بنجاح ✅"
-      : "File uploaded successfully ✅"
-  );
-
-  // reset
-  setFile(null);
-  setNameAr("");
-  setNameEn("");
-  setDescAr("");
-  setDescEn("");
-  setReloadKey((k) => k + 1);
-} catch (err) {
-  console.error(err);
-  if (!msg) {
-    setMsg(lang === "ar" ? "خطأ أثناء الرفع!" : "Upload error!");
-  }
-} finally {
-  setUploading(false);
-}
-
+      // reset
+      setFile(null);
+      setNameAr("");
+      setNameEn("");
+      setDescAr("");
+      setDescEn("");
+      setReloadKey((k) => k + 1);
+    } catch (err) {
+      console.error(err);
+      if (!msg) setMsg(lang === "ar" ? "خطأ أثناء الرفع!" : "Upload error!");
+    } finally {
+      setUploading(false);
+    }
   };
 
   /* =========================
-     تنزيل QR كصورة (Canvas/SVG)
+     Download QR as PNG (Canvas/SVG)
   ========================== */
   const qrRef = useRef(null);
 
-const downloadFromRef = (ref, filename) => {
-  const root = ref.current;
-  if (!root) return;
+  const downloadFromRef = (ref, filename) => {
+    const root = ref.current;
+    if (!root) return;
 
-  // 1) لو Canvas → PNG مباشر
-  const canvas = root.querySelector("canvas");
-  if (canvas) {
-    const url = canvas.toDataURL("image/png");
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename.endsWith(".png") ? filename : `${filename}.png`;
-    a.click();
-    return;
-  }
-
-  // 2) لو SVG → نحوله الأول لـ PNG عن طريق Canvas
-  const svg = root.querySelector("svg");
-  if (svg) {
-    const svgData = new XMLSerializer().serializeToString(svg);
-    const svgBlob = new Blob([svgData], {
-      type: "image/svg+xml;charset=utf-8",
-    });
-    const DOMURL = window.URL || window.webkitURL || window;
-    const url = DOMURL.createObjectURL(svgBlob);
-
-    const img = new Image();
-    img.onload = () => {
-      const canvasEl = document.createElement("canvas");
-      const width =
-        svg.clientWidth ||
-        parseInt(svg.getAttribute("width") || "260", 10) ||
-        260;
-      const height =
-        svg.clientHeight ||
-        parseInt(svg.getAttribute("height") || "260", 10) ||
-        260;
-
-      canvasEl.width = width;
-      canvasEl.height = height;
-
-      const ctx = canvasEl.getContext("2d");
-      ctx.drawImage(img, 0, 0, width, height);
-
-      DOMURL.revokeObjectURL(url);
-
-      const pngData = canvasEl.toDataURL("image/png");
+    const canvas = root.querySelector("canvas");
+    if (canvas) {
+      const url = canvas.toDataURL("image/png");
       const a = document.createElement("a");
-      a.href = pngData;
+      a.href = url;
       a.download = filename.endsWith(".png") ? filename : `${filename}.png`;
       a.click();
-    };
+      return;
+    }
 
-    img.src = url;
-  }
-};
+    const svg = root.querySelector("svg");
+    if (svg) {
+      const svgData = new XMLSerializer().serializeToString(svg);
+      const svgBlob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
+      const DOMURL = window.URL || window.webkitURL || window;
+      const url = DOMURL.createObjectURL(svgBlob);
 
+      const img = new Image();
+      img.onload = () => {
+        const canvasEl = document.createElement("canvas");
+        const width = svg.clientWidth || parseInt(svg.getAttribute("width") || "260", 10) || 260;
+        const height = svg.clientHeight || parseInt(svg.getAttribute("height") || "260", 10) || 260;
+        canvasEl.width = width;
+        canvasEl.height = height;
+
+        const ctx = canvasEl.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+
+        DOMURL.revokeObjectURL(url);
+
+        const pngData = canvasEl.toDataURL("image/png");
+        const a = document.createElement("a");
+        a.href = pngData;
+        a.download = filename.endsWith(".png") ? filename : `${filename}.png`;
+        a.click();
+      };
+      img.src = url;
+    }
+  };
 
   const handleDownloadQR = (qrKey) => {
     if (!qrKey) return;
-    const name = qrKey.startsWith("PAGE::")
-      ? qrKey.replace("PAGE::", "")
-      : qrKey;
+    const name = qrKey.startsWith("PAGE::") ? qrKey.replace("PAGE::", "") : qrKey;
     downloadFromRef(qrRef, `taheel-qr-${name}.png`);
   };
 
   /* =========================
-     QR سريع لأي slug
+     Quick QR for any VIP slug
   ========================== */
   const quickQrRef = useRef(null);
 
@@ -329,10 +302,9 @@ const downloadFromRef = (ref, filename) => {
   /* =========================
      UI
   ========================== */
-
   return (
     <div className="max-w-4xl mx-auto p-4 font-cairo">
-      {/* ===== نموذج الإضافة (VIP أو أرشيف) ===== */}
+      {/* ===== Form (VIP or Archive) ===== */}
       <div className="bg-[#171f26] rounded-xl shadow-lg p-5 mb-8 border border-emerald-800">
         <h2 className="font-extrabold text-2xl mb-6 text-emerald-400 text-center drop-shadow">
           {isVip
@@ -344,11 +316,8 @@ const downloadFromRef = (ref, filename) => {
             : "Add New Archive File"}
         </h2>
 
-        <form
-          onSubmit={handleSubmit}
-          className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end"
-        >
-          {/* اختيار التصنيف */}
+        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+          {/* Category */}
           <select
             className="p-3 rounded-lg border-2 border-emerald-400 bg-[#1a272f] text-emerald-200 font-bold focus:outline-emerald-500 cursor-pointer col-span-2"
             value={category}
@@ -364,15 +333,12 @@ const downloadFromRef = (ref, filename) => {
             ))}
           </select>
 
-          {/* لو VIP */}
           {isVip ? (
             <>
               <input
                 type="text"
                 className="p-3 rounded-lg border-2 border-emerald-400 bg-[#1a272f] text-white font-bold placeholder:text-emerald-300"
-                placeholder={
-                  lang === "ar" ? "اسم العميل" : "Client name"
-                }
+                placeholder={lang === "ar" ? "اسم العميل" : "Client name"}
                 value={clientName}
                 onChange={(e) => {
                   setClientName(e.target.value);
@@ -383,9 +349,7 @@ const downloadFromRef = (ref, filename) => {
               <input
                 type="text"
                 className="p-3 rounded-lg border-2 border-emerald-400 bg-[#1a272f] text-white font-bold placeholder:text-emerald-300"
-                placeholder={
-                  lang === "ar" ? "رقم العميل" : "Client number"
-                }
+                placeholder={lang === "ar" ? "رقم العميل" : "Client number"}
                 value={clientNumber}
                 onChange={(e) => setClientNumber(e.target.value)}
                 required
@@ -393,22 +357,14 @@ const downloadFromRef = (ref, filename) => {
               <input
                 type="text"
                 className="p-3 rounded-lg border-2 border-emerald-400 bg-[#1a272f] text-white font-bold placeholder:text-emerald-300 md:col-span-2"
-                placeholder={
-                  lang === "ar"
-                    ? "Slug الرابط (مثال: mohamed-kestiro)"
-                    : "URL slug (e.g., mohamed-kestiro)"
-                }
+                placeholder={lang === "ar" ? "Slug الرابط (مثال: mohamed-kestiro)" : "URL slug (e.g., mohamed-kestiro)"}
                 value={vipSlug}
                 onChange={(e) => setVipSlug(slugify(e.target.value))}
               />
               <input
                 type="url"
                 className="p-3 rounded-lg border-2 border-gray-300 bg-[#26343d] text-gray-200 font-bold placeholder:text-gray-400 md:col-span-2"
-                placeholder={
-                  lang === "ar"
-                    ? "رابط صورة (اختياري)"
-                    : "Profile image URL (optional)"
-                }
+                placeholder={lang === "ar" ? "رابط صورة (اختياري)" : "Profile image URL (optional)"}
                 value={vipImageUrl}
                 onChange={(e) => setVipImageUrl(e.target.value)}
               />
@@ -423,28 +379,18 @@ const downloadFromRef = (ref, filename) => {
               {vipSlug && (
                 <div className="md:col-span-2 text-emerald-300 font-bold">
                   {lang === "ar" ? "رابط الصفحة:" : "Page URL:"}{" "}
-                  <a
-                    className="underline text-emerald-400"
-                    href={getPageUrl(vipSlug)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
+                  <a className="underline text-emerald-400" href={getPageUrl(vipSlug)} target="_blank" rel="noopener noreferrer">
                     {getPageUrl(vipSlug)}
                   </a>
                 </div>
               )}
             </>
           ) : (
-            // حقول رفع ملف
             <>
               <input
                 type="text"
                 className="p-3 rounded-lg border-2 border-emerald-400 bg-[#1a272f] text-white font-bold placeholder:text-emerald-300"
-                placeholder={
-                  lang === "ar"
-                    ? "اسم الملف بالعربية"
-                    : "Arabic name"
-                }
+                placeholder={lang === "ar" ? "اسم الملف بالعربية" : "Arabic name"}
                 value={nameAr}
                 onChange={(e) => setNameAr(e.target.value)}
                 required
@@ -452,11 +398,7 @@ const downloadFromRef = (ref, filename) => {
               <input
                 type="text"
                 className="p-3 rounded-lg border-2 border-emerald-400 bg-[#1a272f] text-white font-bold placeholder:text-emerald-300"
-                placeholder={
-                  lang === "ar"
-                    ? "اسم الملف بالإنجليزية"
-                    : "English name"
-                }
+                placeholder={lang === "ar" ? "اسم الملف بالإنجليزية" : "English name"}
                 value={nameEn}
                 onChange={(e) => setNameEn(e.target.value)}
                 required
@@ -464,22 +406,14 @@ const downloadFromRef = (ref, filename) => {
               <input
                 type="text"
                 className="p-3 rounded-lg border-2 border-gray-300 bg-[#26343d] text-gray-200 font-bold placeholder:text-gray-400"
-                placeholder={
-                  lang === "ar"
-                    ? "وصف بالعربية (اختياري)"
-                    : "Arabic desc (opt)"
-                }
+                placeholder={lang === "ar" ? "وصف بالعربية (اختياري)" : "Arabic desc (opt)"}
                 value={descAr}
                 onChange={(e) => setDescAr(e.target.value)}
               />
               <input
                 type="text"
                 className="p-3 rounded-lg border-2 border-gray-300 bg-[#26343d] text-gray-200 font-bold placeholder:text-gray-400"
-                placeholder={
-                  lang === "ar"
-                    ? "وصف بالإنجليزية (اختياري)"
-                    : "English desc (opt)"
-                }
+                placeholder={lang === "ar" ? "وصف بالإنجليزية (اختياري)" : "English desc (opt)"}
                 value={descEn}
                 onChange={(e) => setDescEn(e.target.value)}
               />
@@ -512,59 +446,39 @@ const downloadFromRef = (ref, filename) => {
           </button>
         </form>
 
-        {msg && (
-          <div className="text-center text-emerald-300 mt-3 font-bold">
-            {msg}
-          </div>
-        )}
+        {msg && <div className="text-center text-emerald-300 mt-3 font-bold">{msg}</div>}
 
-        {/* عرض QR الناتج من الإضافة أو من الجدول */}
         {qrFor && (
           <div
             ref={qrRef}
             className="mt-5 flex flex-col items-center justify-center gap-2 bg-[#101b15] border border-emerald-400 rounded-xl p-5 w-fit mx-auto"
           >
-            <div className="font-bold mb-1 text-emerald-600">
-              {lang === "ar" ? "الكود" : "QR Code"}
-            </div>
+            <div className="font-bold mb-1 text-emerald-600">{lang === "ar" ? "الكود" : "QR Code"}</div>
             <StyledQRCode value={getSmartQrUrl(qrFor)} size={260} />
-            <a
-              href={getSmartQrUrl(qrFor)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-emerald-400 underline break-all font-bold mt-2"
-            >
+            <a href={getSmartQrUrl(qrFor)} target="_blank" rel="noopener noreferrer" className="text-emerald-400 underline break-all font-bold mt-2">
               {getSmartQrUrl(qrFor)}
             </a>
             <button
               onClick={() => handleDownloadQR(qrFor)}
               className="mt-2 bg-white text-emerald-700 border-2 border-emerald-700 font-bold rounded-lg px-5 py-2 hover:bg-emerald-50"
             >
-              {lang === "ar"
-                ? "تحميل الكود كصورة"
-                : "Download QR as image"}
+              {lang === "ar" ? "تحميل الكود كصورة" : "Download QR as image"}
             </button>
           </div>
         )}
       </div>
 
-      {/* ===== توليد QR سريع لأي صفحة VIP ===== */}
+      {/* ===== Quick QR ===== */}
       <div className="bg-[#151c23] rounded-xl shadow-lg p-5 mb-8 border border-emerald-800">
         <h3 className="font-extrabold text-xl mb-4 text-emerald-400">
-          {lang === "ar"
-            ? "توليد QR سريع لصفحة VIP"
-            : "Quick QR for VIP page"}
+          {lang === "ar" ? "توليد QR سريع لصفحة VIP" : "Quick QR for VIP page"}
         </h3>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
           <input
             type="text"
             className="p-3 rounded-lg border-2 border-emerald-400 bg-[#1a272f] text-white font-bold placeholder:text-emerald-300 md:col-span-2"
-            placeholder={
-              lang === "ar"
-                ? "اكتب الـ slug (مثال: mohamed-kestiro)"
-                : "Enter slug (e.g., mohamed-kestiro)"
-            }
+            placeholder={lang === "ar" ? "اكتب الـ slug (مثال: mohamed-kestiro)" : "Enter slug (e.g., mohamed-kestiro)"}
             value={quickSlug}
             onChange={(e) => setQuickSlug(slugify(e.target.value))}
           />
@@ -587,31 +501,22 @@ const downloadFromRef = (ref, filename) => {
             ref={quickQrRef}
             className="mt-5 flex flex-col items-center gap-2 bg-[#101b15] border border-emerald-400 rounded-xl p-5 w-fit mx-auto"
           >
-            <div className="font-bold mb-1 text-emerald-600">
-              {lang === "ar" ? "كود الصفحة" : "Page QR"}
-            </div>
+            <div className="font-bold mb-1 text-emerald-600">{lang === "ar" ? "كود الصفحة" : "Page QR"}</div>
             <StyledQRCode value={getPageUrl(quickSlug)} size={260} />
-            <a
-              href={getPageUrl(quickSlug)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-emerald-400 underline break-all font-bold mt-2"
-            >
+            <a href={getPageUrl(quickSlug)} target="_blank" rel="noopener noreferrer" className="text-emerald-400 underline break-all font-bold mt-2">
               {getPageUrl(quickSlug)}
             </a>
             <button
               onClick={handleDownloadQuickQR}
               className="mt-2 bg-white text-emerald-700 border-2 border-emerald-700 font-bold rounded-lg px-5 py-2 hover:bg-emerald-50"
             >
-              {lang === "ar"
-                ? "تحميل الكود كصورة"
-                : "Download QR as image"}
+              {lang === "ar" ? "تحميل الكود كصورة" : "Download QR as image"}
             </button>
           </div>
         )}
       </div>
 
-      {/* ===== فلاتر التصنيفات ===== */}
+      {/* ===== Category chips ===== */}
       <div className="flex flex-wrap gap-3 justify-center mb-6">
         {Object.keys(CATEGORY_LABELS).map((cat) => (
           <button
@@ -626,14 +531,12 @@ const downloadFromRef = (ref, filename) => {
               setQrFor(null);
             }}
           >
-            {lang === "ar"
-              ? CATEGORY_LABELS[cat].ar
-              : CATEGORY_LABELS[cat].en}
+            {lang === "ar" ? CATEGORY_LABELS[cat].ar : CATEGORY_LABELS[cat].en}
           </button>
         ))}
       </div>
 
-      {/* ===== جدول العناصر ===== */}
+      {/* ===== Listing ===== */}
       <div className="bg-[#1a272f] rounded-xl shadow-lg p-5 border border-emerald-900">
         <div className="text-xl font-extrabold mb-4 text-emerald-400 text-center">
           {lang === "ar"
@@ -642,47 +545,27 @@ const downloadFromRef = (ref, filename) => {
         </div>
 
         {loading ? (
-          <div className="text-center py-6 font-bold text-emerald-200">
-            {lang === "ar" ? "جارٍ التحميل..." : "Loading..."}
-          </div>
+          <div className="text-center py-6 font-bold text-emerald-200">{lang === "ar" ? "جارٍ التحميل..." : "Loading..."}</div>
         ) : files.length === 0 ? (
-          <div className="text-center py-6 text-gray-400 font-bold">
-            {lang === "ar" ? "لا يوجد عناصر." : "No items here."}
-          </div>
+          <div className="text-center py-6 text-gray-400 font-bold">{lang === "ar" ? "لا يوجد عناصر." : "No items here."}</div>
         ) : isVip ? (
-          // جدول صفحات VIP
           <div className="overflow-x-auto">
             <table className="w-full border-collapse">
               <thead>
                 <tr className="bg-emerald-900 text-emerald-200 font-bold text-lg">
-                  <th className="p-3">
-                    {lang === "ar" ? "الاسم" : "Client"}
-                  </th>
-                  <th className="p-3">
-                    {lang === "ar" ? "رقم العميل" : "Client No."}
-                  </th>
+                  <th className="p-3">{lang === "ar" ? "الاسم" : "Client"}</th>
+                  <th className="p-3">{lang === "ar" ? "رقم العميل" : "Client No."}</th>
                   <th className="p-3">Slug</th>
-                  <th className="p-3">
-                    {lang === "ar" ? "الرابط" : "URL"}
-                  </th>
+                  <th className="p-3">{lang === "ar" ? "الرابط" : "URL"}</th>
                   <th className="p-3">QR</th>
                 </tr>
               </thead>
               <tbody>
                 {files.map((p) => (
-                  <tr
-                    key={p.slug || p.id}
-                    className="border-b border-emerald-800 hover:bg-emerald-950 transition"
-                  >
-                    <td className="p-3 font-extrabold text-white">
-                      {p.clientName || "-"}
-                    </td>
-                    <td className="p-3 text-emerald-200">
-                      {p.clientNumber || "-"}
-                    </td>
-                    <td className="p-3 text-emerald-300">
-                      {p.slug || p.id}
-                    </td>
+                  <tr key={p.slug || p.id} className="border-b border-emerald-800 hover:bg-emerald-950 transition">
+                    <td className="p-3 font-extrabold text-white">{p.clientName || "-"}</td>
+                    <td className="p-3 text-emerald-200">{p.clientNumber || "-"}</td>
+                    <td className="p-3 text-emerald-300">{p.slug || p.id}</td>
                     <td className="p-3">
                       <a
                         href={getPageUrl(p.slug || p.id)}
@@ -707,44 +590,23 @@ const downloadFromRef = (ref, filename) => {
             </table>
           </div>
         ) : (
-          // جدول ملفات الأرشيف
           <div className="overflow-x-auto">
             <table className="w-full border-collapse">
               <thead>
                 <tr className="bg-emerald-900 text-emerald-200 font-bold text-lg">
-                  <th className="p-3">
-                    {lang === "ar" ? "الاسم" : "Name"}
-                  </th>
-                  <th className="p-3">
-                    {lang === "ar" ? "الوصف" : "Description"}
-                  </th>
-                  <th className="p-3">
-                    {lang === "ar" ? "الرابط" : "Link"}
-                  </th>
-                  <th className="p-3">
-                    {lang === "ar" ? "QR التحقق" : "Verify QR"}
-                  </th>
+                  <th className="p-3">{lang === "ar" ? "الاسم" : "Name"}</th>
+                  <th className="p-3">{lang === "ar" ? "الوصف" : "Description"}</th>
+                  <th className="p-3">{lang === "ar" ? "الرابط" : "Link"}</th>
+                  <th className="p-3">{lang === "ar" ? "QR التحقق" : "Verify QR"}</th>
                 </tr>
               </thead>
               <tbody>
                 {files.map((f) => (
-                  <tr
-                    key={f.id}
-                    className="border-b border-emerald-800 hover:bg-emerald-950 transition"
-                  >
-                    <td className="p-3 font-extrabold text-white">
-                      {lang === "ar" ? f.nameAr : f.nameEn}
-                    </td>
-                    <td className="p-3 text-emerald-200">
-                      {lang === "ar" ? f.descAr : f.descEn}
-                    </td>
+                  <tr key={f.id} className="border-b border-emerald-800 hover:bg-emerald-950 transition">
+                    <td className="p-3 font-extrabold text-white">{lang === "ar" ? f.nameAr : f.nameEn}</td>
+                    <td className="p-3 text-emerald-200">{lang === "ar" ? f.descAr : f.descEn}</td>
                     <td className="p-3">
-                      <a
-                        href={f.link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-emerald-400 underline break-all font-bold hover:text-emerald-200 transition"
-                      >
+                      <a href={f.link} target="_blank" rel="noopener noreferrer" className="text-emerald-400 underline break-all font-bold hover:text-emerald-200 transition">
                         {lang === "ar" ? "تحميل" : "Download"}
                       </a>
                     </td>
