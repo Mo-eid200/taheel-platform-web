@@ -602,7 +602,7 @@ export default function TaheelPortfolioPage() {
                       امسح الكود لتحميل التطبيق أو فتح الرابط.
                     </div>
 <div className="mt-4 flex justify-center">
-  <div className="relative w-[170px] h-[170px] sm:w-[190px] sm:h-[190px] md:w-[210px] md:h-[210px] rounded-3xl bg-white/6 ring-1 ring-white/12 overflow-hidden">
+  <div className="relative w-[95px] h-[95px] sm:w-[110px] sm:h-[110px] md:w-[125px] md:h-[125px] rounded-2xl bg-white/6 ring-1 ring-white/12 overflow-hidden">
     <Image
       src="/Taheel-qr.png"
       alt="Taheel QR"
