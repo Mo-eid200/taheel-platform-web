@@ -601,14 +601,18 @@ export default function TaheelPortfolioPage() {
                     <div className="mt-2 text-sm text-white/70">
                       امسح الكود لتحميل التطبيق أو فتح الرابط.
                     </div>
-                    <div className="mt-4 relative w-full aspect-square rounded-3xl bg-white/6 ring-1 ring-white/12 overflow-hidden">
-                      <Image
-                        src="/Taheel-qr.png"
-                        alt="Taheel QR"
-                        fill
-                        className="object-contain p-6"
-                      />
-                    </div>
+<div className="mt-4 flex justify-center">
+  <div className="relative w-[170px] h-[170px] sm:w-[190px] sm:h-[190px] md:w-[210px] md:h-[210px] rounded-3xl bg-white/6 ring-1 ring-white/12 overflow-hidden">
+    <Image
+      src="/Taheel-qr.png"
+      alt="Taheel QR"
+      fill
+      className="object-contain p-4"
+      sizes="(max-width: 640px) 170px, (max-width: 768px) 190px, 210px"
+      priority={false}
+    />
+  </div>
+</div>
                   </Card>
 
                   {/* ✅ DOWNLOAD CARD (Store badges as buttons) */}
