@@ -292,12 +292,9 @@ function HomePageInner() {
               <p className="text-xs sm:text-sm text-gray-200 font-medium">
                 {t.slogan}
               </p>
-              <p className="text-xs sm:text-base text-gray-300">
-                {t.desc}
-              </p>
+              <p className="text-xs sm:text-base text-gray-300">{t.desc}</p>
               <p className="text-[10px] sm:text-xs md:text-sm text-gray-400 font-medium">
-                DOCUMENTS CLEARING AND INFORMATIONS GOVERNMENT SERVICES
-                PLATFORM
+                DOCUMENTS CLEARING AND INFORMATIONS GOVERNMENT SERVICES PLATFORM
               </p>
             </div>
           </div>
@@ -451,6 +448,52 @@ function HomePageInner() {
             >
               {t.hero4}
             </motion.p>
+
+            {/* ✅ App Store / Google Play badges (image buttons) */}
+            <motion.div
+              variants={{
+                hidden: { opacity: 0, y: 22 },
+                visible: { opacity: 1, y: 0 },
+              }}
+              transition={{ duration: 0.9, delay: 0.8 }}
+              className={`flex flex-wrap items-center gap-3 sm:gap-4 mt-1 ${
+                isArabic ? "justify-start" : "justify-end"
+              }`}
+            >
+              <a
+                href="https://play.google.com/store/apps/details?id=ae.taheel.app"
+                target="_blank"
+                rel="noreferrer"
+                className="cursor-pointer hover:scale-[1.03] active:scale-[0.99] transition-transform"
+                aria-label="Google Play"
+              >
+                <Image
+                  src="/google-play.png"
+                  alt="Get it on Google Play"
+                  width={170}
+                  height={52}
+                  className="h-[44px] sm:h-[52px] w-auto drop-shadow-lg"
+                  priority={false}
+                />
+              </a>
+
+              <a
+                href="https://apps.apple.com/ae/app/taheel-government-services/id6755335579"
+                target="_blank"
+                rel="noreferrer"
+                className="cursor-pointer hover:scale-[1.03] active:scale-[0.99] transition-transform"
+                aria-label="App Store"
+              >
+                <Image
+                  src="/Download_on_the_App_Store.png"
+                  alt="Download on the App Store"
+                  width={170}
+                  height={52}
+                  className="h-[44px] sm:h-[52px] w-auto drop-shadow-lg"
+                  priority={false}
+                />
+              </a>
+            </motion.div>
           </motion.div>
         </div>
       </section>
@@ -473,13 +516,7 @@ function HomePageInner() {
           </h2>
 
           <div className="relative z-10">
-            {/* TrackingForm already expects LANG + lang + router, which you did */}
-            <TrackingForm
-              LANG={LANG}
-              lang={lang}
-              isArabic={isArabic}
-              router={router}
-            />
+            <TrackingForm LANG={LANG} lang={lang} isArabic={isArabic} router={router} />
           </div>
 
           <style jsx>{`
@@ -523,9 +560,7 @@ function HomePageInner() {
               key={dynamicIdx}
               className="absolute left-0 right-0 text-sm sm:text-lg md:text-xl font-semibold text-emerald-200 mb-1 animate-fade-in-up transition-all duration-700"
             >
-              {isArabic
-                ? dynamicTextsAr[dynamicIdx]
-                : dynamicTextsEn[dynamicIdx]}
+              {isArabic ? dynamicTextsAr[dynamicIdx] : dynamicTextsEn[dynamicIdx]}
             </span>
           </div>
 
@@ -542,10 +577,7 @@ function HomePageInner() {
           {/* Certifications */}
           <div className="flex flex-wrap justify-center items-center gap-3 sm:gap-5 my-4 sm:my-6">
             {certifications.map((cert, i) => (
-              <span
-                key={i}
-                className="group flex flex-col items-center"
-              >
+              <span key={i} className="group flex flex-col items-center">
                 <img
                   src={cert.src}
                   alt={cert.alt[lang]}
@@ -563,11 +595,7 @@ function HomePageInner() {
           <div className="mt-4 sm:mt-6">
             <Link
               href={registerLink}
-              aria-label={
-                isArabic
-                  ? "سجّل الآن في منصة تأهيل"
-                  : "Register now on Taheel"
-              }
+              aria-label={isArabic ? "سجّل الآن في منصة تأهيل" : "Register now on Taheel"}
             >
               <button className="cursor-pointer px-6 sm:px-8 py-2 sm:py-3 text-white text-xs sm:text-base md:text-lg font-semibold bg-gradient-to-r from-emerald-700 via-emerald-500 to-green-700 rounded-full shadow-lg hover:scale-110 transition-transform duration-300 hover:brightness-110 focus:outline-none focus:ring-4 focus:ring-emerald-400 animate-bounce">
                 {t.registerNow || "سجّل الآن"}
@@ -675,18 +703,11 @@ function HomePageInner() {
                       <div className="w-full h-full rounded-full overflow-hidden flex items-center justify-center bg-gradient-to-br from-emerald-300 via-white to-cyan-300 shadow-lg">
                         <Image
                           src={service.icon}
-                          alt={
-                            t[service.key] ||
-                            (isArabic
-                              ? "أيقونة الخدمة"
-                              : "Service icon")
-                          }
+                          alt={t[service.key] || (isArabic ? "أيقونة الخدمة" : "Service icon")}
                           width={56}
                           height={56}
                           className="w-10 sm:w-14 h-10 sm:h-14 object-contain"
-                          style={{
-                            background: "transparent",
-                          }}
+                          style={{ background: "transparent" }}
                         />
                       </div>
                     </div>
@@ -704,11 +725,7 @@ function HomePageInner() {
                     {/* counter */}
                     <div className="flex flex-col items-center mb-4 sm:mb-6 mt-auto">
                       <span className="text-xl sm:text-3xl font-extrabold text-emerald-400 drop-shadow-sm">
-                        <CountUp
-                          end={service.counter}
-                          duration={2}
-                          separator=","
-                        />
+                        <CountUp end={service.counter} duration={2} separator="," />
                       </span>
                       <span className="text-xs text-gray-400 mt-1">
                         {service.counterLabel}
@@ -757,35 +774,62 @@ function HomePageInner() {
             <div className="text-gray-400 text-xs sm:text-sm leading-relaxed max-w-xs text-justify">
               {isArabic ? (
                 <>
-                  <b>تأهيل</b> منصة معتمده (من حكومة دبي) ذكية
-                  تعتمد على الذكاء الاصطناعي والتقنيات
-                  الحديثة في متابعة وإنجاز المعاملات
-                  والمعلومات الحكومية.
+                  <b>تأهيل</b> منصة معتمده (من حكومة دبي) ذكية تعتمد على الذكاء
+                  الاصطناعي والتقنيات الحديثة في متابعة وإنجاز المعاملات والمعلومات
+                  الحكومية.
                   <br />
-                  جميع بياناتك محمية بأعلى معايير
-                  التشفير، وتتم المعالجة والمعاينة
+                  جميع بياناتك محمية بأعلى معايير التشفير، وتتم المعالجة والمعاينة
                   إلكترونيًا بسرعة وشفافية.
                   <br />
-                  تعتمد المنصة على إدارة رقمية متطورة
-                  وأرشفة مؤمنة، مع دعم مباشر وواجهة
-                  سهلة لكل المستخدمين حول العالم.
+                  تعتمد المنصة على إدارة رقمية متطورة وأرشفة مؤمنة، مع دعم مباشر
+                  وواجهة سهلة لكل المستخدمين حول العالم.
                 </>
               ) : (
                 <>
-                  <b>TAHEEL</b> is an AI-powered smart
-                  government platform for secure
-                  information and transaction management.
+                  <b>TAHEEL</b> is an AI-powered smart government platform for
+                  secure information and transaction management.
                   <br />
-                  Your data is protected with
-                  industry-leading encryption, and all
-                  processes are handled digitally with
-                  speed and full transparency.
+                  Your data is protected with industry-leading encryption, and all
+                  processes are handled digitally with speed and full transparency.
                   <br />
-                  The platform leverages advanced
-                  automation, secure archiving, and
+                  The platform leverages advanced automation, secure archiving, and
                   instant support for users worldwide.
                 </>
               )}
+            </div>
+
+            {/* ✅ App badges (small, consistent) */}
+            <div className="flex flex-wrap items-center gap-3 mt-2">
+              <a
+                href="https://play.google.com/store/apps/details?id=ae.taheel.app"
+                target="_blank"
+                rel="noreferrer"
+                className="cursor-pointer hover:scale-[1.03] active:scale-[0.99] transition-transform"
+                aria-label="Google Play"
+              >
+                <Image
+                  src="/google-play.png"
+                  alt="Get it on Google Play"
+                  width={150}
+                  height={46}
+                  className="h-[40px] w-auto"
+                />
+              </a>
+              <a
+                href="https://apps.apple.com/ae/app/taheel-government-services/id6755335579"
+                target="_blank"
+                rel="noreferrer"
+                className="cursor-pointer hover:scale-[1.03] active:scale-[0.99] transition-transform"
+                aria-label="App Store"
+              >
+                <Image
+                  src="/Download_on_the_App_Store.png"
+                  alt="Download on the App Store"
+                  width={150}
+                  height={46}
+                  className="h-[40px] w-auto"
+                />
+              </a>
             </div>
           </div>
 
@@ -799,52 +843,36 @@ function HomePageInner() {
                 <Link href={`/?lang=${lang}`}>{t.home}</Link>
               </li>
               <li>
-                <Link
-                  href={`/services?section=resident&lang=${lang}`}
-                >
+                <Link href={`/services?section=resident&lang=${lang}`}>
                   {t.resident}
                 </Link>
               </li>
               <li>
-                <Link
-                  href={`/services?section=nonresident&lang=${lang}`}
-                >
+                <Link href={`/services?section=nonresident&lang=${lang}`}>
                   {t.nonresident}
                 </Link>
               </li>
               <li>
-                <Link
-                  href={`/services?section=company&lang=${lang}`}
-                >
+                <Link href={`/services?section=company&lang=${lang}`}>
                   {t.company}
                 </Link>
               </li>
               <li>
-                <Link
-                  href={`/services?section=other&lang=${lang}`}
-                >
+                <Link href={`/services?section=other&lang=${lang}`}>
                   {t.other}
                 </Link>
               </li>
               <li>
-                <Link href={`/about?lang=${lang}`}>
-                  {t.aboutUs}
-                </Link>
+                <Link href={`/about?lang=${lang}`}>{t.aboutUs}</Link>
               </li>
               <li>
-                <Link href={`/privacy?lang=${lang}`}>
-                  {t.privacy}
-                </Link>
+                <Link href={`/privacy?lang=${lang}`}>{t.privacy}</Link>
               </li>
               <li>
-                <Link href={`/terms?lang=${lang}`}>
-                  {t.terms}
-                </Link>
+                <Link href={`/terms?lang=${lang}`}>{t.terms}</Link>
               </li>
               <li>
-                <Link href={`/careers?lang=${lang}`}>
-                  {t.careers}
-                </Link>
+                <Link href={`/careers?lang=${lang}`}>{t.careers}</Link>
               </li>
             </ul>
           </div>
@@ -872,26 +900,31 @@ function HomePageInner() {
             <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-300">
               <FaMapMarkerAlt className="text-emerald-400" />
               <span>
-                57th St - Al Garhoud - Dubai, Red Avenue
-                Building, Office No. 60
+                57th St - Al Garhoud - Dubai, Red Avenue Building, Office No. 60
               </span>
             </div>
 
+            {/* ✅ phone (force LTR to prevent reversing in RTL) */}
             <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-300">
               <span>📞</span>
               <a
                 href="tel:+971554463108"
                 className="underline hover:text-emerald-400"
+                dir="ltr"
+                style={{ unicodeBidi: "isolate" }}
               >
                 +971 55 446 3108
               </a>
             </div>
 
+            {/* ✅ email (force LTR) */}
             <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-300">
               <span>✉️</span>
               <a
                 href="mailto:info@TAHEEL.ae"
                 className="underline hover:text-emerald-400"
+                dir="ltr"
+                style={{ unicodeBidi: "isolate" }}
               >
                 info@TAHEEL.ae
               </a>
@@ -906,10 +939,7 @@ function HomePageInner() {
                 className="bg-emerald-500 hover:bg-emerald-600 text-white rounded-full p-2 sm:p-3 shadow transition focus:outline-none"
                 aria-label="WhatsApp"
               >
-                <FaWhatsapp
-                  size={18}
-                  className="sm:text-[22px]"
-                />
+                <FaWhatsapp size={18} className="sm:text-[22px]" />
               </a>
               <a
                 href="#"
@@ -918,10 +948,7 @@ function HomePageInner() {
                 className="bg-blue-500 hover:bg-blue-600 text-white rounded-full p-2 sm:p-3 shadow transition focus:outline-none"
                 aria-label="Messenger"
               >
-                <FaFacebookMessenger
-                  size={18}
-                  className="sm:text-[22px]"
-                />
+                <FaFacebookMessenger size={18} className="sm:text-[22px]" />
               </a>
               <a
                 href="#"
@@ -930,10 +957,7 @@ function HomePageInner() {
                 className="bg-pink-500 hover:bg-pink-600 text-white rounded-full p-2 sm:p-3 shadow transition focus:outline-none"
                 aria-label="Instagram"
               >
-                <FaInstagram
-                  size={18}
-                  className="sm:text-[22px]"
-                />
+                <FaInstagram size={18} className="sm:text-[22px]" />
               </a>
             </div>
           </div>
@@ -942,12 +966,9 @@ function HomePageInner() {
         {/* bottom bar */}
         <div className="max-w-7xl mx-auto mt-8 sm:mt-10 border-t border-[#22304a] pt-3 sm:pt-4 text-center text-xs text-gray-400 flex flex-col md:flex-row justify-between items-center gap-2">
           <span>
-            © {new Date().getFullYear()} {t.taheel}.{" "}
-            {t.allRights}
+            © {new Date().getFullYear()} {t.taheel}. {t.allRights}
           </span>
-          <span>
-            {t.dubai} - Powered by TAHEEL Team
-          </span>
+          <span>{t.dubai} - Powered by TAHEEL Team</span>
         </div>
 
         {/* floating WhatsApp button */}
@@ -958,6 +979,8 @@ function HomePageInner() {
           className="fixed bottom-4 right-4 z-50 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full shadow-lg p-4 text-xl transition"
           title={t.whatsappTitle}
           aria-label={t.whatsappTitle}
+          dir="ltr"
+          style={{ unicodeBidi: "isolate" }}
         >
           <FaWhatsapp />
         </a>
