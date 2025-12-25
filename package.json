@@ -31,6 +31,7 @@
     "formidable-serverless": "^1.1.1",
     "framer-motion": "^12.23.12",
     "google-gax": "^5.0.1",
+    "lucide-react": "^0.562.0",
     "motion": "^12.18.1",
     "next": "15.3.6",
     "next-connect": "^1.0.0",
