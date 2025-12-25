@@ -602,7 +602,7 @@ export default function TaheelPortfolioPage() {
                       امسح الكود لتحميل التطبيق أو فتح الرابط.
                     </div>
 <div className="mt-4 flex justify-center">
-  <div className="relative w-[95px] h-[95px] sm:w-[110px] sm:h-[110px] md:w-[125px] md:h-[125px] rounded-2xl bg-white/6 ring-1 ring-white/12 overflow-hidden">
+  <div className="relative w-[120px] h-[120px] sm:w-[140px] sm:h-[140px] md:w-[160px] md:h-[160px] rounded-2xl bg-white/6 ring-1 ring-white/12 overflow-hidden">
     <Image
       src="/Taheel-qr.png"
       alt="Taheel QR"
@@ -1599,20 +1599,26 @@ export default function TaheelPortfolioPage() {
                   سجّل الآن وابدأ تجربة حكومية مختلفة — منظمة، موثقة، وواضحة.
                 </div>
 
-                <div className="mt-5 rounded-3xl bg-black/25 ring-1 ring-white/10 p-5">
-                  <div className="font-extrabold">QR Code</div>
-                  <div className="mt-2 text-sm text-white/70">
-                    امسح الكود لفتح التحميل/الملف التعريفي.
-                  </div>
-                  <div className="mt-4 relative w-full aspect-square rounded-3xl bg-white/6 ring-1 ring-white/12 overflow-hidden">
-                    <Image
-                      src="/Taheel-qr.png"
-                      alt="Taheel QR"
-                      fill
-                      className="object-contain p-6"
-                    />
-                  </div>
-                </div>
+<div className="mt-5 rounded-3xl bg-black/25 ring-1 ring-white/10 p-5">
+  <div className="font-extrabold">QR Code</div>
+  <div className="mt-2 text-sm text-white/70">
+    امسح الكود لفتح التحميل/الملف التعريفي.
+  </div>
+
+  <div className="mt-4 flex justify-center">
+    <div className="relative w-[140px] h-[140px] sm:w-[160px] sm:h-[160px] rounded-2xl bg-white/6 ring-1 ring-white/12 overflow-hidden">
+      <Image
+        src="/Taheel-qr.png"
+        alt="Taheel QR"
+        fill
+        className="object-contain p-2"
+        sizes="(max-width: 640px) 140px, 160px"
+      />
+    </div>
+  </div>
+</div>
+
+
 
                 {/* ✅ Store badges again (contact area) */}
                 <div className="mt-5 grid grid-cols-1 gap-3">
