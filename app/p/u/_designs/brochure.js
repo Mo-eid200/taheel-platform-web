@@ -41,6 +41,18 @@ import {
  * Images (in /public):
  * - /logo3.png
  * - /Taheel-qr.png
+ *
+ * ✅ OpenQCore Products (in /public):
+ * - /OpenQCore0.png
+ * - /QXT-Code2.png
+ * - /QXT-Vision.png
+ * - /QXT-research (2).png
+ * - /chatqxt0.png
+ * - /QXT- lib.png
+ *
+ * ✅ Store badges (in /public):
+ * - /google-play.png
+ * - /Download_on_the_App_Store.png
  */
 
 const Section = ({ id, title, subtitle, icon: Icon, children }) => (
@@ -329,6 +341,17 @@ export default function TaheelPortfolioPage() {
     []
   );
 
+  const openqcoreProducts = useMemo(
+    () => [
+      { src: "/chatqxt0.png", alt: "ChatQXT" },
+      { src: "/QXT- lib.png", alt: "QXT Library" },
+      { src: "/QXT-research (2).png", alt: "QXT Research" },
+      { src: "/QXT-Vision.png", alt: "QXT Vision" },
+      { src: "/QXT-Code2.png", alt: "QXT Code" },
+    ],
+    []
+  );
+
   return (
     <div dir="rtl" className="min-h-screen bg-[#05060a] text-white">
       {/* ✅ Ultra Global Animated Background (NO video, NO canvas) */}
@@ -363,6 +386,19 @@ export default function TaheelPortfolioPage() {
               <div className="text-xs text-white/65">
                 Government Services, Re-Engineered
               </div>
+            </div>
+
+            {/* ✅ OpenQCore Brand Mark (subtle, no layout disruption) */}
+            <div className="hidden md:flex items-center gap-2 rounded-2xl bg-white/5 ring-1 ring-white/10 px-3 py-2">
+              <div className="relative h-6 w-6 rounded-xl bg-black/30 ring-1 ring-white/10 overflow-hidden">
+                <Image
+                  src="/OpenQCore0.png"
+                  alt="OpenQCore"
+                  fill
+                  className="object-contain p-1"
+                />
+              </div>
+              <span className="text-xs text-white/70">Powered by OpenQCore</span>
             </div>
           </div>
 
@@ -437,8 +473,16 @@ export default function TaheelPortfolioPage() {
 
               <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
                 {[
-                  { icon: Gauge, t: "سرعة + تنظيم", d: "توزيع ذكي للطلبات ومسار واضح." },
-                  { icon: ShieldCheck, t: "ثقة وامتثال", d: "توثيق + تتبع + معايير تشغيل." },
+                  {
+                    icon: Gauge,
+                    t: "سرعة + تنظيم",
+                    d: "توزيع ذكي للطلبات ومسار واضح.",
+                  },
+                  {
+                    icon: ShieldCheck,
+                    t: "ثقة وامتثال",
+                    d: "توثيق + تتبع + معايير تشغيل.",
+                  },
                   { icon: Lock, t: "حماية بيانات", d: "تشفير وصلاحيات وتسجيل العمليات." },
                 ].map((x, i) => (
                   <Card key={i} className="p-5">
@@ -475,14 +519,32 @@ export default function TaheelPortfolioPage() {
                 </div>
 
                 <div className="mt-6 rounded-3xl bg-black/25 ring-1 ring-white/10 p-5">
-                  <div className="flex items-center gap-3">
-                    <Cpu className="h-6 w-6" />
-                    <div>
-                      <div className="font-extrabold">
-                        QXT — Quantum eXtended Thinking
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <Cpu className="h-6 w-6" />
+                      <div>
+                        <div className="font-extrabold">
+                          QXT — Quantum eXtended Thinking
+                        </div>
+                        <div className="text-sm text-white/70">
+                          محرك تنظيم وتشغيل متقدم ضمن منظومة OpenQCore
+                        </div>
                       </div>
-                      <div className="text-sm text-white/70">
-                        محرك تنظيم وتشغيل متقدم ضمن منظومة OpenQCore
+                    </div>
+
+                    {/* ✅ OpenQCore Logo inside QXT card (premium badge) */}
+                    <div className="flex items-center gap-2 rounded-2xl bg-white/5 ring-1 ring-white/10 px-3 py-2">
+                      <div className="relative h-8 w-8 rounded-2xl bg-black/30 ring-1 ring-white/10 overflow-hidden">
+                        <Image
+                          src="/OpenQCore0.png"
+                          alt="OpenQCore"
+                          fill
+                          className="object-contain p-1"
+                        />
+                      </div>
+                      <div className="text-xs leading-tight">
+                        <div className="font-extrabold text-white/90">OpenQCore</div>
+                        <div className="text-white/55">Core Platform</div>
                       </div>
                     </div>
                   </div>
@@ -504,6 +566,33 @@ export default function TaheelPortfolioPage() {
                       </div>
                     ))}
                   </div>
+
+                  {/* ✅ OpenQCore Products Strip (subtle + premium) */}
+                  <div className="mt-5 rounded-3xl bg-white/5 ring-1 ring-white/10 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-extrabold text-white/90">
+                        منظومة منتجات OpenQCore (QXT)
+                      </div>
+                      <div className="text-xs text-white/55">Ecosystem</div>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-5 gap-2">
+                      {openqcoreProducts.map((p, idx) => (
+                        <div
+                          key={idx}
+                          className="relative aspect-square rounded-2xl bg-black/25 ring-1 ring-white/10 overflow-hidden"
+                          title={p.alt}
+                        >
+                          <Image
+                            src={p.src}
+                            alt={p.alt}
+                            fill
+                            className="object-contain p-2"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
                 <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -522,7 +611,7 @@ export default function TaheelPortfolioPage() {
                     </div>
                   </Card>
 
-                  {/* ✅ DOWNLOAD CARD (Fixed links + FancyButton supports target/rel now) */}
+                  {/* ✅ DOWNLOAD CARD (Store badges as buttons) */}
                   <Card className="p-5">
                     <div className="font-extrabold">تنزيل التطبيق</div>
                     <div className="mt-2 text-sm text-white/70">
@@ -540,23 +629,43 @@ export default function TaheelPortfolioPage() {
                         تنزيل التطبيق (Smart Link)
                       </FancyButton>
 
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 gap-3">
                         <a
                           href="https://play.google.com/store/apps/details?id=ae.taheel.app"
                           target="_blank"
                           rel="noreferrer"
-                          className="inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 bg-white/10 text-white ring-1 ring-white/18 hover:bg-white/14 transition"
+                          className="group rounded-2xl bg-white/10 ring-1 ring-white/18 hover:bg-white/14 transition overflow-hidden"
+                          style={{ textDecoration: "none" }}
+                          aria-label="Google Play"
                         >
-                          Android
+                          <div className="relative w-full h-14 md:h-16">
+                            <Image
+                              src="/google-play.png"
+                              alt="Get it on Google Play"
+                              fill
+                              className="object-contain p-2"
+                              priority={false}
+                            />
+                          </div>
                         </a>
 
                         <a
                           href="https://apps.apple.com/ae/app/taheel-government-services/id6755335579"
                           target="_blank"
                           rel="noreferrer"
-                          className="inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 bg-white/10 text-white ring-1 ring-white/18 hover:bg-white/14 transition"
+                          className="group rounded-2xl bg-white/10 ring-1 ring-white/18 hover:bg-white/14 transition overflow-hidden"
+                          style={{ textDecoration: "none" }}
+                          aria-label="App Store"
                         >
-                          iOS
+                          <div className="relative w-full h-14 md:h-16">
+                            <Image
+                              src="/Download_on_the_App_Store.png"
+                              alt="Download on the App Store"
+                              fill
+                              className="object-contain p-2"
+                              priority={false}
+                            />
+                          </div>
                         </a>
                       </div>
 
@@ -919,7 +1028,21 @@ export default function TaheelPortfolioPage() {
           >
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               <Card className="p-6 lg:col-span-6">
-                <div className="font-extrabold text-lg">QXT — عقل النظام</div>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="font-extrabold text-lg">QXT — عقل النظام</div>
+                  <div className="flex items-center gap-2 rounded-2xl bg-white/5 ring-1 ring-white/10 px-3 py-2">
+                    <div className="relative h-7 w-7 rounded-2xl bg-black/30 ring-1 ring-white/10 overflow-hidden">
+                      <Image
+                        src="/OpenQCore0.png"
+                        alt="OpenQCore"
+                        fill
+                        className="object-contain p-1"
+                      />
+                    </div>
+                    <span className="text-xs text-white/70">OpenQCore</span>
+                  </div>
+                </div>
+
                 <div className="mt-3 text-white/75 leading-relaxed">
                   في قلب تأهيل يعمل QXT كمحرك تفكير وتشغيل مسؤول عن تنظيم الطلبات،
                   تحليل البيانات، إدارة تدفق الإجراءات، توزيع المهام، ومراقبة جودة
@@ -943,6 +1066,42 @@ export default function TaheelPortfolioPage() {
                     </div>
                   ))}
                 </div>
+
+                {/* ✅ OpenQCore Products (full row) */}
+                <div className="mt-6 rounded-3xl bg-black/20 ring-1 ring-white/10 p-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="font-extrabold">منتجات OpenQCore</div>
+                    <div className="text-xs text-white/55">QXT Suite</div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {[
+                      { src: "/chatqxt0.png", label: "ChatQXT" },
+                      { src: "/QXT- lib.png", label: "QXT Library" },
+                      { src: "/QXT-research (2).png", label: "QXT Research" },
+                      { src: "/QXT-Vision.png", label: "QXT Vision" },
+                      { src: "/QXT-Code2.png", label: "QXT Code" },
+                      { src: "/OpenQCore0.png", label: "OpenQCore" },
+                    ].map((x, i) => (
+                      <div
+                        key={i}
+                        className="rounded-3xl bg-white/5 ring-1 ring-white/10 p-4"
+                      >
+                        <div className="relative w-full aspect-[16/9] rounded-2xl bg-black/25 ring-1 ring-white/10 overflow-hidden">
+                          <Image
+                            src={x.src}
+                            alt={x.label}
+                            fill
+                            className="object-contain p-3"
+                          />
+                        </div>
+                        <div className="mt-3 text-sm font-extrabold text-white/90">
+                          {x.label}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </Card>
 
               <Card className="p-6 lg:col-span-6">
@@ -956,9 +1115,21 @@ export default function TaheelPortfolioPage() {
 
                 <div className="mt-5 space-y-3">
                   {[
-                    { icon: Cpu, t: "تحليل أولي ذكي", d: "فحص اكتمال/توافق/جودة المستندات." },
-                    { icon: Users, t: "مراجعة بشرية متخصصة", d: "تدقيق نهائي وقرارات تشغيلية." },
-                    { icon: ShieldCheck, t: "معايير تشغيل موحدة", d: "نفس الجودة لكل عميل وكل معاملة." },
+                    {
+                      icon: Cpu,
+                      t: "تحليل أولي ذكي",
+                      d: "فحص اكتمال/توافق/جودة المستندات.",
+                    },
+                    {
+                      icon: Users,
+                      t: "مراجعة بشرية متخصصة",
+                      d: "تدقيق نهائي وقرارات تشغيلية.",
+                    },
+                    {
+                      icon: ShieldCheck,
+                      t: "معايير تشغيل موحدة",
+                      d: "نفس الجودة لكل عميل وكل معاملة.",
+                    },
                   ].map((x, i) => (
                     <div
                       key={i}
@@ -1438,6 +1609,42 @@ export default function TaheelPortfolioPage() {
                     />
                   </div>
                 </div>
+
+                {/* ✅ Store badges again (contact area) */}
+                <div className="mt-5 grid grid-cols-1 gap-3">
+                  <a
+                    href="https://play.google.com/store/apps/details?id=ae.taheel.app"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-2xl bg-white/10 ring-1 ring-white/18 hover:bg-white/14 transition overflow-hidden"
+                    aria-label="Google Play"
+                  >
+                    <div className="relative w-full h-14 md:h-16">
+                      <Image
+                        src="/google-play.png"
+                        alt="Get it on Google Play"
+                        fill
+                        className="object-contain p-2"
+                      />
+                    </div>
+                  </a>
+                  <a
+                    href="https://apps.apple.com/ae/app/taheel-government-services/id6755335579"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-2xl bg-white/10 ring-1 ring-white/18 hover:bg-white/14 transition overflow-hidden"
+                    aria-label="App Store"
+                  >
+                    <div className="relative w-full h-14 md:h-16">
+                      <Image
+                        src="/Download_on_the_App_Store.png"
+                        alt="Download on the App Store"
+                        fill
+                        className="object-contain p-2"
+                      />
+                    </div>
+                  </a>
+                </div>
               </Card>
             </div>
           </Section>
@@ -1454,7 +1661,26 @@ export default function TaheelPortfolioPage() {
                     <div className="text-sm">
                       منصة تشغيل رقمية — من حيث يبدأ المستقبل
                     </div>
+
+                    {/* ✅ OpenQCore in footer (clean + premium) */}
+                    <div className="mt-3 inline-flex items-center gap-2 rounded-2xl bg-white/5 ring-1 ring-white/10 px-3 py-2">
+                      <div className="relative h-7 w-7 rounded-2xl bg-black/30 ring-1 ring-white/10 overflow-hidden">
+                        <Image
+                          src="/OpenQCore0.png"
+                          alt="OpenQCore"
+                          fill
+                          className="object-contain p-1"
+                        />
+                      </div>
+                      <div className="text-xs leading-tight">
+                        <div className="font-extrabold text-white/90">
+                          OpenQCore
+                        </div>
+                        <div className="text-white/55">QXT Ecosystem</div>
+                      </div>
+                    </div>
                   </div>
+
                   <div className="text-xs text-white/55 leading-relaxed">
                     © {new Date().getFullYear()} TAHEEL. All rights reserved.
                     <br />
