@@ -127,6 +127,13 @@ const fadeUp = {
   show: { opacity: 1, y: 0, filter: "blur(0px)" },
 };
 
+const LtrText = ({ children, className = "" }) => (
+  <span dir="ltr" className={`unicode-bidi-isolate text-left ${className}`}>
+    {children}
+  </span>
+);
+
+
 export default function TaheelPortfolioPage() {
   const nav = useMemo(
     () => [
@@ -331,9 +338,16 @@ export default function TaheelPortfolioPage() {
       <header className="sticky top-0 z-50 border-b border-white/10 bg-black/35 backdrop-blur-xl">
         <div className="mx-auto max-w-7xl px-5 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="relative h-10 w-10 overflow-hidden rounded-2xl bg-white/10 ring-1 ring-white/15">
-              <Image src="/logo3.png" alt="TAHEEL" fill className="object-contain p-2" priority />
-            </div>
+<div className="relative h-14 w-14 md:h-16 md:w-16 overflow-hidden rounded-full bg-white ring-1 ring-white/25 shadow-[0_10px_30px_-15px_rgba(0,0,0,0.9)]">
+  <Image
+    src="/logo3.png"
+    alt="TAHEEL"
+    fill
+    className="object-contain p-2"
+    priority
+  />
+</div>
+
             <div className="leading-tight">
               <div className="font-extrabold tracking-tight">TAHEEL | تأهيل</div>
               <div className="text-xs text-white/65">Government Services, Re-Engineered</div>
@@ -1057,10 +1071,26 @@ export default function TaheelPortfolioPage() {
                       <Phone className="h-5 w-5" />
                       الهاتف
                     </div>
-                    <div className="mt-2 text-white/75 leading-relaxed">
-                      +971 555 598 331<br />
-                      +971 55 446 3108
-                    </div>
+<div className="mt-2 text-white/75 leading-relaxed space-y-1">
+  <a
+    href="tel:+97155598331"
+    className="block hover:text-white transition"
+    dir="ltr"
+    style={{ unicodeBidi: "isolate" }}
+  >
+    +971 55 598 331
+  </a>
+
+  <a
+    href="tel:+971554463108"
+    className="block hover:text-white transition"
+    dir="ltr"
+    style={{ unicodeBidi: "isolate" }}
+  >
+    +971 55 446 3108
+  </a>
+</div>
+
                   </div>
 
                   <div className="rounded-3xl bg-black/20 ring-1 ring-white/10 p-5">
@@ -1068,7 +1098,17 @@ export default function TaheelPortfolioPage() {
                       <Mail className="h-5 w-5" />
                       البريد الإلكتروني
                     </div>
-                    <div className="mt-2 text-white/75 leading-relaxed">info@taheel.ae</div>
+                    <div className="mt-2 text-white/75 leading-relaxed">
+  <a
+    href="mailto:info@taheel.ae"
+    className="hover:text-white transition"
+    dir="ltr"
+    style={{ unicodeBidi: "isolate" }}
+  >
+    info@taheel.ae
+  </a>
+</div>
+
                   </div>
 
                   <div className="rounded-3xl bg-black/20 ring-1 ring-white/10 p-5 md:col-span-2">
@@ -1076,9 +1116,32 @@ export default function TaheelPortfolioPage() {
                       <MapPin className="h-5 w-5" />
                       العنوان
                     </div>
-                    <div className="mt-2 text-white/75 leading-relaxed">
-                      شارع 57 - القرهود - دبي، مبنى ريد أفينيو، مكتب رقم 60
-                    </div>
+<div className="mt-2 text-white/75 leading-relaxed">
+  <a
+    href="https://maps.app.goo.gl/UfGskQBB4MT9di9F7"
+    target="_blank"
+    rel="noreferrer"
+    className="inline-flex items-start gap-2 hover:text-white transition"
+  >
+    <MapPin className="h-5 w-5 mt-0.5 text-white/80" />
+    <span>
+      شارع 57 - القرهود - دبي، مبنى ريد أفينيو، مكتب رقم 60
+      <span className="block text-xs text-white/55 mt-1">
+        اضغط لفتح الموقع على خرائط Google
+      </span>
+    </span>
+  </a>
+</div>
+<a
+  href="https://maps.app.goo.gl/UfGskQBB4MT9di9F7"
+  target="_blank"
+  rel="noreferrer"
+  className="mt-3 inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-2 text-sm ring-1 ring-white/15 hover:bg-white/14 transition"
+>
+  <MapPin className="h-4 w-4" />
+  فتح على خرائط Google
+</a>
+
                   </div>
 
                   <div className="rounded-3xl bg-black/20 ring-1 ring-white/10 p-5 md:col-span-2">
@@ -1086,7 +1149,19 @@ export default function TaheelPortfolioPage() {
                       <Globe className="h-5 w-5" />
                       الموقع الإلكتروني
                     </div>
-                    <div className="mt-2 text-white/75 leading-relaxed">www.taheel.ae</div>
+                    <div className="mt-2 text-white/75 leading-relaxed">
+  <a
+    href="https://www.taheel.ae"
+    target="_blank"
+    rel="noreferrer"
+    className="hover:text-white transition"
+    dir="ltr"
+    style={{ unicodeBidi: "isolate" }}
+  >
+    www.taheel.ae
+  </a>
+</div>
+
                   </div>
                 </div>
 
@@ -1152,6 +1227,7 @@ export default function TaheelPortfolioPage() {
           transform: translate3d(0,0,0);
           animation: auroraFloat 16s ease-in-out infinite alternate;
         }
+        .unicode-bidi-isolate { unicode-bidi: isolate; }
 
         @keyframes auroraFloat {
           0%   { transform: translate3d(-2%, -1%, 0) scale(1); }
