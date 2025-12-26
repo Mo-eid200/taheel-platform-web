@@ -1004,14 +1004,14 @@ function HomePageInner() {
   <div className="flex items-center gap-2">
     <FaWhatsapp className="text-green-500 text-base sm:text-lg" />
     <a
-      href="https://wa.me/971558338331"
+      href="https://wa.me/971565698331"
       target="_blank"
       rel="noopener noreferrer"
       className="underline hover:text-green-400 font-medium"
       dir="ltr"
       style={{ unicodeBidi: "isolate" }}
     >
-      +971 55 833 8331
+      +971 56 569 8331
     </a>
   </div>
 </div>
