@@ -1,31 +1,41 @@
 {
   "id": "taheel-newyear-2026",
   "enabled": true,
+
+  "startAt": "2025-12-26T00:00:00Z",
+  "endAt": "2026-01-10T23:59:59Z",
+
   "rotateMs": 4200,
-  "badge_en": "New Year 2026",
-  "badge_ar": "رأس السنة 2026",
+
+  "badge_en": "🎆 New Year 2026",
+  "badge_ar": "🎆 رأس السنة 2026",
+
+  "cta_en": "Download App",
+  "cta_ar": "حمّل التطبيق",
+
   "links": {
     "play": "https://play.google.com/store/apps/details?id=ae.taheel.app",
     "ios": "https://apps.apple.com/ae/app/taheel-government-services/id6755335579",
     "fallback": "/app"
   },
+
   "messages": [
     {
       "title_en": "Any UAE government request? Leave it to TAHEEL.",
-      "desc_en": "Fast tracking • Clear steps • Real support — join thousands who finish their transactions without stress.",
-      "title_ar": "أي معاملة حكومية؟ سيب الباقي على تأهيل.",
+      "desc_en": "Fast tracking • Clear steps • Real support — join thousands finishing transactions without stress.",
+      "title_ar": "أي معاملة حكومية في الإمارات؟ سيب الباقي على تأهيل.",
       "desc_ar": "تتبع سريع • خطوات واضحة • دعم حقيقي — انضم لآلاف المستخدمين وخلّص معاملاتك من غير صداع."
     },
     {
-      "title_en": "New Year travel? Tourist visa in a smart way.",
-      "desc_en": "Perfect for 2026 plans — apply, upload docs, and track live from your phone.",
-      "title_ar": "سفر رأس السنة؟ فيزا سياحية بطريقة سمارت.",
-      "desc_ar": "لخطط 2026 — قدّم وارفع مستنداتك وتابع الحالة لايف من موبايلك."
+      "title_en": "New Year travel? Tourist visa — the smart way.",
+      "desc_en": "Built for 2026 plans: apply, upload docs, and track live from your phone.",
+      "title_ar": "سفر رأس السنة؟ فيزا سياحية… بطريقة سمارت.",
+      "desc_ar": "جاهزة لخطط 2026: قدّم، ارفع مستنداتك، وتابع الحالة لايف من موبايلك."
     },
     {
       "title_en": "Business setup & PRO services — faster, cleaner, safer.",
       "desc_en": "Licensing • renewals • documents — one place, one team, one clear status timeline.",
-      "title_ar": "تأسيس شركات وخدمات PRO — أسرع وأنظف وأأمن.",
+      "title_ar": "تأسيس شركات وخدمات PRO — أسرع وأنضف وأأمن.",
       "desc_ar": "رخص • تجديدات • مستندات — مكان واحد، فريق واحد، وتتبع واضح خطوة بخطوة."
     }
   ]
