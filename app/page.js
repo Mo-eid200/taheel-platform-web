@@ -143,6 +143,16 @@ function HomePageInner() {
 
   const [loading, setLoading] = useState(false);
 
+  const qrTitle = isArabic ? "QR Code" : "QR Code";
+  const qrDesc = isArabic
+    ? "امسح الكود لفتح التحميل/الملف التعريفي."
+    : "Scan to open download / profile.";
+
+  const qrLink =
+    lang === "ar"
+      ? "https://taheel.ae/p/u/brochure?lang=ar"
+      : "https://taheel.ae/p/u/brochure?lang=en";
+
   // Dynamic value lines under "TAHEEL"
   const dynamicTextsAr = [
     "منصة معتمدة لمتابعة المعلومات والخدمات الحكومية",
@@ -450,50 +460,115 @@ function HomePageInner() {
             </motion.p>
 
             {/* ✅ App Store / Google Play badges (image buttons) */}
-            <motion.div
-              variants={{
-                hidden: { opacity: 0, y: 22 },
-                visible: { opacity: 1, y: 0 },
-              }}
-              transition={{ duration: 0.9, delay: 0.8 }}
-              className={`flex flex-wrap items-center gap-3 sm:gap-4 mt-1 ${
-                isArabic ? "justify-start" : "justify-end"
-              }`}
-            >
-              <a
-                href="https://play.google.com/store/apps/details?id=ae.taheel.app"
-                target="_blank"
-                rel="noreferrer"
-                className="cursor-pointer hover:scale-[1.03] active:scale-[0.99] transition-transform"
-                aria-label="Google Play"
-              >
-                <Image
-                  src="/google-play.png"
-                  alt="Get it on Google Play"
-                  width={170}
-                  height={52}
-                  className="h-[44px] sm:h-[52px] w-auto drop-shadow-lg"
-                  priority={false}
-                />
-              </a>
+{/* ✅ Store badges + QR frame */}
+<motion.div
+  variants={{
+    hidden: { opacity: 0, y: 22 },
+    visible: { opacity: 1, y: 0 },
+  }}
+  transition={{ duration: 0.9, delay: 0.8 }}
+  className={`mt-2 flex flex-col sm:flex-row items-center gap-4 sm:gap-5 ${
+    isArabic ? "justify-start" : "justify-end"
+  }`}
+>
+  {/* Store Badges */}
+  <div className={`flex flex-wrap items-center gap-3 sm:gap-4 ${
+    isArabic ? "justify-start" : "justify-end"
+  }`}>
+    <a
+      href="https://play.google.com/store/apps/details?id=ae.taheel.app"
+      target="_blank"
+      rel="noreferrer"
+      className="cursor-pointer hover:scale-[1.03] active:scale-[0.99] transition-transform"
+      aria-label="Google Play"
+    >
+      <Image
+        src="/google-play.png"
+        alt="Get it on Google Play"
+        width={170}
+        height={52}
+        className="h-[44px] sm:h-[52px] w-auto drop-shadow-lg"
+        priority={false}
+      />
+    </a>
 
-              <a
-                href="https://apps.apple.com/ae/app/taheel-government-services/id6755335579"
-                target="_blank"
-                rel="noreferrer"
-                className="cursor-pointer hover:scale-[1.03] active:scale-[0.99] transition-transform"
-                aria-label="App Store"
-              >
-                <Image
-                  src="/Download_on_the_App_Store.png"
-                  alt="Download on the App Store"
-                  width={170}
-                  height={52}
-                  className="h-[44px] sm:h-[52px] w-auto drop-shadow-lg"
-                  priority={false}
-                />
-              </a>
-            </motion.div>
+    <a
+      href="https://apps.apple.com/ae/app/taheel-government-services/id6755335579"
+      target="_blank"
+      rel="noreferrer"
+      className="cursor-pointer hover:scale-[1.03] active:scale-[0.99] transition-transform"
+      aria-label="App Store"
+    >
+      <Image
+        src="/Download_on_the_App_Store.png"
+        alt="Download on the App Store"
+        width={170}
+        height={52}
+        className="h-[44px] sm:h-[52px] w-auto drop-shadow-lg"
+        priority={false}
+      />
+    </a>
+  </div>
+
+  {/* QR Frame */}
+  <a
+    href={qrLink}
+    target="_blank"
+    rel="noreferrer"
+    className="group"
+    aria-label={qrTitle}
+    title={qrDesc}
+  >
+    <div
+      className="
+        relative rounded-2xl bg-black/45 backdrop-blur-xl
+        ring-1 ring-white/15 border border-white/10
+        shadow-[0_18px_55px_-35px_rgba(0,0,0,0.9)]
+        px-3 py-3 sm:px-3.5 sm:py-3.5
+        hover:scale-[1.02] transition-transform
+      "
+    >
+      <div className={`text-[11px] font-bold text-white/85 ${isArabic ? "text-right" : "text-left"}`}>
+        {qrTitle}
+      </div>
+      <div className={`mt-0.5 text-[11px] text-white/65 leading-4 max-w-[170px] ${isArabic ? "text-right" : "text-left"}`}>
+        {qrDesc}
+      </div>
+
+      <div className="mt-2 flex items-center justify-center">
+        <div
+          className="
+            relative w-[110px] h-[110px]
+            sm:w-[120px] sm:h-[120px]
+            rounded-xl overflow-hidden
+            bg-white ring-1 ring-white/20
+          "
+        >
+          <Image
+            src="/Taheel-qr.png"
+            alt="TAHEEL QR"
+            fill
+            className="object-contain p-2"
+            sizes="120px"
+            priority={false}
+          />
+        </div>
+      </div>
+
+      <div className="mt-2 text-[10px] text-white/55 text-center">
+        {isArabic ? "اضغط لفتح الرابط" : "Tap to open link"}
+      </div>
+
+      {/* tiny glow */}
+      <span className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition duration-300"
+        style={{
+          boxShadow: "0 0 0 1px rgba(52,211,153,0.25), 0 0 22px rgba(52,211,153,0.18)",
+        }}
+      />
+    </div>
+  </a>
+</motion.div>
+
           </motion.div>
         </div>
       </section>
