@@ -16,7 +16,7 @@ import WeatherTimeWidget from "@/components/WeatherTimeWidget";
 import TrackingForm from "@/components/TrackingForm";
 import { GlobalLoader } from "@/components/GlobalLoader";
 import AnnouncementBar from "@/components/AnnouncementBar";
-import { FaWhatsapp } from "react-icons/fa";
+
 
 // Force dynamic rendering (you already want that)
 export const dynamic = "force-dynamic";
