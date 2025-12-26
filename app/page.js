@@ -15,6 +15,7 @@ import { motion } from "framer-motion";
 import WeatherTimeWidget from "@/components/WeatherTimeWidget";
 import TrackingForm from "@/components/TrackingForm";
 import { GlobalLoader } from "@/components/GlobalLoader";
+import AnnouncementBar from "@/components/AnnouncementBar";
 
 // Force dynamic rendering (you already want that)
 export const dynamic = "force-dynamic";
@@ -278,6 +279,9 @@ function HomePageInner() {
       className="min-h-screen flex flex-col font-sans"
       style={{ background: gradientBackground }}
     >
+      {/* ✅ Global Announcement */}
+    <AnnouncementBar lang={lang} />
+    
       {/* ================= HEADER ================= */}
       <header className="sticky top-0 z-30 bg-gradient-to-b from-[#06141B]/90 to-[#253745]/80 backdrop-blur border-b border-gray-800 shadow px-2 sm:px-4 py-4 md:py-8 rounded-b-xl w-full">
         <div className="flex flex-col md:flex-row justify-between items-center w-full gap-4">
