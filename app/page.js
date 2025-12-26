@@ -814,10 +814,10 @@ function HomePageInner() {
               )}
             </div>
 
-            {/* ✅ App badges (small, consistent) */}
 {/* ✅ Download Panel: QR + Store Buttons (Aligned) */}
 <div id="download" className="w-full max-w-[520px] mt-3">
   <div className="rounded-3xl bg-white/5 backdrop-blur-xl border border-white/10 shadow-[0_20px_80px_-60px_rgba(0,0,0,0.9)] p-4 sm:p-5">
+    {/* Title */}
     <div className={`${isArabic ? "text-right" : "text-left"} mb-3`}>
       <div className="text-sm font-extrabold text-white/90">
         {isArabic ? "تحميل تطبيق تأهيل" : "Download TAHEEL App"}
@@ -827,37 +827,37 @@ function HomePageInner() {
       </div>
     </div>
 
-    <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-4 items-center">
-      {/* QR */}
-      <a
-        href="https://taheel.ae/app"
-        target="_blank"
-        rel="noreferrer"
-        className="group"
+    {/* Body */}
+    <div className="grid grid-cols-1 sm:grid-cols-[150px_1fr] gap-4 items-center">
+      {/* ✅ QR (IMAGE ONLY) */}
+      <div
+        className="group select-none justify-self-center sm:justify-self-start"
         aria-label="Smart QR"
         title={isArabic ? "امسح لتحميل التطبيق" : "Scan to download the app"}
       >
-        <div className="relative rounded-2xl bg-black/35 border border-white/10 p-3 hover:scale-[1.02] transition">
+        <div className="relative rounded-2xl bg-black/35 border border-white/10 p-3 w-[150px]">
           <div className="text-[11px] font-bold text-white/80 text-center">
-            {isArabic ? "Smart QR" : "Smart QR"}
+            Smart QR
           </div>
 
           <div className="mt-2 flex justify-center">
-            <div className="relative w-[110px] h-[110px] rounded-xl overflow-hidden bg-white ring-1 ring-white/20">
+            <div className="relative w-[112px] h-[112px] rounded-xl overflow-hidden bg-white ring-1 ring-white/20">
               <Image
                 src="/Taheel-qr.png"
                 alt="TAHEEL Smart QR"
                 fill
                 className="object-contain p-2"
-                sizes="110px"
+                sizes="112px"
+                draggable={false}
               />
             </div>
           </div>
 
           <div className="mt-2 text-[10px] text-white/55 text-center leading-4">
-            {isArabic ? "يفتح iOS / Android تلقائيًا" : "Auto iOS / Android"}
+            {isArabic ? "iOS / Android تلقائيًا" : "Auto iOS / Android"}
           </div>
 
+          {/* subtle glow */}
           <span
             className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition duration-300"
             style={{
@@ -865,10 +865,10 @@ function HomePageInner() {
             }}
           />
         </div>
-      </a>
+      </div>
 
-      {/* Stores */}
-      <div className="flex flex-col gap-3 items-center sm:items-start">
+      {/* ✅ Stores */}
+      <div className={`flex flex-col gap-3 items-center ${isArabic ? "sm:items-start" : "sm:items-start"}`}>
         <a
           href="https://play.google.com/store/apps/details?id=ae.taheel.app"
           target="_blank"
@@ -902,15 +902,13 @@ function HomePageInner() {
         </a>
 
         <div className={`text-[11px] text-white/55 w-full ${isArabic ? "text-right" : "text-left"}`}>
-          {isArabic ? "اضغط أو امسح الكود للتحميل" : "Tap or scan to download"}
+          {isArabic ? "اختر المتجر المناسب أو امسح الكود للتحميل" : "Choose your store or scan the QR"}
         </div>
       </div>
     </div>
   </div>
 </div>
-
           </div>
-
           {/* quick links */}
           <div className="flex flex-col items-center gap-3 sm:gap-4 order-3 md:order-2">
             <h4 className="text-base sm:text-lg font-bold text-white mb-1 sm:mb-2">
