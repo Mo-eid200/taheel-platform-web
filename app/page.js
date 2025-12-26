@@ -985,18 +985,37 @@ function HomePageInner() {
             </div>
 
             {/* ✅ phone (force LTR to prevent reversing in RTL) */}
-            <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-300">
-              <span>📞</span>
-              <a
-                href="tel:+971554463108"
-                className="underline hover:text-emerald-400"
-                dir="ltr"
-                style={{ unicodeBidi: "isolate" }}
-              >
-                +971 55 446 3108
-                +971 56 569 8331
-              </a>
-            </div>
+<div className="flex flex-col gap-2 text-xs sm:text-sm text-gray-300">
+  {/* 📞 Phone */}
+  <div className="flex items-center gap-2">
+    <span>📞</span>
+    <a
+      href="tel:+971554463108"
+      className="underline hover:text-emerald-400"
+      dir="ltr"
+      style={{ unicodeBidi: "isolate" }}
+    >
+      +971 55 446 3108
+    </a>
+  </div>
+
+  {/* 🟢 WhatsApp */}
+  <div className="flex items-center gap-2">
+    <span className="text-green-400">🟢</span>
+    <a
+      href="https://wa.me/971558338331"
+      target="_blank"
+      rel="noopener noreferrer"
+      className="underline hover:text-green-400"
+      dir="ltr"
+      style={{ unicodeBidi: "isolate" }}
+    >
+      +971 55 833 8331
+    </a>
+  </div>
+</div>
+
+
 
             {/* ✅ email (force LTR) */}
             <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-300">
