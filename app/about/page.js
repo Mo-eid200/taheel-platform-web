@@ -342,7 +342,7 @@ function AboutContent() {
 
                 <Link href={lang === "ar" ? "/p/u/brochure?lang=ar" : "/p/u/brochure?lang=en"}>
                   <button className="cursor-pointer px-8 py-3 text-white text-lg font-semibold bg-white/10 ring-1 ring-white/18 rounded-full shadow-lg hover:bg-white/14 transition duration-300 focus:outline-none focus:ring-4 focus:ring-white/20">
-                    {lang === "ar" ? "اقرأ البورتفوليو" : "View Portfolio"}
+                    {lang === "ar" ? "للمزيد من التفاصيل" : "View Portfolio"}
                   </button>
                 </Link>
               </div>
