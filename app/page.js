@@ -16,6 +16,7 @@ import WeatherTimeWidget from "@/components/WeatherTimeWidget";
 import TrackingForm from "@/components/TrackingForm";
 import { GlobalLoader } from "@/components/GlobalLoader";
 import AnnouncementBar from "@/components/AnnouncementBar";
+import { FaWhatsapp } from "react-icons/fa";
 
 // Force dynamic rendering (you already want that)
 export const dynamic = "force-dynamic";
@@ -1001,12 +1002,12 @@ function HomePageInner() {
 
   {/* 🟢 WhatsApp */}
   <div className="flex items-center gap-2">
-    <span className="text-green-400">🟢</span>
+    <FaWhatsapp className="text-green-500 text-base sm:text-lg" />
     <a
       href="https://wa.me/971558338331"
       target="_blank"
       rel="noopener noreferrer"
-      className="underline hover:text-green-400"
+      className="underline hover:text-green-400 font-medium"
       dir="ltr"
       style={{ unicodeBidi: "isolate" }}
     >
@@ -1014,6 +1015,7 @@ function HomePageInner() {
     </a>
   </div>
 </div>
+
 
 
 
