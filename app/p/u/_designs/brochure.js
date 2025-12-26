@@ -459,7 +459,7 @@ export default function TaheelPortfolioPage() {
               <div className="mt-7 flex flex-wrap gap-3">
                 <FancyButton href="#about" variant="primary">
                   <Star className="h-5 w-5" />
-                  اقرأ البورتفوليو
+                  من نحن؟
                 </FancyButton>
                 <FancyButton href="#how" variant="ghost">
                   <Workflow className="h-5 w-5" />
