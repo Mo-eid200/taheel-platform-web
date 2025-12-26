@@ -815,84 +815,98 @@ function HomePageInner() {
             </div>
 
             {/* ✅ App badges (small, consistent) */}
-<div id="download" className={`mt-2 flex flex-col sm:flex-row items-center gap-4 ${isArabic ? "sm:justify-start" : "sm:justify-start"}`}>
-  {/* Store badges */}
-  <div className="flex flex-wrap items-center gap-3">
-    <a
-      href="https://play.google.com/store/apps/details?id=ae.taheel.app"
-      target="_blank"
-      rel="noreferrer"
-      className="cursor-pointer hover:scale-[1.03] active:scale-[0.99] transition-transform"
-      aria-label="Google Play"
-    >
-      <Image
-        src="/google-play.png"
-        alt="Get it on Google Play"
-        width={150}
-        height={46}
-        className="h-[40px] w-auto"
-      />
-    </a>
-
-    <a
-      href="https://apps.apple.com/ae/app/taheel-government-services/id6755335579"
-      target="_blank"
-      rel="noreferrer"
-      className="cursor-pointer hover:scale-[1.03] active:scale-[0.99] transition-transform"
-      aria-label="App Store"
-    >
-      <Image
-        src="/Download_on_the_App_Store.png"
-        alt="Download on the App Store"
-        width={150}
-        height={46}
-        className="h-[40px] w-auto"
-      />
-    </a>
-  </div>
-
-  {/* Smart QR */}
-  <a
-    href="https://taheel.ae/app"
-    target="_blank"
-    rel="noreferrer"
-    className="group"
-    aria-label="Smart QR"
-    title={isArabic ? "امسح لتحميل التطبيق" : "Scan to download the app"}
-  >
-    <div className="relative rounded-2xl bg-black/35 backdrop-blur-xl ring-1 ring-white/10 border border-white/10 px-3 py-3 shadow-lg hover:scale-[1.02] transition-transform">
-      <div className={`text-[11px] font-bold text-white/85 ${isArabic ? "text-right" : "text-left"}`}>
-        {isArabic ? "QR تحميل التطبيق" : "App Download QR"}
+{/* ✅ Download Panel: QR + Store Buttons (Aligned) */}
+<div id="download" className="w-full max-w-[520px] mt-3">
+  <div className="rounded-3xl bg-white/5 backdrop-blur-xl border border-white/10 shadow-[0_20px_80px_-60px_rgba(0,0,0,0.9)] p-4 sm:p-5">
+    <div className={`${isArabic ? "text-right" : "text-left"} mb-3`}>
+      <div className="text-sm font-extrabold text-white/90">
+        {isArabic ? "تحميل تطبيق تأهيل" : "Download TAHEEL App"}
       </div>
-      <div className={`mt-0.5 text-[11px] text-white/65 leading-4 max-w-[180px] ${isArabic ? "text-right" : "text-left"}`}>
-        {isArabic ? "يفتح Android أو iOS تلقائيًا" : "Auto-detects Android / iOS"}
+      <div className="text-xs text-white/60">
+        {isArabic ? "امسح الـ QR أو اختر المتجر المناسب" : "Scan the QR or choose your store"}
       </div>
+    </div>
 
-      <div className="mt-2 flex items-center justify-center">
-        <div className="relative w-[96px] h-[96px] rounded-xl overflow-hidden bg-white ring-1 ring-white/20">
-          <Image
-            src="/Taheel-qr.png"
-            alt="TAHEEL Smart QR"
-            fill
-            className="object-contain p-2"
-            sizes="96px"
+    <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-4 items-center">
+      {/* QR */}
+      <a
+        href="https://taheel.ae/app"
+        target="_blank"
+        rel="noreferrer"
+        className="group"
+        aria-label="Smart QR"
+        title={isArabic ? "امسح لتحميل التطبيق" : "Scan to download the app"}
+      >
+        <div className="relative rounded-2xl bg-black/35 border border-white/10 p-3 hover:scale-[1.02] transition">
+          <div className="text-[11px] font-bold text-white/80 text-center">
+            {isArabic ? "Smart QR" : "Smart QR"}
+          </div>
+
+          <div className="mt-2 flex justify-center">
+            <div className="relative w-[110px] h-[110px] rounded-xl overflow-hidden bg-white ring-1 ring-white/20">
+              <Image
+                src="/Taheel-qr.png"
+                alt="TAHEEL Smart QR"
+                fill
+                className="object-contain p-2"
+                sizes="110px"
+              />
+            </div>
+          </div>
+
+          <div className="mt-2 text-[10px] text-white/55 text-center leading-4">
+            {isArabic ? "يفتح iOS / Android تلقائيًا" : "Auto iOS / Android"}
+          </div>
+
+          <span
+            className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition duration-300"
+            style={{
+              boxShadow: "0 0 0 1px rgba(52,211,153,0.20), 0 0 26px rgba(52,211,153,0.14)",
+            }}
           />
         </div>
-      </div>
+      </a>
 
-      <div className="mt-2 text-[10px] text-white/55 text-center">
-        {isArabic ? "امسح بالكاميرا" : "Scan with camera"}
-      </div>
+      {/* Stores */}
+      <div className="flex flex-col gap-3 items-center sm:items-start">
+        <a
+          href="https://play.google.com/store/apps/details?id=ae.taheel.app"
+          target="_blank"
+          rel="noreferrer"
+          className="cursor-pointer hover:scale-[1.03] active:scale-[0.99] transition-transform"
+          aria-label="Google Play"
+        >
+          <Image
+            src="/google-play.png"
+            alt="Get it on Google Play"
+            width={180}
+            height={56}
+            className="h-[46px] w-auto drop-shadow-lg"
+          />
+        </a>
 
-      <span
-        className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition duration-300"
-        style={{
-          boxShadow:
-            "0 0 0 1px rgba(52,211,153,0.22), 0 0 22px rgba(52,211,153,0.16)",
-        }}
-      />
+        <a
+          href="https://apps.apple.com/ae/app/taheel-government-services/id6755335579"
+          target="_blank"
+          rel="noreferrer"
+          className="cursor-pointer hover:scale-[1.03] active:scale-[0.99] transition-transform"
+          aria-label="App Store"
+        >
+          <Image
+            src="/Download_on_the_App_Store.png"
+            alt="Download on the App Store"
+            width={180}
+            height={56}
+            className="h-[46px] w-auto drop-shadow-lg"
+          />
+        </a>
+
+        <div className={`text-[11px] text-white/55 w-full ${isArabic ? "text-right" : "text-left"}`}>
+          {isArabic ? "اضغط أو امسح الكود للتحميل" : "Tap or scan to download"}
+        </div>
+      </div>
     </div>
-  </a>
+  </div>
 </div>
 
           </div>
