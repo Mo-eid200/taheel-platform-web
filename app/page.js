@@ -281,7 +281,7 @@ function HomePageInner() {
     >
       {/* ✅ Global Announcement */}
     <AnnouncementBar lang={lang} />
-    
+
       {/* ================= HEADER ================= */}
       <header className="sticky top-0 z-30 bg-gradient-to-b from-[#06141B]/90 to-[#253745]/80 backdrop-blur border-b border-gray-800 shadow px-2 sm:px-4 py-4 md:py-8 rounded-b-xl w-full">
         <div className="flex flex-col md:flex-row justify-between items-center w-full gap-4">
@@ -994,6 +994,7 @@ function HomePageInner() {
                 style={{ unicodeBidi: "isolate" }}
               >
                 +971 55 446 3108
+                +971 56 569 8331
               </a>
             </div>
 
