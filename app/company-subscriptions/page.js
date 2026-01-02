@@ -5,15 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  Check,
-  Shield,
-  Zap,
-  Crown,
-  Sparkles,
-  ChevronDown,
-  ArrowLeft,
-} from "lucide-react";
+import { Check, Shield, Zap, Crown, Sparkles, ChevronDown, ArrowLeft } from "lucide-react";
 
 function cn(...a) {
   return a.filter(Boolean).join(" ");
@@ -22,20 +14,18 @@ function cn(...a) {
 /** ✅ Quiet glow wrapper (ONLY for buttons) */
 function ButtonGlow({ active = false, radius = "rounded-full", children }) {
   return (
-    <div className={cn("relative", radius)}>
+    <div className={cn("relative group", radius)}>
+      {/* active glow */}
       <div
-        className={cn(
-          "absolute -inset-[2px] z-0",
-          radius,
-          "opacity-0 transition-opacity duration-300"
-        )}
+        className={cn("absolute -inset-[2px] z-0", radius, "transition-opacity duration-300")}
         style={{
           background:
             "linear-gradient(90deg, rgba(16,185,129,0.85), rgba(56,189,248,0.65), rgba(168,85,247,0.55))",
           filter: "blur(10px)",
-          opacity: active ? 0.45 : undefined,
+          opacity: active ? 0.45 : 0,
         }}
       />
+      {/* hover glow */}
       <div
         className={cn(
           "absolute -inset-[2px] z-0",
@@ -204,12 +194,12 @@ export default function CompanySubscriptionsPage() {
   }, [isArabic, t.offer, t.most]);
 
   const [activePackage, setActivePackage] = useState(pkgFromUrl);
-  const [selectedDurationByPkg, setSelectedDurationByPkg] = useState(() => ({
+  const [selectedDurationByPkg, setSelectedDurationByPkg] = useState({
     starter: "yearly",
     growth: "yearly",
     scale: "yearly",
     enterprise: "yearly",
-  }));
+  });
 
   useEffect(() => {
     if (pkgFromUrl) setActivePackage(pkgFromUrl);
@@ -259,25 +249,19 @@ export default function CompanySubscriptionsPage() {
             </Link>
 
             <div className={cn("flex items-center gap-2", isArabic && "flex-row-reverse")}>
-              <ButtonGlow>
+              <ButtonGlow radius="rounded-full">
                 <button
                   onClick={toggleLang}
-                  className="group cursor-pointer px-3 py-2 rounded-full bg-white/8 border border-white/12 text-white/85 font-extrabold text-xs hover:bg-white/12 transition"
+                  className="cursor-pointer px-3 py-2 rounded-full bg-white/8 border border-white/12 text-white/85 font-extrabold text-xs hover:bg-white/12 transition"
                 >
                   {t.langBtn}
                 </button>
               </ButtonGlow>
 
-<div className="relative rounded-xl bg-white p-2 border border-black/10 shadow w-[54px] h-[54px]">
-  <Image
-    src="/logo3.png"
-    alt="TAHEEL"
-    fill
-    className="object-contain"
-    priority
-  />
-</div>
-
+              {/* Logo */}
+              <div className="relative rounded-xl bg-white p-1 border border-black/10 shadow w-[60px] h-[60px]">
+                <Image src="/logo3.png" alt="TAHEEL" fill className="object-contain" priority />
+              </div>
 
               <div className={cn("hidden sm:block", isArabic && "text-right")}>
                 <div className="text-white font-extrabold leading-none">{t.pageTitle}</div>
@@ -291,9 +275,7 @@ export default function CompanySubscriptionsPage() {
       {/* Content */}
       <div className="max-w-6xl mx-auto px-3 sm:px-4 py-8 sm:py-10">
         <div className={cn("mb-5", isArabic && "text-right")}>
-          <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white">
-            {t.pageTitle}
-          </h1>
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white">{t.pageTitle}</h1>
         </div>
 
         {/* Packages */}
@@ -317,7 +299,9 @@ export default function CompanySubscriptionsPage() {
                   className={cn(
                     "relative rounded-3xl border bg-white/5 backdrop-blur-xl overflow-hidden",
                     p.brand.ring,
-                    isOpen ? "border-emerald-400/35 shadow-[0_40px_120px_-90px_rgba(16,185,129,0.35)]" : ""
+                    isOpen
+                      ? "border-emerald-400/35 shadow-[0_40px_120px_-90px_rgba(16,185,129,0.35)]"
+                      : "border-white/10"
                   )}
                 >
                   <div className={cn("absolute top-0 left-0 right-0 h-[5px] bg-gradient-to-r", p.brand.bar)} />
@@ -386,7 +370,7 @@ export default function CompanySubscriptionsPage() {
                                     <button
                                       onClick={() => setDurationFor(p.key, d.key)}
                                       className={cn(
-                                        "group cursor-pointer relative w-full rounded-2xl border p-4 bg-white/6 backdrop-blur-xl transition text-left",
+                                        "cursor-pointer relative w-full rounded-2xl border p-4 bg-white/6 backdrop-blur-xl transition text-left",
                                         active
                                           ? "border-emerald-400/55 bg-white/8"
                                           : "border-white/10 hover:border-white/20 hover:bg-white/7"
@@ -489,10 +473,10 @@ export default function CompanySubscriptionsPage() {
                                   </div>
                                 </div>
 
-                                <ButtonGlow>
+                                <ButtonGlow radius="rounded-full">
                                   <button
                                     onClick={goSubscribe}
-                                    className="group cursor-pointer px-5 py-3 rounded-full font-extrabold text-white shadow-lg transition hover:scale-[1.02] active:scale-[0.99] bg-gradient-to-r from-emerald-700 via-emerald-500 to-green-700"
+                                    className="cursor-pointer px-5 py-3 rounded-full font-extrabold text-white shadow-lg transition hover:scale-[1.02] active:scale-[0.99] bg-gradient-to-r from-emerald-700 via-emerald-500 to-green-700"
                                   >
                                     {t.subscribeNow}
                                   </button>
@@ -526,10 +510,10 @@ export default function CompanySubscriptionsPage() {
               </div>
             </div>
 
-            <ButtonGlow>
+            <ButtonGlow radius="rounded-full">
               <button
                 onClick={goSubscribe}
-                className="group cursor-pointer shrink-0 px-6 py-3 rounded-full font-extrabold text-white shadow-lg transition hover:scale-[1.02] active:scale-[0.99] bg-gradient-to-r from-emerald-700 via-emerald-500 to-green-700"
+                className="cursor-pointer shrink-0 px-6 py-3 rounded-full font-extrabold text-white shadow-lg transition hover:scale-[1.02] active:scale-[0.99] bg-gradient-to-r from-emerald-700 via-emerald-500 to-green-700"
               >
                 {t.subscribeNow}
               </button>
