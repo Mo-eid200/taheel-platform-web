@@ -789,28 +789,30 @@ function HomePageInner() {
 {/* ================= COMPANY PRO PACKAGES (PREVIEW) ================= */}
 <section className="py-10 sm:py-14 px-2 sm:px-4 bg-gradient-to-b from-[#22304a]/85 via-[#122024]/92 to-[#0b131e]/95">
   <div className="max-w-6xl mx-auto">
+
     {/* Header */}
     <div className="text-center mb-8 sm:mb-10">
-      <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/8 border border-white/10 text-emerald-200 text-xs font-extrabold shadow">
-        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-        {isArabic ? "باقات PRO للشركات" : "Company PRO Packages"}
-      </div>
-
-      <h2 className="mt-4 text-2xl sm:text-3xl md:text-4xl font-extrabold text-white drop-shadow">
-        {isArabic ? "اختار نوع الباقة… وبعدها اختار المدة" : "Choose a package type… then pick a duration"}
+      {/* ✅ Title is the section header */}
+      <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white drop-shadow">
+        {t.companyPlansTitle}
       </h2>
 
+      {/* ✅ short marketing line (no “شرح”) */}
       <p className="mt-2 text-sm sm:text-base text-white/70 max-w-3xl mx-auto leading-relaxed">
         {isArabic
-          ? "المنصة تعرض لك نوع الباقة المناسب لحجم شركتك، ثم داخل صفحة الباقات تختار المدة والسعر."
-          : "We show the right package type for your company size, then you choose duration & pricing inside the plans page."}
+          ? "اختر باقتك التي تناسب حجم شركتك من باقات مرنة ومتنوعة."
+          : "Pick the package that fits your company size from flexible, diverse plans."}
       </p>
 
-      <p className="mt-2 text-[12px] text-white/55">
-        {isArabic
-          ? "عرض محدود: نصف سنوي = 7 شهور | سنوي = 13 شهر (الأكثر طلبًا)"
-          : "Limited offer: Semiannual = 7 months | Yearly = 13 months (most requested)"}
-      </p>
+      {/* ✅ small offer badge only (clean) */}
+      <div className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/8 border border-white/10 text-[12px] font-extrabold text-white/85">
+        <span className="text-emerald-300">🎁</span>
+        <span>
+          {isArabic
+            ? "عرض: نصف سنوي = 7 شهور | سنوي = 13 شهر (الأكثر طلبًا)"
+            : "Offer: Semiannual = 7 months | Yearly = 13 months (most requested)"}
+        </span>
+      </div>
     </div>
 
     {/* Package Types */}
@@ -818,12 +820,16 @@ function HomePageInner() {
       {[
         {
           key: "starter",
-          name: isArabic ? "Starter PRO" : "Starter PRO",
-          fit: isArabic ? "للشركات الصغيرة (1–5 موظفين)" : "For small companies (1–5 staff)",
-          color: {
-            ring: "border-emerald-400/25 hover:border-emerald-400/65",
+          name: "Starter PRO",
+          fit: isArabic ? "للشركات الصغيرة (1–5 موظفين)" : "Small companies (1–5 staff)",
+          // ✅ Brochure identity (GREEN)
+          brand: {
+            bar: "from-emerald-400 to-emerald-600",
+            ring: "border-emerald-400/25 hover:border-emerald-400/70",
             pill: "bg-emerald-500/12 border-emerald-400/25 text-emerald-200",
-            top: "from-emerald-500/16 via-white/8 to-transparent",
+            iconBg: "bg-emerald-500/18 border-emerald-300/25",
+            dot: "bg-emerald-400",
+            code: "STARTER",
           },
           perks: isArabic
             ? ["إلغاء رسوم الطباعة", "دعم مباشر", "تفعيل سريع"]
@@ -831,25 +837,33 @@ function HomePageInner() {
         },
         {
           key: "growth",
-          name: isArabic ? "Growth PRO" : "Growth PRO",
-          fit: isArabic ? "للشركات المتوسطة (5–10 موظفين)" : "For mid teams (5–10 staff)",
-          color: {
-            ring: "border-sky-400/25 hover:border-sky-400/65",
+          name: "Growth PRO",
+          fit: isArabic ? "للشركات المتوسطة (5–10 موظفين)" : "Mid teams (5–10 staff)",
+          // ✅ Brochure identity (BLUE)
+          brand: {
+            bar: "from-sky-400 to-sky-600",
+            ring: "border-sky-400/25 hover:border-sky-400/70",
             pill: "bg-sky-500/12 border-sky-400/25 text-sky-200",
-            top: "from-sky-500/16 via-white/8 to-transparent",
+            iconBg: "bg-sky-500/18 border-sky-300/25",
+            dot: "bg-sky-400",
+            code: "GROWTH",
           },
           perks: isArabic
-            ? ["متابعة أسرع للطلبات", "إلغاء رسوم الطباعة", "أولوية أعلى"]
+            ? ["متابعة أسرع", "إلغاء رسوم الطباعة", "أولوية أعلى"]
             : ["Faster tracking", "Printing fees waived", "Higher priority"],
         },
         {
           key: "scale",
-          name: isArabic ? "Scale PRO" : "Scale PRO",
-          fit: isArabic ? "للشركات الكبيرة (10–20 موظف)" : "For larger teams (10–20 staff)",
-          color: {
-            ring: "border-amber-400/30 hover:border-amber-400/70",
-            pill: "bg-amber-500/12 border-amber-400/25 text-amber-200",
-            top: "from-amber-500/18 via-white/10 to-transparent",
+          name: "Scale PRO",
+          fit: isArabic ? "للشركات الكبيرة (10–20 موظف)" : "Larger teams (10–20 staff)",
+          // ✅ Brochure identity (PURPLE)
+          brand: {
+            bar: "from-purple-400 to-purple-600",
+            ring: "border-purple-400/25 hover:border-purple-400/75",
+            pill: "bg-purple-500/12 border-purple-400/25 text-purple-200",
+            iconBg: "bg-purple-500/18 border-purple-300/25",
+            dot: "bg-purple-400",
+            code: "SCALE",
           },
           perks: isArabic
             ? ["أولوية معالجة أعلى", "إلغاء رسوم الطباعة", "تقارير أسهل"]
@@ -857,13 +871,17 @@ function HomePageInner() {
         },
         {
           key: "enterprise",
-          name: isArabic ? "Enterprise PRO" : "Enterprise PRO",
+          name: "Enterprise PRO",
           fit: isArabic ? "مؤسسات / 20+ موظف" : "Enterprise / 20+ staff",
           most: true,
-          color: {
-            ring: "border-purple-400/35 hover:border-purple-400/80",
-            pill: "bg-purple-500/12 border-purple-400/25 text-purple-200",
-            top: "from-purple-500/18 via-white/10 to-transparent",
+          // ✅ Brochure identity (RED)
+          brand: {
+            bar: "from-rose-400 to-red-600",
+            ring: "border-red-400/25 hover:border-red-400/75",
+            pill: "bg-red-500/12 border-red-400/25 text-red-200",
+            iconBg: "bg-red-500/18 border-red-300/25",
+            dot: "bg-red-400",
+            code: "ENTERPRISE",
           },
           perks: isArabic
             ? ["SLA ودعم مخصص", "أولوية قصوى", "حلول حسب نشاط الشركة"]
@@ -878,51 +896,70 @@ function HomePageInner() {
           transition={{ duration: 0.6, delay: idx * 0.06 }}
           className={`relative ${p.most ? "lg:-mt-2" : ""}`}
         >
-          {/* small badge */}
+          {/* Most badge */}
           {p.most ? (
             <div className={`absolute -top-3 ${isArabic ? "right-4" : "left-4"} z-20`}>
-              <span className="px-3 py-1 rounded-full text-[11px] font-extrabold shadow border bg-purple-500 text-white border-purple-300/30">
-                {isArabic ? "باقة المؤسسات" : "Enterprise"}
+              <span className="px-3 py-1 rounded-full text-[11px] font-extrabold shadow border bg-red-500 text-white border-red-300/30">
+                {isArabic ? "الأكثر اختيارًا" : "Most Chosen"}
               </span>
             </div>
           ) : null}
 
           <div
-            className={`relative h-full rounded-3xl bg-white/6 backdrop-blur-xl border ${p.color.ring} p-5 sm:p-6 flex flex-col overflow-hidden shadow-[0_30px_90px_-75px_rgba(0,0,0,0.55)]`}
+            className={`relative h-full rounded-3xl bg-white/6 backdrop-blur-xl border ${p.brand.ring} p-5 sm:p-6 flex flex-col overflow-hidden shadow-[0_30px_90px_-75px_rgba(0,0,0,0.55)]`}
           >
-            {/* top accent */}
-            <div className={`absolute inset-0 bg-gradient-to-br ${p.color.top} opacity-95`} />
+            {/* ✅ identity top bar */}
+            <div className={`absolute top-0 left-0 right-0 h-[5px] bg-gradient-to-r ${p.brand.bar}`} />
 
+            {/* ✅ soft inner light (keeps design consistent) */}
+            <div className="absolute inset-0 opacity-90"
+              style={{
+                background:
+                  "radial-gradient(circle at 18% 12%, rgba(255,255,255,0.12), transparent 55%)",
+              }}
+            />
+
+            {/* Header row */}
             <div className="relative z-10 flex items-start justify-between">
-              <div>
-                <div className="text-white font-extrabold text-lg">{p.name}</div>
-                <div className="mt-1 text-[12px] text-white/65 font-semibold">{p.fit}</div>
+              <div className="flex items-start gap-3">
+                {/* ✅ icon bubble (visual identity without clutter) */}
+                <div className={`w-10 h-10 rounded-2xl border ${p.brand.iconBg} flex items-center justify-center shadow`}>
+                  <span className="text-white font-extrabold">⚡</span>
+                </div>
+
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${p.brand.dot}`} />
+                    <div className="text-white font-extrabold text-lg">{p.name}</div>
+                  </div>
+                  <div className="mt-1 text-[12px] text-white/65 font-semibold">{p.fit}</div>
+
+                  {/* ✅ small code label like brochure feel */}
+                  <div className="mt-2 text-[10px] font-extrabold tracking-[0.2em] text-white/45">
+                    {p.brand.code}
+                  </div>
+                </div>
               </div>
 
-              <div className={`text-xs font-extrabold px-2.5 py-1 rounded-full border ${p.color.pill}`}>
+              <div className={`text-xs font-extrabold px-2.5 py-1 rounded-full border ${p.brand.pill}`}>
                 PRO
               </div>
             </div>
 
-            {/* durations line */}
+            {/* Durations line (short) */}
             <div className="relative z-10 mt-4 text-[12px] text-white/70">
-              {isArabic ? "المدد المتاحة:" : "Available durations:"}{" "}
               <span className="font-extrabold text-white/90">
-                {isArabic ? "شهري • 3 شهور • 6 شهور • سنوي" : "Monthly • 3 Months • 6 Months • Yearly"}
+                {isArabic ? "شهري • 3 • 6 • سنوي" : "Monthly • 3 • 6 • Yearly"}
               </span>
             </div>
 
-            {/* offers line */}
+            {/* Offer line (compact) */}
             <div className="relative z-10 mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/8 border border-white/10 text-[11px] font-extrabold text-white/85">
               <span>🎁</span>
-              <span>
-                {isArabic ? "6 شهور = 7 | سنوي = 13 شهر" : "6M = 7M | Yearly = 13 months"}
-              </span>
-              <span className="opacity-70">
-                {isArabic ? "(الأكثر طلبًا: السنوي)" : "(Most requested: Yearly)"}
-              </span>
+              <span>{isArabic ? "6=7 | سنوي=13 شهر" : "6=7 | Yearly=13 months"}</span>
             </div>
 
+            {/* Perks */}
             <ul className="relative z-10 mt-5 space-y-2 text-sm text-white/78">
               {p.perks.map((x, i) => (
                 <li key={i} className="flex items-start gap-2">
@@ -932,18 +969,13 @@ function HomePageInner() {
               ))}
             </ul>
 
+            {/* CTA */}
             <div className="relative z-10 mt-auto pt-7">
-              <Link href={`/company-subscriptions?lang=${lang}`}>
+              <Link href={`/company-subscriptions?lang=${lang}&package=${p.key}`}>
                 <button className="w-full cursor-pointer px-5 py-3 rounded-full font-extrabold shadow-lg transition hover:scale-[1.02] active:scale-[0.99] bg-gradient-to-r from-emerald-700 via-emerald-500 to-green-700 text-white">
-                  {isArabic ? "عرض التفاصيل والأسعار" : "View details & pricing"}
+                  {isArabic ? "عرض الباقة" : "View Package"}
                 </button>
               </Link>
-
-              <div className="mt-3 text-[11px] text-white/45 text-center">
-                {isArabic
-                  ? "هذا العرض للتعريف — الاختيار والدفع داخل صفحة الباقات"
-                  : "This is a preview — selection & payment happen in the plans page"}
-              </div>
             </div>
           </div>
         </motion.div>
@@ -951,6 +983,7 @@ function HomePageInner() {
     </div>
   </div>
 </section>
+
 
 
 
