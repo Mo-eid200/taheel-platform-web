@@ -953,10 +953,15 @@ function HomePageInner() {
             </div>
 
             {/* Offer line (compact) */}
-            <div className="relative z-10 mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/8 border border-white/10 text-[11px] font-extrabold text-white/85">
-              <span>🎁</span>
-              <span>{isArabic ? "6=7 | سنوي=13 شهر" : "6=7 | Yearly=13 months"}</span>
-            </div>
+<div className="relative z-10 mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/8 border border-white/10 text-[11px] font-extrabold text-white/85">
+  <span>🎁</span>
+  <span>
+    {isArabic
+      ? "نصف سنوي = 7 شهور • سنوي = 13 شهر"
+      : "Semiannual = 7 Months • Yearly = 13 Months"}
+  </span>
+</div>
+
 
             {/* Perks */}
             <ul className="relative z-10 mt-5 space-y-2 text-sm text-white/78">
