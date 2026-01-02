@@ -18,7 +18,7 @@ import NotificationsSection from "@/components/admin/NotificationsSection";
 export const dynamic = 'force-dynamic';
 import ServicesSection from "@/components/admin/ServicesSection";
 import SocialSection from "@/components/admin/SocialSection";
-import SettingsSection from "@/components/admin/SubscriptionsSection";
+import SubscriptionsSection from "@/components/admin/SubscriptionsSection";
 import ArchiveSection from "@/components/admin/ArchiveSection";
 import ChatWidget from "@/components/admin/ChatWidget";
 import {
