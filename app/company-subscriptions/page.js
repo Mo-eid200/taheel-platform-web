@@ -33,7 +33,7 @@ function ButtonGlow({ active = false, radius = "rounded-full", children }) {
           background:
             "linear-gradient(90deg, rgba(16,185,129,0.85), rgba(56,189,248,0.65), rgba(168,85,247,0.55))",
           filter: "blur(10px)",
-          opacity: active ? 0.75 : undefined,
+          opacity: active ? 0.45 : undefined,
         }}
       />
       <div
