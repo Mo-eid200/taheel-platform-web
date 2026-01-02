@@ -16,6 +16,9 @@ import WeatherTimeWidget from "@/components/WeatherTimeWidget";
 import TrackingForm from "@/components/TrackingForm";
 import { GlobalLoader } from "@/components/GlobalLoader";
 import AnnouncementBar from "@/components/AnnouncementBar";
+import { collection, getDocs } from "firebase/firestore";
+import { firestore } from "@/lib/firebase.client";
+
 
 
 // Force dynamic rendering (you already want that)
@@ -844,14 +847,18 @@ useEffect(() => {
 {/* ================= COMPANY PRO PACKAGES (PREVIEW) ================= */}
 <section className="py-10 sm:py-14 px-2 sm:px-4 bg-gradient-to-b from-[#22304a]/85 via-[#122024]/92 to-[#0b131e]/95">
   <div className="max-w-6xl mx-auto">
+
     {/* Header */}
     <div className="text-center mb-8 sm:mb-10">
-{typeof t.companyPlansTitle === "string" ? t.companyPlansTitle : (isArabic ? "باقات الشركات" : "Company Plans")}
+      <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white drop-shadow">
+        {t.companyPlansTitle || (isArabic ? "باقات الشركات (PRO)" : "Company Plans (PRO)")}
+      </h2>
 
       <p className="mt-2 text-sm sm:text-base text-white/70 max-w-3xl mx-auto leading-relaxed">
-        {isArabic
-          ? "اختر باقتك التي تناسب حجم شركتك من باقات مرنة ومتنوعة."
-          : "Pick the package that fits your company size from flexible, diverse plans."}
+        {t.companyPlansSub ||
+          (isArabic
+            ? "اختر باقتك التي تناسب حجم شركتك من باقات مرنة ومتنوعة."
+            : "Pick the package that fits your company size from flexible, diverse plans.")}
       </p>
 
       <div className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/8 border border-white/10 text-[12px] font-extrabold text-white/85">
@@ -864,258 +871,158 @@ useEffect(() => {
       </div>
     </div>
 
-    {/* Package Types */}
+    {/* Grid */}
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 sm:gap-6 items-stretch">
       {companyPackagesLoading ? (
-  <div className="text-center text-white/70 font-extrabold">
-    {isArabic ? "جاري تحميل الباقات..." : "Loading plans..."}
-  </div>
-) : (
-  companyPackages.map((p, idx) => {
-    const fallbackBrand =
-      p.key === "starter"
-        ? {
-            bar: "from-emerald-400 to-emerald-600",
-            ring: "border-emerald-400/25 hover:border-emerald-400/70",
-            pill: "bg-emerald-500/12 border-emerald-400/25 text-emerald-200",
-            iconBg: "bg-emerald-500/18 border-emerald-300/25",
-            dot: "bg-emerald-400",
-            code: "STARTER",
-          }
-        : p.key === "growth"
-        ? {
-            bar: "from-sky-400 to-sky-600",
-            ring: "border-sky-400/25 hover:border-sky-400/70",
-            pill: "bg-sky-500/12 border-sky-400/25 text-sky-200",
-            iconBg: "bg-sky-500/18 border-sky-300/25",
-            dot: "bg-sky-400",
-            code: "GROWTH",
-          }
-        : p.key === "scale"
-        ? {
-            bar: "from-purple-400 to-purple-600",
-            ring: "border-purple-400/25 hover:border-purple-400/75",
-            pill: "bg-purple-500/12 border-purple-400/25 text-purple-200",
-            iconBg: "bg-purple-500/18 border-purple-300/25",
-            dot: "bg-purple-400",
-            code: "SCALE",
-          }
-        : {
-            bar: "from-rose-400 to-red-600",
-            ring: "border-red-400/25 hover:border-red-400/75",
-            pill: "bg-red-500/12 border-red-400/25 text-red-200",
-            iconBg: "bg-red-500/18 border-red-300/25",
-            dot: "bg-red-400",
-            code: "ENTERPRISE",
-          };
+        <div className="col-span-full text-center text-white/70 font-extrabold">
+          {isArabic ? "جاري تحميل الباقات..." : "Loading plans..."}
+        </div>
+      ) : !companyPackages?.length ? (
+        <div className="col-span-full text-center text-white/60 font-extrabold">
+          {isArabic ? "لا توجد باقات متاحة الآن." : "No plans available right now."}
+        </div>
+      ) : (
+        companyPackages.map((p, idx) => {
+          const fallbackBrand =
+            p.key === "starter"
+              ? {
+                  bar: "from-emerald-400 to-emerald-600",
+                  ring: "border-emerald-400/25 hover:border-emerald-400/70",
+                  pill: "bg-emerald-500/12 border-emerald-400/25 text-emerald-200",
+                  iconBg: "bg-emerald-500/18 border-emerald-300/25",
+                  dot: "bg-emerald-400",
+                  code: "STARTER",
+                }
+              : p.key === "growth"
+              ? {
+                  bar: "from-sky-400 to-sky-600",
+                  ring: "border-sky-400/25 hover:border-sky-400/70",
+                  pill: "bg-sky-500/12 border-sky-400/25 text-sky-200",
+                  iconBg: "bg-sky-500/18 border-sky-300/25",
+                  dot: "bg-sky-400",
+                  code: "GROWTH",
+                }
+              : p.key === "scale"
+              ? {
+                  bar: "from-purple-400 to-purple-600",
+                  ring: "border-purple-400/25 hover:border-purple-400/75",
+                  pill: "bg-purple-500/12 border-purple-400/25 text-purple-200",
+                  iconBg: "bg-purple-500/18 border-purple-300/25",
+                  dot: "bg-purple-400",
+                  code: "SCALE",
+                }
+              : {
+                  bar: "from-rose-400 to-red-600",
+                  ring: "border-red-400/25 hover:border-red-400/75",
+                  pill: "bg-red-500/12 border-red-400/25 text-red-200",
+                  iconBg: "bg-red-500/18 border-red-300/25",
+                  dot: "bg-red-400",
+                  code: "ENTERPRISE",
+                };
 
-    const brand = p.brand || fallbackBrand;
+          const brand = p.brand || fallbackBrand;
 
-    return (
-      <motion.div
-        key={p.key}
-        initial={{ opacity: 0, y: 22 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true, amount: 0.25 }}
-        transition={{ duration: 0.6, delay: idx * 0.06 }}
-        className={`relative ${p.most ? "lg:-mt-2" : ""}`}
-      >
-        {p.most ? (
-          <div className={`absolute -top-3 ${isArabic ? "right-4" : "left-4"} z-20`}>
-            <span className="px-3 py-1 rounded-full text-[11px] font-extrabold shadow border bg-red-500 text-white border-red-300/30">
-              {isArabic ? "الأكثر اختيارًا" : "Most Chosen"}
-            </span>
-          </div>
-        ) : null}
-
-        <Link
-          href={`/company-subscriptions?lang=${lang}&package=${p.key}`}
-          className="block h-full"
-          aria-label={isArabic ? `عرض باقة ${p.name}` : `View ${p.name} package`}
-        >
-          <motion.div
-            whileHover={{ y: -4 }}
-            whileTap={{ scale: 0.99 }}
-            className={`group relative h-full cursor-pointer rounded-3xl bg-white/6 backdrop-blur-xl border ${brand.ring}
-              p-5 sm:p-6 flex flex-col overflow-hidden shadow-[0_30px_90px_-75px_rgba(0,0,0,0.55)]
-              transition hover:shadow-[0_40px_110px_-80px_rgba(0,0,0,0.75)]`}
-          >
-            <div className={`absolute top-0 left-0 right-0 h-[5px] bg-gradient-to-r ${brand.bar}`} />
-
-            <div
-              className="absolute inset-0 opacity-90 transition-opacity duration-300 group-hover:opacity-100"
-              style={{
-                background:
-                  "radial-gradient(circle at 18% 12%, rgba(255,255,255,0.12), transparent 55%)",
-              }}
-            />
-
-            <div className="relative z-10 flex items-start justify-between">
-              <div className="flex items-start gap-3">
-                <div className={`w-10 h-10 rounded-2xl border ${brand.iconBg} flex items-center justify-center shadow`}>
-                  <span className="text-white font-extrabold">⚡</span>
-                </div>
-
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${brand.dot}`} />
-                    <div className="text-white font-extrabold text-lg">{p.name}</div>
-                  </div>
-
-                  {!!p.fit && <div className="mt-1 text-[12px] text-white/65 font-semibold">{p.fit}</div>}
-
-                  <div className="mt-2 text-[10px] font-extrabold tracking-[0.2em] text-white/45">
-                    {brand.code}
-                  </div>
-                </div>
-              </div>
-
-              <div className={`text-xs font-extrabold px-2.5 py-1 rounded-full border ${brand.pill}`}>
-                PRO
-              </div>
-            </div>
-
-            <div className="relative z-10 mt-4 text-[12px] text-white/70">
-              <span className="font-extrabold text-white/90">
-                {isArabic ? "شهري • 3 • نصف سنوي • سنوي" : "Monthly • 3 • Semiannual • Yearly"}
-              </span>
-            </div>
-
-            <div className="relative z-10 mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/8 border border-white/10 text-[11px] font-extrabold text-white/85">
-              <span>🎁</span>
-              <span>
-                {isArabic ? "نصف سنوي = 7 شهور • سنوي = 13 شهر" : "Semiannual = 7 Months • Yearly = 13 Months"}
-              </span>
-            </div>
-
-            <ul className="relative z-10 mt-5 space-y-2 text-sm text-white/78">
-              {(p.perks || []).slice(0, 4).map((x, i) => (
-                <li key={i} className="flex items-start gap-2">
-                  <span className="mt-[2px] text-emerald-300">✓</span>
-                  <span>{x}</span>
-                </li>
-              ))}
-            </ul>
-
-            <div className="relative z-10 mt-auto pt-7">
-              <div className="w-full px-5 py-3 rounded-full font-extrabold shadow-lg bg-gradient-to-r from-emerald-700 via-emerald-500 to-green-700 text-white text-center transition group-hover:scale-[1.01]">
-                {isArabic ? "عرض الباقة" : "View Package"}
-              </div>
-            </div>
-          </motion.div>
-        </Link>
-      </motion.div>
-    );
-  })
-)}
-        <motion.div
-          key={p.key}
-          initial={{ opacity: 0, y: 22 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, amount: 0.25 }}
-          transition={{ duration: 0.6, delay: idx * 0.06 }}
-          className={`relative ${p.most ? "lg:-mt-2" : ""}`}
-        >
-          {/* Most badge */}
-          {p.most ? (
-            <div className={`absolute -top-3 ${isArabic ? "right-4" : "left-4"} z-20`}>
-              <span className="px-3 py-1 rounded-full text-[11px] font-extrabold shadow border bg-red-500 text-white border-red-300/30">
-                {isArabic ? "الأكثر اختيارًا" : "Most Chosen"}
-              </span>
-            </div>
-          ) : null}
-
-          {/* ✅ WHOLE CARD CLICKABLE */}
-          <Link
-            href={`/company-subscriptions?lang=${lang}&package=${p.key}`}
-            className="block h-full"
-            aria-label={isArabic ? `عرض باقة ${p.name}` : `View ${p.name} package`}
-          >
+          return (
             <motion.div
-              whileHover={{ y: -4 }}
-              whileTap={{ scale: 0.99 }}
-              className={`group relative h-full cursor-pointer rounded-3xl bg-white/6 backdrop-blur-xl border ${p.brand.ring}
-                p-5 sm:p-6 flex flex-col overflow-hidden shadow-[0_30px_90px_-75px_rgba(0,0,0,0.55)]
-                transition hover:shadow-[0_40px_110px_-80px_rgba(0,0,0,0.75)]
-                focus:outline-none focus:ring-2 focus:ring-emerald-400/50`}
+              key={p.key}
+              initial={{ opacity: 0, y: 22 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, amount: 0.25 }}
+              transition={{ duration: 0.6, delay: idx * 0.06 }}
+              className={`relative ${p.most ? "lg:-mt-2" : ""}`}
             >
-              {/* identity top bar */}
-              <div className={`absolute top-0 left-0 right-0 h-[5px] bg-gradient-to-r ${p.brand.bar}`} />
+              {p.most ? (
+                <div className={`absolute -top-3 ${isArabic ? "right-4" : "left-4"} z-20`}>
+                  <span className="px-3 py-1 rounded-full text-[11px] font-extrabold shadow border bg-red-500 text-white border-red-300/30">
+                    {isArabic ? "الأكثر اختيارًا" : "Most Chosen"}
+                  </span>
+                </div>
+              ) : null}
 
-              {/* soft inner light */}
-              <div
-                className="absolute inset-0 opacity-90 transition-opacity duration-300 group-hover:opacity-100"
-                style={{
-                  background:
-                    "radial-gradient(circle at 18% 12%, rgba(255,255,255,0.12), transparent 55%)",
-                }}
-              />
+              <Link
+                href={`/company-subscriptions?lang=${lang}&package=${p.key}`}
+                className="block h-full"
+                aria-label={isArabic ? `عرض باقة ${p.name}` : `View ${p.name} package`}
+              >
+                <motion.div
+                  whileHover={{ y: -4 }}
+                  whileTap={{ scale: 0.99 }}
+                  className={`group relative h-full cursor-pointer rounded-3xl bg-white/6 backdrop-blur-xl border ${brand.ring}
+                    p-5 sm:p-6 flex flex-col overflow-hidden shadow-[0_30px_90px_-75px_rgba(0,0,0,0.55)]
+                    transition hover:shadow-[0_40px_110px_-80px_rgba(0,0,0,0.75)]`}
+                >
+                  <div className={`absolute top-0 left-0 right-0 h-[5px] bg-gradient-to-r ${brand.bar}`} />
 
-              {/* Header row */}
-              <div className="relative z-10 flex items-start justify-between">
-                <div className="flex items-start gap-3">
-                  <div className={`w-10 h-10 rounded-2xl border ${p.brand.iconBg} flex items-center justify-center shadow transition group-hover:scale-[1.03]`}>
-                    <span className="text-white font-extrabold">⚡</span>
-                  </div>
+                  <div
+                    className="absolute inset-0 opacity-90 transition-opacity duration-300 group-hover:opacity-100"
+                    style={{
+                      background:
+                        "radial-gradient(circle at 18% 12%, rgba(255,255,255,0.12), transparent 55%)",
+                    }}
+                  />
 
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className={`w-2 h-2 rounded-full ${p.brand.dot}`} />
-                      <div className="text-white font-extrabold text-lg">{p.name}</div>
+                  <div className="relative z-10 flex items-start justify-between">
+                    <div className="flex items-start gap-3">
+                      <div className={`w-10 h-10 rounded-2xl border ${brand.iconBg} flex items-center justify-center shadow`}>
+                        <span className="text-white font-extrabold">⚡</span>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2 h-2 rounded-full ${brand.dot}`} />
+                          <div className="text-white font-extrabold text-lg">{p.name}</div>
+                        </div>
+
+                        {!!p.fit && (
+                          <div className="mt-1 text-[12px] text-white/65 font-semibold">{p.fit}</div>
+                        )}
+
+                        <div className="mt-2 text-[10px] font-extrabold tracking-[0.2em] text-white/45">
+                          {brand.code}
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="mt-1 text-[12px] text-white/65 font-semibold">{p.fit}</div>
+                    <div className={`text-xs font-extrabold px-2.5 py-1 rounded-full border ${brand.pill}`}>PRO</div>
+                  </div>
 
-                    <div className="mt-2 text-[10px] font-extrabold tracking-[0.2em] text-white/45">
-                      {p.brand.code}
+                  <div className="relative z-10 mt-4 text-[12px] text-white/70">
+                    <span className="font-extrabold text-white/90">
+                      {isArabic ? "شهري • 3 • نصف سنوي • سنوي" : "Monthly • 3 • Semiannual • Yearly"}
+                    </span>
+                  </div>
+
+                  <div className="relative z-10 mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/8 border border-white/10 text-[11px] font-extrabold text-white/85">
+                    <span>🎁</span>
+                    <span>
+                      {isArabic ? "نصف سنوي = 7 شهور • سنوي = 13 شهر" : "Semiannual = 7 Months • Yearly = 13 Months"}
+                    </span>
+                  </div>
+
+                  <ul className="relative z-10 mt-5 space-y-2 text-sm text-white/78">
+                    {(p.perks || []).slice(0, 4).map((x, i) => (
+                      <li key={i} className="flex items-start gap-2">
+                        <span className="mt-[2px] text-emerald-300">✓</span>
+                        <span>{x}</span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <div className="relative z-10 mt-auto pt-7">
+                    <div className="w-full px-5 py-3 rounded-full font-extrabold shadow-lg bg-gradient-to-r from-emerald-700 via-emerald-500 to-green-700 text-white text-center transition group-hover:scale-[1.01]">
+                      {isArabic ? "عرض الباقة" : "View Package"}
                     </div>
                   </div>
-                </div>
-
-                <div className={`text-xs font-extrabold px-2.5 py-1 rounded-full border ${p.brand.pill}`}>
-                  PRO
-                </div>
-              </div>
-
-              {/* Durations */}
-              <div className="relative z-10 mt-4 text-[12px] text-white/70">
-                <span className="font-extrabold text-white/90">
-                  {isArabic ? "شهري • 3 • نصف سنوي • سنوي" : "Monthly • 3 • Semiannual • Yearly"}
-                </span>
-              </div>
-
-              {/* Offer */}
-              <div className="relative z-10 mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/8 border border-white/10 text-[11px] font-extrabold text-white/85">
-                <span>🎁</span>
-                <span>
-                  {isArabic
-                    ? "نصف سنوي = 7 شهور • سنوي = 13 شهر"
-                    : "Semiannual = 7 Months • Yearly = 13 Months"}
-                </span>
-              </div>
-
-              {/* Perks */}
-              <ul className="relative z-10 mt-5 space-y-2 text-sm text-white/78">
-                {p.perks.map((x, i) => (
-                  <li key={i} className="flex items-start gap-2">
-                    <span className="mt-[2px] text-emerald-300">✓</span>
-                    <span>{x}</span>
-                  </li>
-                ))}
-              </ul>
-
-              {/* CTA (NOT a link/button to avoid nested link) */}
-              <div className="relative z-10 mt-auto pt-7">
-                <div className="w-full px-5 py-3 rounded-full font-extrabold shadow-lg bg-gradient-to-r from-emerald-700 via-emerald-500 to-green-700 text-white text-center transition group-hover:scale-[1.01]">
-                  {isArabic ? "عرض الباقة" : "View Package"}
-                </div>
-              </div>
+                </motion.div>
+              </Link>
             </motion.div>
-          </Link>
-        </motion.div>
+          );
+        })
+      )}
     </div>
   </div>
 </section>
+
 
 
 
