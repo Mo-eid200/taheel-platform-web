@@ -785,7 +785,6 @@ function HomePageInner() {
         </div>
       </section>
 
-      {/* ================= COMPANY PLANS ================= */}
 {/* ================= COMPANY PRO PACKAGES (PREVIEW) ================= */}
 <section className="py-10 sm:py-14 px-2 sm:px-4 bg-gradient-to-b from-[#22304a]/85 via-[#122024]/92 to-[#0b131e]/95">
   <div className="max-w-6xl mx-auto">
@@ -983,6 +982,7 @@ function HomePageInner() {
     </div>
   </div>
 </section>
+
 
 
 
