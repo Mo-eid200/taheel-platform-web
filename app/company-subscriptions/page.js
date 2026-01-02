@@ -15,11 +15,39 @@ function cn(...a) {
   return a.filter(Boolean).join(" ");
 }
 
-/** ✅ Quiet glow wrapper (ONLY for buttons) */
+/* =========================
+   ✅ Safe text helpers (prevents React crash #31)
+========================= */
+function asText(v, fallback = "") {
+  if (v == null) return fallback;
+  if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") return String(v);
+  if (typeof v === "object") {
+    if (typeof v.ar === "string") return v.ar;
+    if (typeof v.en === "string") return v.en;
+    // if it is Firestore Timestamp or other object -> ignore
+  }
+  return fallback;
+}
+
+function localized(obj, lang, fallback = "") {
+  if (obj == null) return fallback;
+  if (typeof obj === "string" || typeof obj === "number") return String(obj);
+  if (typeof obj === "object") {
+    // {ar,en} OR any map
+    const v = obj?.[lang];
+    return asText(v, asText(obj, fallback));
+  }
+  return fallback;
+}
+
+function safeArray(x) {
+  return Array.isArray(x) ? x : [];
+}
+
+/** ✅ Quiet glow wrapper (ONLY for buttons/cards) */
 function ButtonGlow({ active = false, radius = "rounded-full", children }) {
   return (
     <div className={cn("relative group", radius)}>
-      {/* active glow */}
       <div
         className={cn("absolute -inset-[2px] z-0", radius, "transition-opacity duration-300")}
         style={{
@@ -29,13 +57,8 @@ function ButtonGlow({ active = false, radius = "rounded-full", children }) {
           opacity: active ? 0.45 : 0,
         }}
       />
-      {/* hover glow */}
       <div
-        className={cn(
-          "absolute -inset-[2px] z-0",
-          radius,
-          "opacity-0 group-hover:opacity-55 transition-opacity duration-300"
-        )}
+        className={cn("absolute -inset-[2px] z-0", radius, "opacity-0 group-hover:opacity-55 transition-opacity duration-300")}
         style={{
           background:
             "linear-gradient(90deg, rgba(16,185,129,0.85), rgba(56,189,248,0.65), rgba(168,85,247,0.55))",
@@ -60,30 +83,33 @@ const DEFAULT_BRAND = {
     ring: "border-emerald-400/25 hover:border-emerald-400/70",
     dot: "bg-emerald-400",
     pill: "bg-emerald-500/12 border-emerald-400/25 text-emerald-200",
+    accentShadow: "shadow-[0_40px_120px_-90px_rgba(16,185,129,0.38)]",
   },
   growth: {
     bar: "from-sky-400 to-sky-600",
     ring: "border-sky-400/25 hover:border-sky-400/70",
     dot: "bg-sky-400",
     pill: "bg-sky-500/12 border-sky-400/25 text-sky-200",
+    accentShadow: "shadow-[0_40px_120px_-90px_rgba(56,189,248,0.35)]",
   },
   scale: {
     bar: "from-purple-400 to-purple-600",
     ring: "border-purple-400/25 hover:border-purple-400/75",
     dot: "bg-purple-400",
     pill: "bg-purple-500/12 border-purple-400/25 text-purple-200",
+    accentShadow: "shadow-[0_40px_120px_-90px_rgba(168,85,247,0.35)]",
   },
   enterprise: {
     bar: "from-rose-400 to-red-600",
     ring: "border-red-400/25 hover:border-red-400/80",
     dot: "bg-red-400",
     pill: "bg-red-500/12 border-red-400/25 text-red-200",
+    accentShadow: "shadow-[0_40px_120px_-90px_rgba(244,63,94,0.38)]",
   },
 };
 
-function safeArray(x) {
-  return Array.isArray(x) ? x : [];
-}
+const DURATION_ORDER = { monthly: 1, quarterly: 2, semiannual: 3, yearly: 4 };
+const PACKAGE_ORDER = { starter: 1, growth: 2, scale: 3, enterprise: 4 };
 
 export default function CompanySubscriptionsPage() {
   const sp = useSearchParams();
@@ -105,7 +131,7 @@ export default function CompanySubscriptionsPage() {
       month: "شهر",
       total: "الإجمالي",
       subscribeNow: "اشترك الآن",
-      summary: "ملخص",
+      summary: "ملخص الباقة",
       package: "الباقة",
       duration: "المدة",
       includes: "يشمل",
@@ -116,6 +142,8 @@ export default function CompanySubscriptionsPage() {
       langBtn: "EN",
       loading: "جاري تحميل الباقات...",
       empty: "لا توجد باقات متاحة الآن.",
+      noOffer: "بدون عرض",
+      freeMonth: "شهر مجاني",
     };
 
     const en = {
@@ -129,7 +157,7 @@ export default function CompanySubscriptionsPage() {
       month: "Month",
       total: "Total",
       subscribeNow: "Subscribe Now",
-      summary: "Summary",
+      summary: "Plan Summary",
       package: "Package",
       duration: "Duration",
       includes: "Includes",
@@ -140,6 +168,8 @@ export default function CompanySubscriptionsPage() {
       langBtn: "AR",
       loading: "Loading packages...",
       empty: "No packages available right now.",
+      noOffer: "No offer",
+      freeMonth: "free month",
     };
 
     return isArabic ? ar : en;
@@ -168,61 +198,67 @@ export default function CompanySubscriptionsPage() {
       try {
         setLoading(true);
 
-        // ✅ collection name (change here if different)
-        const colRef = collection(firestore, "companySubscriptionPlans");
-        const snap = await getDocs(colRef);
+        // ✅ Firestore collection
+        const snap = await getDocs(collection(firestore, "companySubscriptionPlans"));
 
-        const rows = snap.docs.map((d) => {
-          const data = d.data() || {};
-          const key = d.id;
+        const rows = snap.docs.map((docSnap) => {
+          const data = docSnap.data() || {};
+          const key = docSnap.id;
 
           const Icon = ICONS_BY_KEY[key] || Sparkles;
 
-          // durations might be stored as object {monthly:..., yearly:...}
-          const rawDurations = data.pricing || {};
-          const durationsArr = Object.entries(rawDurations).map(([k, v]) => {
+          const brand = data.brand || DEFAULT_BRAND[key] || DEFAULT_BRAND.starter;
+
+          // durations
+          const rawPricing = data.pricing || {};
+          const durations = Object.entries(rawPricing).map(([durKey, v]) => {
             const vv = v || {};
-            const title = vv.title?.[isArabic ? "ar" : "en"] || vv.title || k;
-            const tagKey = vv.tag; // "offer" | "most" etc
+            const title = localized(vv.title, isArabic ? "ar" : "en", durKey);
+            const tagKey = asText(vv.tag, ""); // "offer" | "most" | ""
+            const tag =
+              tagKey === "offer" ? t.offer : tagKey === "most" ? t.most : "";
+
             return {
-              key: k,
+              key: durKey,
               title,
               monthsShown: Number(vv.monthsShown ?? 1),
               paidMonths: Number(vv.paidMonths ?? vv.monthsShown ?? 1),
               bonus: Number(vv.bonus ?? 0),
               price: Number(vv.price ?? 0),
               best: Boolean(vv.best),
-              tag: tagKey ? (tagKey === "offer" ? t.offer : tagKey === "most" ? t.most : null) : null,
+              tag: tag || null,
             };
           });
 
-          // sort durations in desired order
-          const order = { monthly: 1, quarterly: 2, semiannual: 3, yearly: 4 };
-          durationsArr.sort((a, b) => (order[a.key] || 99) - (order[b.key] || 99));
+          durations.sort((a, b) => (DURATION_ORDER[a.key] || 99) - (DURATION_ORDER[b.key] || 99));
+
+          // perks
+          const perksLocale = data.perks?.[isArabic ? "ar" : "en"];
+          const perks = safeArray(perksLocale ?? data.perks).map((x) => asText(x, "")).filter(Boolean);
+
+          // badge (safe)
+          const badgeFromKey =
+            data.badgeKey === "most" ? t.most : data.badgeKey === "offer" ? t.offer : "";
+          const badge = badgeFromKey || localized(data.badge, isArabic ? "ar" : "en", "");
 
           return {
             key,
-            name: data.name?.[isArabic ? "ar" : "en"] || data.name || key,
-            fit: data.fit?.[isArabic ? "ar" : "en"] || data.fit || "",
+            name: localized(data.name, isArabic ? "ar" : "en", key),
+            fit: localized(data.fit, isArabic ? "ar" : "en", ""),
             icon: Icon,
-            badge:
-              (data.badgeKey === "most" ? t.most : data.badgeKey === "offer" ? t.offer : null) ||
-              data.badge ||
-              null,
+            badge: badge ? String(badge) : null,
             most: Boolean(data.most),
-            brand: data.brand || DEFAULT_BRAND[key] || DEFAULT_BRAND.starter,
-            perks: safeArray(data.perks?.[isArabic ? "ar" : "en"] || data.perks),
-            durations: durationsArr.length ? durationsArr : [],
+            brand,
+            perks,
+            durations: durations.length ? durations : [],
           };
         });
 
-        // keep stable order by known keys
-        const keyOrder = { starter: 1, growth: 2, scale: 3, enterprise: 4 };
-        rows.sort((a, b) => (keyOrder[a.key] || 99) - (keyOrder[b.key] || 99));
+        rows.sort((a, b) => (PACKAGE_ORDER[a.key] || 99) - (PACKAGE_ORDER[b.key] || 99));
 
         if (mounted) setPackages(rows);
       } catch (e) {
-        console.error("Failed to load company_subscriptions:", e);
+        console.error("Failed to load companySubscriptionPlans:", e);
         if (mounted) setPackages([]);
       } finally {
         if (mounted) setLoading(false);
@@ -291,8 +327,7 @@ export default function CompanySubscriptionsPage() {
                 </button>
               </ButtonGlow>
 
-              {/* Logo */}
-              <div className="relative rounded-xl bg-white p-1 border border-black/10 shadow w-[60px] h-[60px]">
+              <div className="relative rounded-xl bg-white p-1 border border-black/10 shadow w-[56px] h-[56px]">
                 <Image src="/logo3.png" alt="TAHEEL" fill className="object-contain" priority />
               </div>
 
@@ -327,7 +362,7 @@ export default function CompanySubscriptionsPage() {
               return (
                 <motion.div
                   key={p.key}
-                  initial={{ opacity: 0, y: 18 }}
+                  initial={{ opacity: 0, y: 16 }}
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true, amount: 0.2 }}
                   transition={{ duration: 0.5, delay: idx * 0.04 }}
@@ -336,11 +371,12 @@ export default function CompanySubscriptionsPage() {
                     className={cn(
                       "relative rounded-3xl border bg-white/5 backdrop-blur-xl overflow-hidden",
                       p.brand?.ring || "border-white/10",
-                      isOpen ? "border-emerald-400/35 shadow-[0_40px_120px_-90px_rgba(16,185,129,0.35)]" : ""
+                      isOpen ? cn("border-white/20", p.brand?.accentShadow) : ""
                     )}
                   >
                     <div className={cn("absolute top-0 left-0 right-0 h-[5px] bg-gradient-to-r", p.brand?.bar)} />
 
+                    {/* Header button */}
                     <button
                       onClick={() => setActivePackage((prev) => (prev === p.key ? "" : p.key))}
                       className={cn(
@@ -348,31 +384,39 @@ export default function CompanySubscriptionsPage() {
                         isArabic && "text-right flex-row-reverse"
                       )}
                     >
-                      <div className={cn("flex items-center gap-4", isArabic && "flex-row-reverse")}>
+                      <div className={cn("flex items-center gap-4 min-w-0", isArabic && "flex-row-reverse")}>
                         <div
                           className={cn(
-                            "w-12 h-12 rounded-2xl border flex items-center justify-center",
+                            "shrink-0 w-12 h-12 rounded-2xl border flex items-center justify-center",
                             isOpen ? "bg-white/10 border-white/20" : "bg-white/6 border-white/10"
                           )}
                         >
                           <Icon className="w-5 h-5 text-white/85" />
                         </div>
 
-                        <div>
-                          <div className={cn("flex items-center gap-2", isArabic && "flex-row-reverse")}>
+                        <div className="min-w-0">
+                          <div className={cn("flex items-center gap-2 flex-wrap", isArabic && "flex-row-reverse")}>
                             <span className={cn("w-2 h-2 rounded-full", p.brand?.dot)} />
-                            <div className="text-white font-extrabold text-lg sm:text-xl">{p.name}</div>
+                            <div className="text-white font-extrabold text-lg sm:text-xl truncate max-w-[70vw] sm:max-w-[420px]">
+                              {asText(p.name, p.key)}
+                            </div>
+
                             {p.badge ? (
-                              <span className="ml-2 px-3 py-1 rounded-full text-[11px] font-extrabold bg-red-500 text-white">
-                                {p.badge}
+                              <span className="px-3 py-1 rounded-full text-[11px] font-extrabold bg-red-500 text-white cursor-default">
+                                {String(p.badge)}
                               </span>
                             ) : null}
                           </div>
-                          <div className="mt-1 text-[12px] text-white/60 font-semibold">{p.fit}</div>
+
+                          {p.fit ? (
+                            <div className="mt-1 text-[12px] text-white/60 font-semibold line-clamp-2">
+                              {asText(p.fit, "")}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
 
-                      <div className={cn("flex items-center gap-3", isArabic && "flex-row-reverse")}>
+                      <div className={cn("flex items-center gap-3 shrink-0", isArabic && "flex-row-reverse")}>
                         <div className={cn("px-2.5 py-1 rounded-full border text-xs font-extrabold", p.brand?.pill)}>
                           PRO
                         </div>
@@ -403,6 +447,7 @@ export default function CompanySubscriptionsPage() {
                                   return (
                                     <ButtonGlow key={d.key} active={active} radius="rounded-2xl">
                                       <button
+                                        type="button"
                                         onClick={() => setDurationFor(p.key, d.key)}
                                         className={cn(
                                           "cursor-pointer relative w-full rounded-2xl border p-4 bg-white/6 backdrop-blur-xl transition text-left",
@@ -421,18 +466,21 @@ export default function CompanySubscriptionsPage() {
                                                   : "bg-white/10 text-white border-white/10"
                                               )}
                                             >
-                                              {d.tag}
+                                              {String(d.tag)}
                                             </span>
                                           </div>
                                         ) : null}
 
-                                        <div className="text-white font-extrabold text-base">{d.title}</div>
+                                        <div className="text-white font-extrabold text-base">{asText(d.title, d.key)}</div>
 
                                         <div className="mt-1 text-[12px] text-white/60 font-semibold">
-                                          {d.monthsShown} {d.monthsShown === 1 ? t.month : t.months}
-                                          {d.bonus ? (
-                                            <span className="ml-2 text-emerald-200 font-extrabold">
-                                              {isArabic ? `(+${d.bonus} مجاني)` : `(+${d.bonus} free)`}
+                                          {Number(d.monthsShown || 1)}{" "}
+                                          {Number(d.monthsShown || 1) === 1 ? t.month : t.months}
+                                          {Number(d.bonus || 0) ? (
+                                            <span className={cn("ml-2 font-extrabold", isArabic ? "mr-2 ml-0" : "")}>
+                                              <span className="text-emerald-200">
+                                                {isArabic ? `(+${d.bonus} مجاني)` : `(+${d.bonus} free)`}
+                                              </span>
                                             </span>
                                           ) : null}
                                         </div>
@@ -463,26 +511,28 @@ export default function CompanySubscriptionsPage() {
                               <div className="rounded-3xl bg-black/25 border border-white/10 p-5">
                                 <div className={cn("flex items-center justify-between", isArabic && "flex-row-reverse")}>
                                   <div className="text-white font-extrabold">{t.summary}</div>
-                                  <div className="text-[11px] text-white/55 font-bold">{p.name}</div>
+                                  <div className="text-[11px] text-white/55 font-bold truncate max-w-[52%]">
+                                    {asText(p.name, p.key)}
+                                  </div>
                                 </div>
 
                                 <div className="mt-4 rounded-2xl bg-white/6 border border-white/10 p-4">
                                   <div className="text-white/55 text-xs">{t.duration}</div>
                                   <div className="mt-1 text-white font-extrabold">
-                                    {selectedDur?.title} • {selectedDur?.monthsShown}{" "}
-                                    {selectedDur?.monthsShown === 1 ? t.month : t.months}
+                                    {asText(selectedDur?.title, "")} • {Number(selectedDur?.monthsShown || 1)}{" "}
+                                    {Number(selectedDur?.monthsShown || 1) === 1 ? t.month : t.months}
                                   </div>
 
                                   <div className="mt-2 text-white/60 text-sm">
-                                    {selectedDur?.bonus ? (
+                                    {Number(selectedDur?.bonus || 0) ? (
                                       <span>
                                         {t.includes}{" "}
                                         <span className="font-extrabold text-emerald-200">
-                                          +{selectedDur.bonus} {isArabic ? "شهر مجاني" : "free month"}
+                                          +{Number(selectedDur?.bonus || 0)} {isArabic ? t.freeMonth : t.freeMonth}
                                         </span>
                                       </span>
                                     ) : (
-                                      <span className="text-white/45">{isArabic ? "بدون عرض" : "No offer"}</span>
+                                      <span className="text-white/45">{t.noOffer}</span>
                                     )}
                                   </div>
                                 </div>
@@ -491,16 +541,16 @@ export default function CompanySubscriptionsPage() {
                                   <div className="text-white font-extrabold mb-3">{t.perks}</div>
                                   <div className="space-y-2 text-sm text-white/80">
                                     {safeArray(p.perks).map((x, i) => (
-                                      <div key={i} className="flex items-start gap-2">
-                                        <Check className="w-4 h-4 text-emerald-300 mt-[2px]" />
-                                        <span>{x}</span>
+                                      <div key={i} className={cn("flex items-start gap-2", isArabic && "flex-row-reverse text-right")}>
+                                        <Check className="w-4 h-4 text-emerald-300 mt-[2px] shrink-0" />
+                                        <span className="break-words">{asText(x, "")}</span>
                                       </div>
                                     ))}
                                   </div>
                                 </div>
 
-                                <div className="mt-5 rounded-2xl bg-white/6 border border-white/10 p-4 flex items-center justify-between">
-                                  <div>
+                                <div className="mt-5 rounded-2xl bg-white/6 border border-white/10 p-4 flex items-center justify-between gap-3">
+                                  <div className={cn("min-w-0", isArabic && "text-right")}>
                                     <div className="text-white/55 text-xs">{t.total}</div>
                                     <div className="text-white text-2xl font-extrabold mt-1">
                                       {Number(selectedDur?.price || 0).toLocaleString()}{" "}
@@ -510,8 +560,9 @@ export default function CompanySubscriptionsPage() {
 
                                   <ButtonGlow radius="rounded-full">
                                     <button
+                                      type="button"
                                       onClick={goSubscribe}
-                                      className="cursor-pointer px-5 py-3 rounded-full font-extrabold text-white shadow-lg transition hover:scale-[1.02] active:scale-[0.99] bg-gradient-to-r from-emerald-700 via-emerald-500 to-green-700"
+                                      className="cursor-pointer shrink-0 px-5 py-3 rounded-full font-extrabold text-white shadow-lg transition hover:scale-[1.02] active:scale-[0.99] bg-gradient-to-r from-emerald-700 via-emerald-500 to-green-700"
                                     >
                                       {t.subscribeNow}
                                     </button>
@@ -538,17 +589,18 @@ export default function CompanySubscriptionsPage() {
             <div className={cn("flex items-center justify-between gap-3", isArabic && "flex-row-reverse")}>
               <div className={cn("min-w-0", isArabic && "text-right")}>
                 <div className="text-[11px] text-white/55 font-bold">
-                  {t.package}: <span className="text-white/85">{pkgObj.name}</span> • {t.duration}:{" "}
-                  <span className="text-white/85">{durationObj.title}</span>
+                  {t.package}: <span className="text-white/85">{asText(pkgObj?.name, "")}</span> • {t.duration}:{" "}
+                  <span className="text-white/85">{asText(durationObj?.title, "")}</span>
                 </div>
                 <div className="text-white font-extrabold text-lg leading-none mt-1">
-                  {t.total}: {Number(durationObj.price || 0).toLocaleString()}{" "}
+                  {t.total}: {Number(durationObj?.price || 0).toLocaleString()}{" "}
                   <span className="text-[12px] text-white/55 font-semibold">{t.aed}</span>
                 </div>
               </div>
 
               <ButtonGlow radius="rounded-full">
                 <button
+                  type="button"
                   onClick={goSubscribe}
                   className="cursor-pointer shrink-0 px-6 py-3 rounded-full font-extrabold text-white shadow-lg transition hover:scale-[1.02] active:scale-[0.99] bg-gradient-to-r from-emerald-700 via-emerald-500 to-green-700"
                 >
