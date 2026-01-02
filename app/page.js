@@ -786,183 +786,144 @@ function HomePageInner() {
       </section>
 
       {/* ================= COMPANY PLANS ================= */}
-{/* ================= COMPANY PLANS (CLEAN + CONSISTENT) ================= */}
+{/* ================= COMPANY PRO PACKAGES (PREVIEW) ================= */}
 <section className="py-10 sm:py-14 px-2 sm:px-4 bg-gradient-to-b from-[#22304a]/85 via-[#122024]/92 to-[#0b131e]/95">
   <div className="max-w-6xl mx-auto">
     {/* Header */}
     <div className="text-center mb-8 sm:mb-10">
       <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/8 border border-white/10 text-emerald-200 text-xs font-extrabold shadow">
         <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-        {t.companyPlansTitle}
+        {isArabic ? "باقات PRO للشركات" : "Company PRO Packages"}
       </div>
 
       <h2 className="mt-4 text-2xl sm:text-3xl md:text-4xl font-extrabold text-white drop-shadow">
-        {isArabic ? "باقات PRO للشركات" : "PRO Plans for Companies"}
+        {isArabic ? "اختار نوع الباقة… وبعدها اختار المدة" : "Choose a package type… then pick a duration"}
       </h2>
 
       <p className="mt-2 text-sm sm:text-base text-white/70 max-w-3xl mx-auto leading-relaxed">
-        {t.companyPlansSub}
+        {isArabic
+          ? "المنصة تعرض لك نوع الباقة المناسب لحجم شركتك، ثم داخل صفحة الباقات تختار المدة والسعر."
+          : "We show the right package type for your company size, then you choose duration & pricing inside the plans page."}
       </p>
 
       <p className="mt-2 text-[12px] text-white/55">
         {isArabic
-          ? "عرض محدود: نصف سنوي = 7 شهور | سنوي = 13 شهر"
-          : "Limited offer: Semiannual = 7 months | Yearly = 13 months"}
+          ? "عرض محدود: نصف سنوي = 7 شهور | سنوي = 13 شهر (الأكثر طلبًا)"
+          : "Limited offer: Semiannual = 7 months | Yearly = 13 months (most requested)"}
       </p>
     </div>
 
-    {/* Cards */}
+    {/* Package Types */}
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 sm:gap-6 items-stretch">
       {[
-        // 1) Monthly
         {
-          key: "monthly",
-          title: t.monthly,
-          months: isArabic ? "1 شهر" : "1 Month",
-          bonus: "",
-          tag: "",
-          accent: {
-            ring: "border-emerald-400/25 hover:border-emerald-400/60",
+          key: "starter",
+          name: isArabic ? "Starter PRO" : "Starter PRO",
+          fit: isArabic ? "للشركات الصغيرة (1–5 موظفين)" : "For small companies (1–5 staff)",
+          color: {
+            ring: "border-emerald-400/25 hover:border-emerald-400/65",
             pill: "bg-emerald-500/12 border-emerald-400/25 text-emerald-200",
-            glow: "shadow-[0_30px_90px_-75px_rgba(16,185,129,0.45)]",
-            top: "from-emerald-500/15 via-white/8 to-transparent",
+            top: "from-emerald-500/16 via-white/8 to-transparent",
           },
           perks: isArabic
-            ? ["إلغاء رسوم الطباعة", "تفعيل فوري بعد الدفع", "دعم مباشر"]
-            : ["Printing fees waived", "Instant activation after payment", "Direct support"],
+            ? ["إلغاء رسوم الطباعة", "دعم مباشر", "تفعيل سريع"]
+            : ["Printing fees waived", "Direct support", "Fast activation"],
         },
-
-        // 2) Quarterly (3 months)
         {
-          key: "quarterly",
-          title: t.quarterly,
-          months: isArabic ? "3 شهور" : "3 Months",
-          bonus: "",
-          tag: isArabic ? "اختيار ذكي" : "Smart Pick",
-          accent: {
-            ring: "border-sky-400/25 hover:border-sky-400/60",
+          key: "growth",
+          name: isArabic ? "Growth PRO" : "Growth PRO",
+          fit: isArabic ? "للشركات المتوسطة (5–10 موظفين)" : "For mid teams (5–10 staff)",
+          color: {
+            ring: "border-sky-400/25 hover:border-sky-400/65",
             pill: "bg-sky-500/12 border-sky-400/25 text-sky-200",
-            glow: "shadow-[0_30px_90px_-75px_rgba(56,189,248,0.45)]",
-            top: "from-sky-500/15 via-white/8 to-transparent",
+            top: "from-sky-500/16 via-white/8 to-transparent",
           },
           perks: isArabic
-            ? ["مناسب للبدايات", "إلغاء رسوم الطباعة", "متابعة أسرع"]
-            : ["Great for starting", "Printing fees waived", "Faster tracking"],
+            ? ["متابعة أسرع للطلبات", "إلغاء رسوم الطباعة", "أولوية أعلى"]
+            : ["Faster tracking", "Printing fees waived", "Higher priority"],
         },
-
-        // 3) Semiannual (6 months -> 7 months offer)
         {
-          key: "semiannual",
-          title: t.semiannual,
-          months: isArabic ? "6 شهور" : "6 Months",
-          bonus: isArabic ? "+ شهر مجاني (7 شهور)" : "+ 1 Month Free (7 Months)",
-          tag: isArabic ? "عرض" : "Offer",
-          featured: true, // make it stand out (but not most requested)
-          accent: {
-            ring: "border-amber-400/35 hover:border-amber-400/70",
+          key: "scale",
+          name: isArabic ? "Scale PRO" : "Scale PRO",
+          fit: isArabic ? "للشركات الكبيرة (10–20 موظف)" : "For larger teams (10–20 staff)",
+          color: {
+            ring: "border-amber-400/30 hover:border-amber-400/70",
             pill: "bg-amber-500/12 border-amber-400/25 text-amber-200",
-            glow: "shadow-[0_40px_120px_-85px_rgba(245,158,11,0.55)]",
             top: "from-amber-500/18 via-white/10 to-transparent",
           },
           perks: isArabic
-            ? ["ثبات في التكاليف", "إلغاء رسوم الطباعة", "مناسب للمحاسبة"]
-            : ["Stable budgeting", "Printing fees waived", "Cleaner accounting"],
+            ? ["أولوية معالجة أعلى", "إلغاء رسوم الطباعة", "تقارير أسهل"]
+            : ["Higher processing priority", "Printing fees waived", "Cleaner reports"],
         },
-
-        // 4) Yearly (12 -> 13 months offer, Most requested)
         {
-          key: "yearly",
-          title: t.yearly,
-          months: isArabic ? "12 شهر" : "12 Months",
-          bonus: isArabic ? "+ شهر مجاني (13 شهر)" : "+ 1 Month Free (13 Months)",
-          tag: isArabic ? "الأكثر طلبًا" : "Most Requested",
+          key: "enterprise",
+          name: isArabic ? "Enterprise PRO" : "Enterprise PRO",
+          fit: isArabic ? "مؤسسات / 20+ موظف" : "Enterprise / 20+ staff",
           most: true,
-          accent: {
-            ring: "border-purple-400/40 hover:border-purple-400/75",
+          color: {
+            ring: "border-purple-400/35 hover:border-purple-400/80",
             pill: "bg-purple-500/12 border-purple-400/25 text-purple-200",
-            glow: "shadow-[0_45px_140px_-95px_rgba(168,85,247,0.6)]",
             top: "from-purple-500/18 via-white/10 to-transparent",
           },
           perks: isArabic
-            ? ["أعلى أولوية في المعالجة", "إلغاء رسوم الطباعة", "أفضل توفير على المدى الطويل"]
-            : ["Highest processing priority", "Printing fees waived", "Best long-term savings"],
+            ? ["SLA ودعم مخصص", "أولوية قصوى", "حلول حسب نشاط الشركة"]
+            : ["SLA & dedicated support", "Maximum priority", "Tailored solutions"],
         },
       ].map((p, idx) => (
         <motion.div
           key={p.key}
-          initial={{ opacity: 0, y: 24 }}
+          initial={{ opacity: 0, y: 22 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.25 }}
-          transition={{ duration: 0.6, delay: idx * 0.07 }}
-          className={`relative ${p.most ? "lg:-mt-3" : p.featured ? "lg:-mt-1" : ""}`}
+          transition={{ duration: 0.6, delay: idx * 0.06 }}
+          className={`relative ${p.most ? "lg:-mt-2" : ""}`}
         >
-          {/* Badge */}
-          {p.tag ? (
+          {/* small badge */}
+          {p.most ? (
             <div className={`absolute -top-3 ${isArabic ? "right-4" : "left-4"} z-20`}>
-              <span
-                className={`px-3 py-1 rounded-full text-[11px] font-extrabold shadow border ${
-                  p.most
-                    ? "bg-purple-500 text-white border-purple-300/30"
-                    : "bg-white/10 text-white border-white/10"
-                }`}
-              >
-                {p.tag}
+              <span className="px-3 py-1 rounded-full text-[11px] font-extrabold shadow border bg-purple-500 text-white border-purple-300/30">
+                {isArabic ? "باقة المؤسسات" : "Enterprise"}
               </span>
             </div>
           ) : null}
 
-          {/* subtle glow ring for most */}
-          {p.most ? (
-            <span
-              className="pointer-events-none absolute -inset-1 rounded-[28px] opacity-70"
-              style={{
-                background:
-                  "linear-gradient(120deg, rgba(168,85,247,0.35), rgba(255,255,255,0.08), rgba(16,185,129,0.18))",
-                filter: "blur(10px)",
-              }}
-            />
-          ) : null}
-
           <div
-            className={`relative h-full rounded-3xl bg-white/6 backdrop-blur-xl border ${p.accent.ring} ${p.accent.glow} p-5 sm:p-6 flex flex-col overflow-hidden`}
+            className={`relative h-full rounded-3xl bg-white/6 backdrop-blur-xl border ${p.color.ring} p-5 sm:p-6 flex flex-col overflow-hidden shadow-[0_30px_90px_-75px_rgba(0,0,0,0.55)]`}
           >
             {/* top accent */}
-            <div className={`absolute inset-0 bg-gradient-to-br ${p.accent.top} opacity-95`} />
+            <div className={`absolute inset-0 bg-gradient-to-br ${p.color.top} opacity-95`} />
 
-            {/* Header row */}
-            <div className="relative z-10 flex items-center justify-between">
+            <div className="relative z-10 flex items-start justify-between">
               <div>
-                <div className="text-white font-extrabold text-lg">{p.title}</div>
-                <div className="mt-1 text-[12px] text-white/65 font-semibold">{p.months}</div>
+                <div className="text-white font-extrabold text-lg">{p.name}</div>
+                <div className="mt-1 text-[12px] text-white/65 font-semibold">{p.fit}</div>
               </div>
 
-              <div className={`text-xs font-extrabold px-2.5 py-1 rounded-full border ${p.accent.pill}`}>
+              <div className={`text-xs font-extrabold px-2.5 py-1 rounded-full border ${p.color.pill}`}>
                 PRO
               </div>
             </div>
 
-            {/* Bonus line */}
-            {p.bonus ? (
-              <div className="relative z-10 mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/8 border border-white/10 text-[11px] font-extrabold text-white/85">
-                <span>🎁</span>
-                <span>{p.bonus}</span>
-              </div>
-            ) : null}
-
-            {/* Price placeholder */}
-            <div className="relative z-10 mt-5">
-              <div className="text-white/70 text-xs">{isArabic ? "السعر" : "Price"}</div>
-              <div className="text-3xl font-extrabold text-white mt-1 leading-none">
-                —
-                <span className="text-xs text-white/55 font-semibold"> AED</span>
-              </div>
-              <div className="text-[11px] text-white/55 mt-2">
-                {isArabic ? "يظهر السعر بعد ربط لوحة التحكم" : "Price loads from admin plan settings"}
-              </div>
+            {/* durations line */}
+            <div className="relative z-10 mt-4 text-[12px] text-white/70">
+              {isArabic ? "المدد المتاحة:" : "Available durations:"}{" "}
+              <span className="font-extrabold text-white/90">
+                {isArabic ? "شهري • 3 شهور • 6 شهور • سنوي" : "Monthly • 3 Months • 6 Months • Yearly"}
+              </span>
             </div>
 
-            {/* Perks */}
-            <ul className="relative z-10 mt-6 space-y-2 text-sm text-white/78">
+            {/* offers line */}
+            <div className="relative z-10 mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/8 border border-white/10 text-[11px] font-extrabold text-white/85">
+              <span>🎁</span>
+              <span>
+                {isArabic ? "6 شهور = 7 | سنوي = 13 شهر" : "6M = 7M | Yearly = 13 months"}
+              </span>
+              <span className="opacity-70">
+                {isArabic ? "(الأكثر طلبًا: السنوي)" : "(Most requested: Yearly)"}
+              </span>
+            </div>
+
+            <ul className="relative z-10 mt-5 space-y-2 text-sm text-white/78">
               {p.perks.map((x, i) => (
                 <li key={i} className="flex items-start gap-2">
                   <span className="mt-[2px] text-emerald-300">✓</span>
@@ -971,24 +932,17 @@ function HomePageInner() {
               ))}
             </ul>
 
-            {/* CTA */}
             <div className="relative z-10 mt-auto pt-7">
               <Link href={`/company-subscriptions?lang=${lang}`}>
-                <button
-                  className={`w-full cursor-pointer px-5 py-3 rounded-full font-extrabold shadow-lg transition hover:scale-[1.02] active:scale-[0.99] ${
-                    p.most
-                      ? "bg-gradient-to-r from-purple-500 via-purple-400 to-fuchsia-500 text-white"
-                      : "bg-gradient-to-r from-emerald-700 via-emerald-500 to-green-700 text-white"
-                  }`}
-                >
-                  {t.subscribeNow}
+                <button className="w-full cursor-pointer px-5 py-3 rounded-full font-extrabold shadow-lg transition hover:scale-[1.02] active:scale-[0.99] bg-gradient-to-r from-emerald-700 via-emerald-500 to-green-700 text-white">
+                  {isArabic ? "عرض التفاصيل والأسعار" : "View details & pricing"}
                 </button>
               </Link>
 
               <div className="mt-3 text-[11px] text-white/45 text-center">
                 {isArabic
-                  ? "التفعيل يتم تلقائيًا بعد نجاح الدفع فقط"
-                  : "Activation happens automatically only after successful payment"}
+                  ? "هذا العرض للتعريف — الاختيار والدفع داخل صفحة الباقات"
+                  : "This is a preview — selection & payment happen in the plans page"}
               </div>
             </div>
           </div>
@@ -996,11 +950,11 @@ function HomePageInner() {
       ))}
     </div>
 
-    {/* Bottom centered CTA (no WhatsApp / no quick ask) */}
+    {/* Bottom CTA */}
     <div className="mt-8 sm:mt-10 flex justify-center">
       <Link href={`/company-subscriptions?lang=${lang}`}>
         <button className="cursor-pointer px-7 sm:px-10 py-3 rounded-full bg-white/10 border border-white/10 text-white font-extrabold shadow hover:bg-white/15 hover:scale-[1.02] transition">
-          {isArabic ? "عرض كل باقات الشركات" : "View All Company Plans"}
+          {isArabic ? "اذهب لصفحة الباقات" : "Go to Plans Page"}
         </button>
       </Link>
     </div>
