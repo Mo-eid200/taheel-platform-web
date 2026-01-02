@@ -949,15 +949,6 @@ function HomePageInner() {
         </motion.div>
       ))}
     </div>
-
-    {/* Bottom CTA */}
-    <div className="mt-8 sm:mt-10 flex justify-center">
-      <Link href={`/company-subscriptions?lang=${lang}`}>
-        <button className="cursor-pointer px-7 sm:px-10 py-3 rounded-full bg-white/10 border border-white/10 text-white font-extrabold shadow hover:bg-white/15 hover:scale-[1.02] transition">
-          {isArabic ? "اذهب لصفحة الباقات" : "Go to Plans Page"}
-        </button>
-      </Link>
-    </div>
   </div>
 </section>
 
