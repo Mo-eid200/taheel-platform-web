@@ -169,7 +169,7 @@ export default function CompanySubscriptionsPage() {
         setLoading(true);
 
         // ✅ collection name (change here if different)
-        const colRef = collection(firestore, "company_subscriptions");
+        const colRef = collection(firestore, "companySubscriptionPlans");
         const snap = await getDocs(colRef);
 
         const rows = snap.docs.map((d) => {
@@ -179,12 +179,11 @@ export default function CompanySubscriptionsPage() {
           const Icon = ICONS_BY_KEY[key] || Sparkles;
 
           // durations might be stored as object {monthly:..., yearly:...}
-          const rawDurations = data.durations || {};
+          const rawDurations = data.pricing || {};
           const durationsArr = Object.entries(rawDurations).map(([k, v]) => {
             const vv = v || {};
             const title = vv.title?.[isArabic ? "ar" : "en"] || vv.title || k;
-            const tagKey = vv.tagKey; // "offer" | "most" etc
-
+            const tagKey = vv.tag; // "offer" | "most" etc
             return {
               key: k,
               title,
@@ -193,7 +192,7 @@ export default function CompanySubscriptionsPage() {
               bonus: Number(vv.bonus ?? 0),
               price: Number(vv.price ?? 0),
               best: Boolean(vv.best),
-              tag: tagKey ? (tagKey === "offer" ? t.offer : tagKey === "most" ? t.most : vv.tag) : vv.tag,
+              tag: tagKey ? (tagKey === "offer" ? t.offer : tagKey === "most" ? t.most : null) : null,
             };
           });
 
