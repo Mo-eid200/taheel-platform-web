@@ -268,9 +268,16 @@ export default function CompanySubscriptionsPage() {
                 </button>
               </ButtonGlow>
 
-              <div className="rounded-xl bg-white p-2 border border-black/10 shadow">
-                <Image src="/logo3.png" alt="TAHEEL" width={34} height={34} />
-              </div>
+<div className="relative rounded-xl bg-white p-2 border border-black/10 shadow w-[54px] h-[54px]">
+  <Image
+    src="/logo3.png"
+    alt="TAHEEL"
+    fill
+    className="object-contain"
+    priority
+  />
+</div>
+
 
               <div className={cn("hidden sm:block", isArabic && "text-right")}>
                 <div className="text-white font-extrabold leading-none">{t.pageTitle}</div>
