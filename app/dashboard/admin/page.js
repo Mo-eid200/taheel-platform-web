@@ -18,7 +18,7 @@ import NotificationsSection from "@/components/admin/NotificationsSection";
 export const dynamic = 'force-dynamic';
 import ServicesSection from "@/components/admin/ServicesSection";
 import SocialSection from "@/components/admin/SocialSection";
-import SettingsSection from "@/components/admin/SettingsSection";
+import SettingsSection from "@/components/admin/SubscriptionsSection";
 import ArchiveSection from "@/components/admin/ArchiveSection";
 import ChatWidget from "@/components/admin/ChatWidget";
 import {
@@ -196,7 +196,7 @@ function AdminDashboardPage({ adminData }) {
       case "social":
         return <SocialSection lang={lang} />;
       case "settings":
-        return <SettingsSection lang={lang} />;
+        return <SubscriptionsSection lang={lang} />;
       case "archive":
         return <ArchiveSection lang={lang} />;
       default:
