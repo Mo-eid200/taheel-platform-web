@@ -672,24 +672,44 @@ function ClientProfilePageInner({ userId }) {
     client?.type || client?.accountType || ""
   ).toLowerCase();
 
-  const residentServices = objectToArray(services.resident);
-  const companyServices = objectToArray(services.company);
-  const nonresidentServices = objectToArray(services.nonresident);
-  const otherServices = objectToArray(services.other);
+const residentServices = useMemo(
+  () => objectToArray(services.resident),
+  [services.resident]
+);
+const companyServices = useMemo(
+  () => objectToArray(services.company),
+  [services.company]
+);
+const nonresidentServices = useMemo(
+  () => objectToArray(services.nonresident),
+  [services.nonresident]
+);
+const otherServices = useMemo(
+  () => objectToArray(services.other),
+  [services.other]
+);
 
-  const sectionToServices = {
-    residentServices,
-    companyServices,
-    nonresidentServices,
-    otherServices,
-  };
+const currentServices = useMemo(() => {
+  switch (selectedSection) {
+    case "residentServices":
+      return residentServices;
+    case "companyServices":
+      return companyServices;
+    case "nonresidentServices":
+      return nonresidentServices;
+    case "otherServices":
+      return otherServices;
+    default:
+      return [];
+  }
+}, [
+  selectedSection,
+  residentServices,
+  companyServices,
+  nonresidentServices,
+  otherServices,
+]);
 
-  const dir = lang === "ar" ? "rtl" : "ltr";
-
-  const currentServices = useMemo(
-    () => sectionToServices[selectedSection] || [],
-    [selectedSection, sectionToServices]
-  );
 
   const [translationsMap, setTranslationsMap] = useState({}); // {sid: {name, description, longDescription}}
 
@@ -711,6 +731,62 @@ function ClientProfilePageInner({ userId }) {
         if (alive) setTranslationsMap(m);
         return;
       }
+
+
+      const isServicesSection = [
+  "residentServices",
+  "companyServices",
+  "nonresidentServices",
+  "otherServices",
+].includes(selectedSection);
+
+useEffect(() => {
+  let alive = true;
+
+  async function run() {
+    if (!isServicesSection) return;  // ✅ مهم
+    if (!currentServices?.length) {
+      if (alive) setTranslationsMap({});
+      return;
+    }
+
+    if (lang === "ar") {
+      const m = {};
+      for (const s of currentServices) {
+        const sid = s?.serviceId || s?.id || s?.name;
+        m[sid] = {
+          name: s?.name || "",
+          description: s?.description || "",
+          longDescription: s?.longDescription || "",
+        };
+      }
+      if (alive) setTranslationsMap(m);
+      return;
+    }
+
+    // EN: translate
+    const entries = await Promise.all(
+      currentServices.map(async (s) => {
+        const sid = s?.serviceId || s?.id || s?.name;
+        const tr = await translateServiceFields({
+          service: s,
+          lang,
+          fields: ["name", "description", "longDescription"],
+          idKey: "serviceId",
+        });
+        return [sid, tr];
+      })
+    );
+
+    if (alive) setTranslationsMap(Object.fromEntries(entries));
+  }
+
+  run();
+  return () => {
+    alive = false;
+  };
+}, [lang, selectedSection, currentServices, isServicesSection]);
+
 
       const entries = await Promise.all(
         currentServices.map(async (s) => {
