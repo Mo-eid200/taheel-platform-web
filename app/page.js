@@ -74,6 +74,15 @@ const LANG = {
     privacy: "Privacy Policy",
     terms: "Terms & Conditions",
     careers: "Careers",
+    companyPlansTitle: "Company Plans (PRO)",
+companyPlansSub: "Save time & remove printing fees across your company transactions.",
+mostPopular: "Most Popular",
+subscribeNow: "View Plans",
+plansNote: "Printing fees are waived after successful subscription payment.",
+monthly: "Monthly",
+quarterly: "3 Months",
+semiannual: "6 Months",
+yearly: "Yearly",
   },
   ar: {
     taheel: "تأهيل",
@@ -120,6 +129,15 @@ const LANG = {
     privacy: "سياسة الخصوصية",
     terms: "الشروط والأحكام",
     careers: "انضم إلينا",
+    companyPlansTitle: "باقات الشركات (PRO)",
+companyPlansSub: "وفر وقتك وألغِ رسوم الطباعة على معاملات شركتك بعد الاشتراك.",
+mostPopular: "الأكثر اختيارًا",
+subscribeNow: "عرض الباقات",
+plansNote: "يتم إلغاء رسوم الطباعة بعد نجاح دفع الاشتراك فقط.",
+monthly: "شهري",
+quarterly: "3 شهور",
+semiannual: "6 شهور",
+yearly: "سنوي",
   },
 };
 
@@ -766,6 +784,162 @@ function HomePageInner() {
           </div>
         </div>
       </section>
+
+      {/* ================= COMPANY PLANS ================= */}
+      {/* ================= COMPANY PLANS ================= */}
+<section className="py-12 sm:py-16 px-2 sm:px-4 bg-gradient-to-b from-[#0b131e]/80 via-[#122024]/70 to-[#192233]/90">
+  <div className="max-w-6xl mx-auto">
+    {/* Header */}
+    <div className={`text-center mb-10 ${isArabic ? "text-right" : "text-left"}`}>
+      <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 border border-white/10 text-emerald-200 text-xs font-bold shadow">
+        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+        {t.companyPlansTitle}
+      </div>
+
+      <h2 className="mt-4 text-2xl sm:text-4xl font-extrabold text-white drop-shadow">
+        {isArabic ? "اشتراك واحد = طباعة بدون رسوم" : "One Subscription = Printing Fees Waived"}
+      </h2>
+
+      <p className="mt-3 text-sm sm:text-base text-white/70 max-w-3xl mx-auto leading-relaxed">
+        {t.companyPlansSub}
+      </p>
+
+      <p className="mt-2 text-[12px] text-white/50">
+        {t.plansNote}
+      </p>
+    </div>
+
+    {/* Cards */}
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-5 sm:gap-6 items-stretch">
+      {[
+        {
+          key: "monthly",
+          title: t.monthly,
+          price: "—",
+          tag: "",
+          glow: "hover:border-emerald-400/60",
+          perks: isArabic
+            ? ["إلغاء رسوم الطباعة", "تفعيل فوري بعد الدفع", "دعم مباشر"]
+            : ["Printing fees waived", "Instant activation after payment", "Priority support"],
+        },
+        {
+          key: "quarterly",
+          title: t.quarterly,
+          price: "—",
+          tag: t.mostPopular,
+          glow: "border-emerald-400/40 hover:border-emerald-400/80",
+          perks: isArabic
+            ? ["أفضل قيمة للشركات", "إلغاء رسوم الطباعة", "تتبع أسرع للطلبات"]
+            : ["Best value for teams", "Printing fees waived", "Faster tracking"],
+        },
+        {
+          key: "semiannual",
+          title: t.semiannual,
+          price: "—",
+          tag: "",
+          glow: "hover:border-emerald-400/60",
+          perks: isArabic
+            ? ["ثبات في التكاليف", "إلغاء رسوم الطباعة", "تقارير أسهل للمحاسبة"]
+            : ["Stable budgeting", "Printing fees waived", "Cleaner accounting"],
+        },
+        {
+          key: "yearly",
+          title: t.yearly,
+          price: "—",
+          tag: "",
+          glow: "hover:border-emerald-400/60",
+          perks: isArabic
+            ? ["أعلى توفير على المدى الطويل", "إلغاء رسوم الطباعة", "أولوية في المعالجة"]
+            : ["Max long-term savings", "Printing fees waived", "Processing priority"],
+        },
+      ].map((p, idx) => (
+        <motion.div
+          key={p.key}
+          initial={{ opacity: 0, y: 24 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, amount: 0.25 }}
+          transition={{ duration: 0.6, delay: idx * 0.08 }}
+          className="relative"
+        >
+          {/* Popular tag */}
+          {p.tag ? (
+            <div className={`absolute -top-3 ${isArabic ? "right-4" : "left-4"} z-10`}>
+              <span className="px-3 py-1 rounded-full text-[11px] font-extrabold bg-emerald-500 text-white shadow">
+                {p.tag}
+              </span>
+            </div>
+          ) : null}
+
+          <div
+            className={`h-full rounded-3xl bg-white/5 backdrop-blur-xl border border-white/10 ${p.glow} shadow-[0_30px_90px_-70px_rgba(0,0,0,0.9)] p-5 sm:p-6 flex flex-col`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="text-white font-extrabold text-lg">{p.title}</div>
+              <div className="text-emerald-300 text-xs font-bold px-2 py-1 rounded-full bg-emerald-500/10 border border-emerald-400/20">
+                PRO
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <div className="text-white/70 text-xs">{isArabic ? "السعر" : "Price"}</div>
+              <div className="text-3xl font-extrabold text-white mt-1">
+                {p.price}
+                <span className="text-xs text-white/50 font-semibold">
+                  {isArabic ? " AED" : " AED"}
+                </span>
+              </div>
+              <div className="text-[11px] text-white/50 mt-1">
+                {isArabic ? "يظهر السعر بعد ربط لوحة التحكم" : "Price loads from admin plan settings"}
+              </div>
+            </div>
+
+            <ul className="mt-5 space-y-2 text-sm text-white/75">
+              {p.perks.map((x, i) => (
+                <li key={i} className="flex items-start gap-2">
+                  <span className="mt-[2px] text-emerald-400">✓</span>
+                  <span>{x}</span>
+                </li>
+              ))}
+            </ul>
+
+            <div className="mt-auto pt-6">
+              <Link href={`/company-subscriptions?lang=${lang}`}>
+                <button className="w-full cursor-pointer px-5 py-3 rounded-full bg-gradient-to-r from-emerald-600 via-emerald-500 to-green-700 text-white font-extrabold shadow-lg hover:scale-[1.02] active:scale-[0.99] transition">
+                  {t.subscribeNow}
+                </button>
+              </Link>
+
+              <div className="mt-3 text-[11px] text-white/45 text-center">
+                {isArabic
+                  ? "التفعيل يتم تلقائيًا بعد نجاح الدفع فقط"
+                  : "Activation happens automatically only after successful payment"}
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      ))}
+    </div>
+
+    {/* Bottom CTA strip */}
+    <div className="mt-10 rounded-3xl bg-gradient-to-r from-emerald-900/40 via-black/30 to-emerald-900/40 border border-white/10 p-5 sm:p-6 flex flex-col md:flex-row items-center justify-between gap-4">
+      <div className={`${isArabic ? "text-right" : "text-left"}`}>
+        <div className="text-white font-extrabold text-lg">
+          {isArabic ? "جاهز توفر على معاملات شركتك؟" : "Ready to save on your company transactions?"}
+        </div>
+        <div className="text-white/70 text-sm mt-1">
+          {isArabic ? "إلغاء رسوم الطباعة + تجربة أسرع للشركات." : "Printing fee removal + smoother company flow."}
+        </div>
+      </div>
+
+      <Link href={`/company-subscriptions?lang=${lang}`}>
+        <button className="cursor-pointer px-6 py-3 rounded-full bg-white text-[#0b131e] font-extrabold shadow hover:scale-105 transition">
+          {isArabic ? "اذهب للباقات" : "Go to Plans"}
+        </button>
+      </Link>
+    </div>
+  </div>
+</section>
+
 
       {/* ================= FOOTER ================= */}
       <footer className="bg-[#192233] text-gray-200 pt-10 sm:pt-14 pb-4 sm:pb-6 px-2 sm:px-4 mt-10 sm:mt-20 rounded-t-3xl shadow-lg border-t border-[#22304a]">
