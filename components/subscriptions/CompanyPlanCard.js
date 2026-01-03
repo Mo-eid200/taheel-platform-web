@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { firestore } from "@/lib/firebase.client";
-import CompanyPlanCardPro from "./CompanyPlanCardPro";
+import CompanyPlanCardPro from "./CompanyPlanCard";
 
 const PACKAGE_ORDER = { starter: 1, growth: 2, scale: 3, enterprise: 4 };
 
