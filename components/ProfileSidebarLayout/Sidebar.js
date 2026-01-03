@@ -1,24 +1,17 @@
-"use client";
-
 import { useEffect, useRef, useState } from "react";
 import {
-  FaUser,
-  FaClipboardList,
-  FaServicestack,
-  FaBuilding,
-  FaUserTie,
-  FaTag,
-  FaChevronLeft,
-  FaChevronRight,
+  FaUser, FaClipboardList, FaServicestack,
+  FaBuilding, FaUserTie, FaTag,
+  FaChevronLeft, FaChevronRight
 } from "react-icons/fa";
-import { FaCrown } from "react-icons/fa";
 import { firestore } from "@/lib/firebase.client";
 import { doc, getDoc } from "firebase/firestore";
+import { FaCrown } from "react-icons/fa";
 
 // الأقسام الأساسية
 const MAIN_SECTIONS = [
   { key: "personal", icon: <FaUser size={22} />, ar: "المعلومات الشخصية", en: "Personal Info" },
-  { key: "orders", icon: <FaClipboardList size={22} />, ar: "الطلبات الحالية", en: "Current Orders" },
+  { key: "orders",   icon: <FaClipboardList size={22} />, ar: "الطلبات الحالية", en: "Current Orders" },
 ];
 
 const SERVICE_SECTIONS = {
@@ -38,15 +31,6 @@ const SERVICE_SECTIONS = {
   ],
 };
 
-// ✅ fix: أي subcategory object يتحول لنص
-function toText(v) {
-  if (v == null) return "";
-  if (typeof v === "string") return v;
-  if (typeof v === "number") return String(v);
-  if (typeof v === "object") return v.ar || v.en || v.label || v.name || "";
-  return String(v);
-}
-
 export default function Sidebar({
   selected,
   onSelect = () => {},
@@ -56,17 +40,18 @@ export default function Sidebar({
   onSelectSubcategory = () => {},
 }) {
   const [opened, setOpened] = useState(true);
-  const sidebarRef = useRef(null);
+  const sidebarRef = useRef();
   const dir = lang === "ar" ? "rtl" : "ltr";
   const headerHeight = 140;
   const [showSubcatsFor, setShowSubcatsFor] = useState(null);
+  const serviceSections = SERVICE_SECTIONS[clientType] || [];
   const [isHovered, setIsHovered] = useState(false);
 
-  const serviceSections = SERVICE_SECTIONS[(clientType || "resident").toLowerCase()] || [];
-
+  // السابكاتوجري الديناميكية لكل قسم خدمات
   const [subcategories, setSubcategories] = useState({});
   const [loadingSubcats, setLoadingSubcats] = useState(false);
 
+  // جلب السابكاتوجري الديناميكية من الخدمات تحت القسم
   async function fetchSubcategories(sectionKey) {
     let docKey = "";
     if (sectionKey === "residentServices") docKey = "resident";
@@ -74,27 +59,22 @@ export default function Sidebar({
     else if (sectionKey === "companyServices") docKey = "company";
     else if (sectionKey === "otherServices") docKey = "other";
     if (!docKey) return;
-
     setLoadingSubcats(true);
     try {
       const snap = await getDoc(doc(firestore, "servicesByClientType", docKey));
-      if (!snap.exists()) {
-        setSubcategories((prev) => ({ ...prev, [sectionKey]: [] }));
-        return;
-      }
-
-      const data = snap.data() || {};
+      if (!snap.exists()) return;
+      const data = snap.data();
       const servicesArr = Object.entries(data)
-        .filter(([key, val]) => key.startsWith("service") && typeof val === "object" && val)
-        .map(([, val]) => val);
-
-      const uniqueSubcats = [...new Set(servicesArr.map((s) => toText(s.subcategory)).filter(Boolean))];
-      setSubcategories((prev) => ({ ...prev, [sectionKey]: uniqueSubcats }));
-    } catch {
-      setSubcategories((prev) => ({ ...prev, [sectionKey]: [] }));
-    } finally {
-      setLoadingSubcats(false);
+        .filter(([key, val]) => key.startsWith("service") && typeof val === "object")
+        .map(([key, val]) => val);
+      const uniqueSubcats = [
+        ...new Set(servicesArr.map(s => s.subcategory).filter(Boolean))
+      ];
+      setSubcategories(prev => ({ ...prev, [sectionKey]: uniqueSubcats }));
+    } catch (error) {
+      setSubcategories(prev => ({ ...prev, [sectionKey]: [] }));
     }
+    setLoadingSubcats(false);
   }
 
   useEffect(() => {
@@ -138,28 +118,29 @@ export default function Sidebar({
   };
 
   const handleServiceSectionClick = async (sectionKey) => {
+    // لو نفس القسم مفتوح، اقفل السابكاتوجري واظهر كل الخدمات
     if (sectionKey === "subscriptions") {
-      setShowSubcatsFor(null);
-      onSelect("subscriptions");
-      onSelectSubcategory("");
-      return;
-    }
-
+  setShowSubcatsFor(null);
+  onSelect("subscriptions");
+  onSelectSubcategory("");
+  return;
+}
     if (showSubcatsFor === sectionKey) {
       setShowSubcatsFor(null);
-      onSelect(sectionKey);
-      onSelectSubcategory("");
+      onSelect(sectionKey); // تظهر كل خدمات النوع فقط
+      onSelectSubcategory(""); // تلغي الفلتر الفرعي
     } else {
       setShowSubcatsFor(sectionKey);
-      onSelect(sectionKey);
-      onSelectSubcategory("");
+      onSelect(sectionKey); // تظهر كل خدمات النوع فقط
+      onSelectSubcategory(""); // تلغي الفلتر الفرعي
       await fetchSubcategories(sectionKey);
     }
   };
 
+  // عند اختيار سابكاتوجري تظهر خدماته فقط
   const handleSubcategoryClick = (sectionKey, subcat) => {
-    onSelect(sectionKey);
-    onSelectSubcategory(subcat);
+    onSelect(sectionKey); // نوع الخدمة
+    onSelectSubcategory(subcat); // التصنيف الفرعي
   };
 
   return (
@@ -185,63 +166,101 @@ export default function Sidebar({
         flexDirection: "column",
       }}
     >
+      {/* زر فتح/غلق عائم صغير وديناميكي */}
       <button
         style={isHovered ? { ...floatingBtnStyle, ...floatingBtnHoverStyle } : floatingBtnStyle}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         onClick={() => {
-          setOpened((v) => !v);
+          setOpened(v => !v);
           if (opened) setShowSubcatsFor(null);
         }}
         title={opened ? (lang === "ar" ? "إغلاق القائمة" : "Close sidebar") : (lang === "ar" ? "فتح القائمة" : "Open sidebar")}
       >
-        {opened ? <FaChevronLeft size={20} /> : <FaChevronRight size={20} />}
+        {opened
+          ? <FaChevronLeft size={20} />
+          : <FaChevronRight size={20} />
+        }
       </button>
 
+      {/* اللوجو */}
       <div className={`mt-10 mb-8 flex items-center justify-center transition-all duration-300 ${opened ? "opacity-100" : "opacity-0"}`}>
         <div className="w-16 h-16 rounded-full bg-white shadow-xl flex items-center justify-center border-2 border-emerald-400">
-          <img src="/logo-transparent-large.png" alt="Logo" className="w-12 h-12 rounded-full" style={{ objectFit: "contain" }} />
+          <img
+            src="/logo-transparent-large.png"
+            alt="Logo"
+            className="w-12 h-12 rounded-full"
+            style={{ objectFit: "contain" }}
+          />
         </div>
       </div>
 
+      {/* قائمة التنقل الرئيسية */}
       <nav className="flex flex-col gap-2 mt-2">
         {MAIN_SECTIONS.map((section) => (
           <button
             key={section.key}
             className={`flex flex-row items-center gap-3 px-4 py-3 rounded-full transition-all font-bold text-base group
-              ${selected === section.key ? "bg-emerald-700/20 text-emerald-300 shadow" : "text-gray-100 hover:bg-emerald-400/20 hover:text-emerald-300"}`}
+              ${selected === section.key
+                ? "bg-emerald-700/20 text-emerald-300 shadow"
+                : "text-gray-100 hover:bg-emerald-400/20 hover:text-emerald-300"
+              }
+              `}
             onClick={() => {
               setShowSubcatsFor(null);
               onSelect(section.key);
               onSelectSubcategory("");
             }}
-            style={{ justifyContent: "flex-start", cursor: "pointer" }}
+            style={{
+              justifyContent: "flex-start",
+              cursor: "pointer",
+            }}
+            tabIndex={0}
           >
             <span className={`transition-all ${opened ? "" : "mx-auto"}`}>{section.icon}</span>
-            {opened && <span className="whitespace-nowrap">{lang === "ar" ? section.ar : section.en}</span>}
+            {opened && (
+              <span className="whitespace-nowrap">{lang === "ar" ? section.ar : section.en}</span>
+            )}
           </button>
         ))}
 
+        {/* أقسام الخدمات حسب نوع العميل */}
         {serviceSections.map((section) => (
           <div key={section.key}>
             <button
               className={`flex flex-row items-center gap-3 px-4 py-3 rounded-full transition-all font-bold text-base group
-                ${selected === section.key ? "bg-emerald-700/20 text-emerald-300 shadow" : "text-gray-100 hover:bg-emerald-400/20 hover:text-emerald-300"}`}
+                ${selected === section.key
+                  ? "bg-emerald-700/20 text-emerald-300 shadow"
+                  : "text-gray-100 hover:bg-emerald-400/20 hover:text-emerald-300"
+                }
+                `}
               onClick={() => handleServiceSectionClick(section.key)}
-              style={{ justifyContent: "flex-start", cursor: "pointer" }}
+              style={{
+                justifyContent: "flex-start",
+                cursor: "pointer",
+              }}
+              tabIndex={0}
             >
               <span className={`transition-all ${opened ? "" : "mx-auto"}`}>{section.icon}</span>
-              {opened && <span className="whitespace-nowrap">{lang === "ar" ? section.ar : section.en}</span>}
+              {opened && (
+                <span className="whitespace-nowrap">{lang === "ar" ? section.ar : section.en}</span>
+              )}
             </button>
-
+            {/* قائمة السابكاتوجري تظهر فقط لو القسم مفتوح ومختار */}
             <div
               style={{
                 maxHeight:
-                  showSubcatsFor === section.key && subcategories[section.key] && opened && subcategories[section.key].length
+                  showSubcatsFor === section.key &&
+                  subcategories[section.key] &&
+                  opened &&
+                  subcategories[section.key].length
                     ? "500px"
                     : "0px",
                 opacity:
-                  showSubcatsFor === section.key && subcategories[section.key] && opened && subcategories[section.key].length
+                  showSubcatsFor === section.key &&
+                  subcategories[section.key] &&
+                  opened &&
+                  subcategories[section.key].length
                     ? 1
                     : 0,
                 overflow: "hidden",
@@ -253,13 +272,16 @@ export default function Sidebar({
                 <div className="text-xs text-gray-400 py-2">جاري التحميل...</div>
               ) : (
                 <>
-                  {subcategories[section.key]?.map((subcat) => (
+                  {subcategories[section.key]?.map(subcat => (
                     <button
                       key={subcat}
                       onClick={() => handleSubcategoryClick(section.key, subcat)}
                       className={`text-sm rounded-full px-3 py-1 font-bold transition border
-                        ${selectedSubcategory === subcat ? "bg-emerald-400 text-white" : "bg-white text-emerald-800 border-emerald-200 hover:bg-emerald-100"}`}
-                      style={{ cursor: "pointer" }}
+                        ${selectedSubcategory === subcat
+                          ? "bg-emerald-400 text-white"
+                          : "bg-white text-emerald-800 border-emerald-200 hover:bg-emerald-100"}
+                      `}
+                      style={{ cursor: "pointer" }} // الماوس يد دائماً
                     >
                       {subcat}
                     </button>
@@ -271,8 +293,10 @@ export default function Sidebar({
         ))}
       </nav>
 
+      {/* فراغ لحقوق الملكية بالأسفل */}
       <div className="flex-1" />
 
+      {/* حقوق الملكية */}
       {opened && (
         <div className="text-xs text-gray-400 text-center mb-8 transition-opacity opacity-80 relative z-10">
           © 2025 تأهيل. جميع الحقوق محفوظة
