@@ -1,62 +1,52 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { collection, getDocs } from "firebase/firestore";
-import { firestore } from "@/lib/firebase.client";
+import React from "react";
 import CompanyPlanCard from "./CompanyPlanCard";
 
-export default function CompanySubscriptionsSection({ lang = "ar", darkMode = false }) {
-  const [plans, setPlans] = useState([]);
-  const [loading, setLoading] = useState(true);
+export default function CompanySubscriptionsSection({ lang = "ar", darkMode = false, router }) {
+  const plans = [
+    {
+      id: "pro",
+      badge: lang === "ar" ? "الأكثر طلبًا" : "Most Popular",
+      title: lang === "ar" ? "اشتراك PRO" : "PRO Plan",
+      price: 499,
+      period: lang === "ar" ? "شهريًا" : "Monthly",
+      color: "emerald",
+      features:
+        lang === "ar"
+          ? ["لوحة تحكم احترافية", "أولوية في الدعم", "خصومات على الخدمات", "إدارة موظفين/طلبات"]
+          : ["Pro dashboard", "Priority support", "Service discounts", "Staff/Orders management"],
+    },
+    {
+      id: "business",
+      badge: lang === "ar" ? "للشركات" : "For Companies",
+      title: lang === "ar" ? "اشتراك BUSINESS" : "BUSINESS Plan",
+      price: 999,
+      period: lang === "ar" ? "شهريًا" : "Monthly",
+      color: "blue",
+      features:
+        lang === "ar"
+          ? ["كل مزايا PRO", "تقارير شهرية", "حسابات متعددة", "تخصيص أسعار أكثر"]
+          : ["Everything in PRO", "Monthly reports", "Multi accounts", "More pricing controls"],
+    },
+  ];
 
-  useEffect(() => {
-    let alive = true;
-
-    (async () => {
-      setLoading(true);
-      try {
-        const snap = await getDocs(collection(firestore, "companySubscriptionPlans"));
-        const arr = snap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .filter((p) => p.isActive !== false)
-          .sort((a, b) => (a.sortIndex || 0) - (b.sortIndex || 0));
-
-        if (alive) setPlans(arr);
-      } catch {
-        if (alive) setPlans([]);
-      } finally {
-        if (alive) setLoading(false);
-      }
-    })();
-
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  if (loading) {
-    return (
-      <div className={`w-full rounded-2xl p-6 text-center ${darkMode ? "bg-gray-800" : "bg-white/90"}`}>
-        <div className="font-extrabold text-lg">{lang === "ar" ? "جاري تحميل الاشتراكات..." : "Loading plans..."}</div>
-      </div>
-    );
-  }
-
-  if (!plans.length) {
-    return (
-      <div className={`w-full rounded-2xl p-6 text-center ${darkMode ? "bg-gray-800" : "bg-white/90"}`}>
-        <div className="font-extrabold text-lg text-red-500">
-          {lang === "ar" ? "لا توجد باقات متاحة حالياً" : "No plans available"}
-        </div>
-      </div>
-    );
-  }
+  const onSelectPlan = (planId) => {
+    // عدّل المسار حسب صفحة الدفع عندك
+    if (router?.push) router.push(`/checkout?plan=${planId}`);
+  };
 
   return (
     <div className="w-full">
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {plans.map((p) => (
-          <CompanyPlanCard key={p.id} plan={p} lang={lang} darkMode={darkMode} />
+          <CompanyPlanCard
+            key={p.id}
+            plan={p}
+            lang={lang}
+            darkMode={darkMode}
+            onSelect={() => onSelectPlan(p.id)}
+          />
         ))}
       </div>
     </div>
