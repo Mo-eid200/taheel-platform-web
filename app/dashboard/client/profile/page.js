@@ -62,6 +62,12 @@ function getDayGreeting(lang = "ar") {
   }
 }
 
+function asText(v) {
+  if (v == null) return "";
+  if (typeof v === "string") return v.trim().toLowerCase();
+  return String(v).trim().toLowerCase();
+}
+
 function getFullName(client, lang = "ar") {
   if (!client) return "";
   if (lang === "ar") {
@@ -1235,12 +1241,15 @@ function ClientProfilePageInner({ userId }) {
 // Page wrapper: read userId from query
 // =====================================
 export default function ClientProfilePage() {
-  const searchParams = useSearchParams();
-  const userId = searchParams.get("userId") || "";
-
   return (
-    <Suspense fallback={null}>
-      <ClientProfilePageInner userId={userId} />
+    <Suspense fallback={<GlobalLoader />}>
+      <ClientProfilePageWithParams />
     </Suspense>
   );
+}
+
+function ClientProfilePageWithParams() {
+  const searchParams = useSearchParams();
+  const userId = searchParams.get("userId") || "";
+  return <ClientProfilePageInner userId={userId} />;
 }
