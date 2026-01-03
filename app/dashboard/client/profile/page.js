@@ -582,15 +582,6 @@ function ClientProfilePageInner({ userId }) {
         return;
       }
 
-      useEffect(() => {
-  if (!clientType) return;
-
-  if (selectedSection === "subscriptions" && clientType !== "company") {
-    setSelectedSection("personal");
-    if (typeof window !== "undefined") localStorage.setItem("selectedSection", "personal");
-  }
-}, [clientType, selectedSection]);
-
 
       // AR: no translation
       if (lang === "ar") {
@@ -1088,7 +1079,8 @@ function ClientProfilePageInner({ userId }) {
                 {currentServices
                   .filter((srv) => {
                     const matchesSearch = advancedServiceFilter(srv);
-                    const matchesSubcat = !selectedSubcategory || srv.subcategory === selectedSubcategory;
+                    const matchesSubcat =
+                    !selectedSubcategory || asText(srv?.subcategory) === asText(selectedSubcategory);
                     return matchesSearch && matchesSubcat;
                   })
                   .map((srv, i) => {
