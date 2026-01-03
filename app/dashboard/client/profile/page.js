@@ -151,7 +151,7 @@ function SectionTitle({ icon, color = "emerald", children }) {
     <div className="w-full flex items-center my-10 select-none">
       <div className={c.lineLeft} />
       <span className={c.bubble}>
-        {iconMap[icon]} {children}
+        {iconMap[icon] && iconMap[icon]} {children}
       </span>
       <div className={c.lineRight} />
     </div>
