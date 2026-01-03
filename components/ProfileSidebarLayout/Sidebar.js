@@ -10,8 +10,6 @@ import {
   FaTag,
   FaChevronLeft,
   FaChevronRight,
-  FaComments,
-  FaEnvelopeOpenText,
 } from "react-icons/fa";
 import { FaCrown } from "react-icons/fa";
 import { firestore } from "@/lib/firebase.client";
@@ -23,7 +21,6 @@ const MAIN_SECTIONS = [
   { key: "orders", icon: <FaClipboardList size={22} />, ar: "الطلبات الحالية", en: "Current Orders" },
 ];
 
-// أقسام الخدمات حسب نوع العميل
 const SERVICE_SECTIONS = {
   resident: [
     { key: "residentServices", icon: <FaServicestack size={22} />, ar: "خدمات المقيم", en: "Resident Services" },
@@ -41,6 +38,15 @@ const SERVICE_SECTIONS = {
   ],
 };
 
+// ✅ fix: أي subcategory object يتحول لنص
+function toText(v) {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return String(v);
+  if (typeof v === "object") return v.ar || v.en || v.label || v.name || "";
+  return String(v);
+}
+
 export default function Sidebar({
   selected,
   onSelect = () => {},
@@ -50,23 +56,14 @@ export default function Sidebar({
   onSelectSubcategory = () => {},
 }) {
   const [opened, setOpened] = useState(true);
-  const [isHovered, setIsHovered] = useState(false);
-  const [showSubcatsFor, setShowSubcatsFor] = useState(null);
-
   const sidebarRef = useRef(null);
-
   const dir = lang === "ar" ? "rtl" : "ltr";
   const headerHeight = 140;
+  const [showSubcatsFor, setShowSubcatsFor] = useState(null);
+  const [isHovered, setIsHovered] = useState(false);
 
-  // ✅ Guard: subscriptions تظهر للشركة فقط
-  const safeClientType = clientType === "company" ? "company" : clientType;
-  const serviceSectionsRaw = SERVICE_SECTIONS[safeClientType] || [];
-  const serviceSections =
-    safeClientType !== "company"
-      ? serviceSectionsRaw.filter((s) => s.key !== "subscriptions")
-      : serviceSectionsRaw;
+  const serviceSections = SERVICE_SECTIONS[(clientType || "resident").toLowerCase()] || [];
 
-  // السابكاتوجري الديناميكية لكل قسم خدمات
   const [subcategories, setSubcategories] = useState({});
   const [loadingSubcats, setLoadingSubcats] = useState(false);
 
@@ -91,7 +88,7 @@ export default function Sidebar({
         .filter(([key, val]) => key.startsWith("service") && typeof val === "object" && val)
         .map(([, val]) => val);
 
-      const uniqueSubcats = [...new Set(servicesArr.map((s) => s.subcategory).filter(Boolean))];
+      const uniqueSubcats = [...new Set(servicesArr.map((s) => toText(s.subcategory)).filter(Boolean))];
       setSubcategories((prev) => ({ ...prev, [sectionKey]: uniqueSubcats }));
     } catch {
       setSubcategories((prev) => ({ ...prev, [sectionKey]: [] }));
@@ -100,18 +97,16 @@ export default function Sidebar({
     }
   }
 
-  // close sidebar if click outside
   useEffect(() => {
     function handleClick(e) {
       if (opened && sidebarRef.current && !sidebarRef.current.contains(e.target)) {
         setOpened(false);
         setShowSubcatsFor(null);
-        onSelectSubcategory("");
       }
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
-  }, [opened, onSelectSubcategory]);
+  }, [opened]);
 
   const floatingBtnStyle = {
     position: "absolute",
@@ -143,7 +138,6 @@ export default function Sidebar({
   };
 
   const handleServiceSectionClick = async (sectionKey) => {
-    // ✅ subscriptions: صفحة مباشرة بدون subcats
     if (sectionKey === "subscriptions") {
       setShowSubcatsFor(null);
       onSelect("subscriptions");
@@ -168,24 +162,13 @@ export default function Sidebar({
     onSelectSubcategory(subcat);
   };
 
-  const asidePosStyle =
-    dir === "rtl"
-      ? { right: 0, left: "auto" }
-      : { left: 0, right: "auto" };
-
-  // سهم الزر حسب الاتجاه
-  const ToggleIcon = opened
-    ? (dir === "rtl" ? FaChevronRight : FaChevronLeft)
-    : (dir === "rtl" ? FaChevronLeft : FaChevronRight);
-
   return (
     <aside
       ref={sidebarRef}
-      className="fixed z-40"
+      className={`fixed left-0 z-40`}
       dir={dir}
       lang={lang}
       style={{
-        ...asidePosStyle,
         top: `${headerHeight}px`,
         height: `calc(100vh - ${headerHeight}px)`,
         width: opened ? "260px" : "70px",
@@ -202,60 +185,37 @@ export default function Sidebar({
         flexDirection: "column",
       }}
     >
-      {/* زر فتح/غلق */}
       <button
         style={isHovered ? { ...floatingBtnStyle, ...floatingBtnHoverStyle } : floatingBtnStyle}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         onClick={() => {
           setOpened((v) => !v);
-          if (opened) {
-            setShowSubcatsFor(null);
-            onSelectSubcategory("");
-          }
+          if (opened) setShowSubcatsFor(null);
         }}
-        title={
-          opened
-            ? lang === "ar"
-              ? "إغلاق القائمة"
-              : "Close sidebar"
-            : lang === "ar"
-              ? "فتح القائمة"
-              : "Open sidebar"
-        }
+        title={opened ? (lang === "ar" ? "إغلاق القائمة" : "Close sidebar") : (lang === "ar" ? "فتح القائمة" : "Open sidebar")}
       >
-        <ToggleIcon size={20} />
+        {opened ? <FaChevronLeft size={20} /> : <FaChevronRight size={20} />}
       </button>
 
-      {/* اللوجو */}
       <div className={`mt-10 mb-8 flex items-center justify-center transition-all duration-300 ${opened ? "opacity-100" : "opacity-0"}`}>
         <div className="w-16 h-16 rounded-full bg-white shadow-xl flex items-center justify-center border-2 border-emerald-400">
-          <img
-            src="/logo-transparent-large.png"
-            alt="Logo"
-            className="w-12 h-12 rounded-full"
-            style={{ objectFit: "contain" }}
-          />
+          <img src="/logo-transparent-large.png" alt="Logo" className="w-12 h-12 rounded-full" style={{ objectFit: "contain" }} />
         </div>
       </div>
 
-      {/* القائمة */}
       <nav className="flex flex-col gap-2 mt-2">
         {MAIN_SECTIONS.map((section) => (
           <button
             key={section.key}
             className={`flex flex-row items-center gap-3 px-4 py-3 rounded-full transition-all font-bold text-base group
-              ${selected === section.key
-                ? "bg-emerald-700/20 text-emerald-300 shadow"
-                : "text-gray-100 hover:bg-emerald-400/20 hover:text-emerald-300"
-              }`}
+              ${selected === section.key ? "bg-emerald-700/20 text-emerald-300 shadow" : "text-gray-100 hover:bg-emerald-400/20 hover:text-emerald-300"}`}
             onClick={() => {
               setShowSubcatsFor(null);
               onSelect(section.key);
               onSelectSubcategory("");
             }}
             style={{ justifyContent: "flex-start", cursor: "pointer" }}
-            tabIndex={0}
           >
             <span className={`transition-all ${opened ? "" : "mx-auto"}`}>{section.icon}</span>
             {opened && <span className="whitespace-nowrap">{lang === "ar" ? section.ar : section.en}</span>}
@@ -266,33 +226,22 @@ export default function Sidebar({
           <div key={section.key}>
             <button
               className={`flex flex-row items-center gap-3 px-4 py-3 rounded-full transition-all font-bold text-base group
-                ${selected === section.key
-                  ? "bg-emerald-700/20 text-emerald-300 shadow"
-                  : "text-gray-100 hover:bg-emerald-400/20 hover:text-emerald-300"
-                }`}
+                ${selected === section.key ? "bg-emerald-700/20 text-emerald-300 shadow" : "text-gray-100 hover:bg-emerald-400/20 hover:text-emerald-300"}`}
               onClick={() => handleServiceSectionClick(section.key)}
               style={{ justifyContent: "flex-start", cursor: "pointer" }}
-              tabIndex={0}
             >
               <span className={`transition-all ${opened ? "" : "mx-auto"}`}>{section.icon}</span>
               {opened && <span className="whitespace-nowrap">{lang === "ar" ? section.ar : section.en}</span>}
             </button>
 
-            {/* subcategories */}
             <div
               style={{
                 maxHeight:
-                  showSubcatsFor === section.key &&
-                  subcategories[section.key] &&
-                  opened &&
-                  subcategories[section.key].length
+                  showSubcatsFor === section.key && subcategories[section.key] && opened && subcategories[section.key].length
                     ? "500px"
                     : "0px",
                 opacity:
-                  showSubcatsFor === section.key &&
-                  subcategories[section.key] &&
-                  opened &&
-                  subcategories[section.key].length
+                  showSubcatsFor === section.key && subcategories[section.key] && opened && subcategories[section.key].length
                     ? 1
                     : 0,
                 overflow: "hidden",
@@ -301,7 +250,7 @@ export default function Sidebar({
               className="pl-8 pr-2 mt-1 mb-2 flex flex-col gap-1"
             >
               {loadingSubcats ? (
-                <div className="text-xs text-gray-400 py-2">{lang === "ar" ? "جاري التحميل..." : "Loading..."}</div>
+                <div className="text-xs text-gray-400 py-2">جاري التحميل...</div>
               ) : (
                 <>
                   {subcategories[section.key]?.map((subcat) => (
@@ -309,10 +258,7 @@ export default function Sidebar({
                       key={subcat}
                       onClick={() => handleSubcategoryClick(section.key, subcat)}
                       className={`text-sm rounded-full px-3 py-1 font-bold transition border
-                        ${selectedSubcategory === subcat
-                          ? "bg-emerald-400 text-white"
-                          : "bg-white text-emerald-800 border-emerald-200 hover:bg-emerald-100"
-                        }`}
+                        ${selectedSubcategory === subcat ? "bg-emerald-400 text-white" : "bg-white text-emerald-800 border-emerald-200 hover:bg-emerald-100"}`}
                       style={{ cursor: "pointer" }}
                     >
                       {subcat}
