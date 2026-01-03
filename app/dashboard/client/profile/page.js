@@ -13,7 +13,6 @@ import {
   FaMoon,
   FaSun,
 } from "react-icons/fa";
-
 import WeatherTimeWidget from "@/components/WeatherTimeWidget";
 import { ResidentCard } from "@/components/cards/ResidentCard";
 import CompanyCardGold from "@/components/cards/CompanyCard";
@@ -41,7 +40,6 @@ import {
   onSnapshot,
   limit,
 } from "firebase/firestore";
-
 import WalletWidget from "@/components/clientheader/WalletWidget";
 import CoinsWidget from "@/components/clientheader/CoinsWidget";
 import NotificationWidget from "@/components/clientheader/NotificationWidget";
@@ -301,9 +299,9 @@ function ClientProfilePageInner({ userId }) {
   const [search, setSearch] = useState("");
   const [reloadClient, setReloadClient] = useState(false);
   const [selectedSubcategory, setSelectedSubcategory] = useState("");
-  const coinsRef = useRef(null);
-  const walletRef = useRef(null);
-  const messagesRef = useRef(null);
+  const coinsRef = useRef();
+  const walletRef = useRef();
+  const messagesRef = useRef();
 
   const [resolvedUserId, setResolvedUserId] = useState(null);
   const [resolving, setResolving] = useState(true);
@@ -326,16 +324,9 @@ function ClientProfilePageInner({ userId }) {
   const clientType = (client?.type || client?.accountType || "").toLowerCase();
   const dir = lang === "ar" ? "rtl" : "ltr";
 
-  // ✅ Guard: لا تسمح subscriptions لغير company
-  useEffect(() => {
-    if (!clientType) return;
-    if (selectedSection === "subscriptions" && clientType !== "company") {
-      setSelectedSection("personal");
-      if (typeof window !== "undefined") localStorage.setItem("selectedSection", "personal");
-    }
-  }, [clientType, selectedSection]);
-
+  // =====================================
   // prevent browser back if logged in
+  // =====================================
   useEffect(() => {
     if (typeof window === "undefined") return;
     window.history.pushState(null, "", window.location.href);
@@ -348,7 +339,9 @@ function ClientProfilePageInner({ userId }) {
     return () => window.removeEventListener("popstate", onPopState);
   }, [client]);
 
+  // =====================================
   // Auto logout after 30min
+  // =====================================
   useEffect(() => {
     if (!client) return;
     const timer = setTimeout(() => {
@@ -359,12 +352,16 @@ function ClientProfilePageInner({ userId }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, lang]);
 
+  // =====================================
   // if not logged in -> /login
+  // =====================================
   useEffect(() => {
     if (client === null && !loading && !resolving) router.replace("/login");
   }, [client, loading, resolving, router]);
 
+  // =====================================
   // Resolve userId → actual Firestore doc.id
+  // =====================================
   useEffect(() => {
     let cancelled = false;
 
@@ -377,6 +374,7 @@ function ClientProfilePageInner({ userId }) {
 
       setResolving(true);
       try {
+        // 1) direct doc id
         const directRef = doc(firestore, "users", param);
         const directSnap = await getDoc(directRef);
         if (directSnap.exists()) {
@@ -387,6 +385,7 @@ function ClientProfilePageInner({ userId }) {
           return;
         }
 
+        // 2) fallback queries
         const usersCol = collection(firestore, "users");
         const tryField = async (field) => {
           const qs = await getDocs(query(usersCol, where(field, "==", param), limit(1)));
@@ -395,6 +394,7 @@ function ClientProfilePageInner({ userId }) {
 
         let found = (await tryField("customerId")) || (await tryField("userId")) || (await tryField("companyId"));
 
+        // 3) last resort: current auth uid
         if (!found && auth?.currentUser?.uid) {
           const qs = await getDocs(query(usersCol, where("uid", "==", auth.currentUser.uid), limit(1)));
           if (!qs.empty) found = qs.docs[0].id;
@@ -418,7 +418,9 @@ function ClientProfilePageInner({ userId }) {
     };
   }, [userId]);
 
+  // =====================================
   // Live user snapshot + companies
+  // =====================================
   useEffect(() => {
     if (!resolvedUserId) return;
 
@@ -430,6 +432,7 @@ function ClientProfilePageInner({ userId }) {
         user.customerId = snap.id;
         setClient(user);
 
+        // owner if company
         if (user?.type === "company" || user?.accountType === "company") {
           setOwnerResident({
             firstName: user.ownerFirstName,
@@ -444,6 +447,7 @@ function ClientProfilePageInner({ userId }) {
           setOwnerResident(null);
         }
 
+        // related companies if resident
         if ((user?.type || user?.accountType || "").toLowerCase() === "resident" && user.customerId) {
           const related = await fetchRelatedCompanies(user.customerId, user);
           const seen = new Set();
@@ -467,12 +471,15 @@ function ClientProfilePageInner({ userId }) {
     return () => unsubscribe();
   }, [resolvedUserId]);
 
+  // =====================================
   // Fetch services, orders, notifications
+  // =====================================
   useEffect(() => {
     async function fetchData() {
       if (!resolvedUserId) return;
       setLoading(true);
 
+      // services by client type
       const types = ["resident", "company", "nonresident", "other"];
       const servicesByType = { resident: [], nonresident: [], company: [], other: [] };
 
@@ -487,26 +494,33 @@ function ClientProfilePageInner({ userId }) {
       }
       setServices(servicesByType);
 
+      // orders
       const ordersSnap = await getDocs(
-        query(collection(firestore, "requests"), where("customerId", "==", resolvedUserId), orderBy("createdAt", "desc"))
+        query(
+          collection(firestore, "requests"),
+          where("customerId", "==", resolvedUserId),
+          orderBy("createdAt", "desc")
+        )
       );
       setOrders(ordersSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
 
-      const notifsSnap = await getDocs(
-        query(collection(firestore, "notifications"), where("targetId", "==", resolvedUserId))
-      );
+      // notifications
+      const notifsSnap = await getDocs(query(collection(firestore, "notifications"), where("targetId", "==", resolvedUserId)));
       const clientNotifs = notifsSnap.docs
         .map((d) => ({ ...d.data(), _date: toDateSafe(d.data().timestamp) }))
         .sort((a, b) => (b._date?.getTime?.() || 0) - (a._date?.getTime?.() || 0));
 
       setNotifications(clientNotifs);
+
       setLoading(false);
     }
 
     fetchData().catch(() => setLoading(false));
   }, [resolvedUserId, reloadClient]);
 
+  // =====================================
   // Close popups if click outside
+  // =====================================
   useEffect(() => {
     function handleClickOutside(event) {
       if (coinsRef.current && !coinsRef.current.contains(event.target)) setShowCoinsMenu(false);
@@ -528,7 +542,9 @@ function ClientProfilePageInner({ userId }) {
     if (typeof window !== "undefined") localStorage.setItem("selectedSection", selectedSection);
   }, [selectedSection]);
 
+  // =====================================
   // Services derived + translation
+  // =====================================
   const residentServices = useMemo(() => objectToArray(services.resident), [services.resident]);
   const companyServices = useMemo(() => objectToArray(services.company), [services.company]);
   const nonresidentServices = useMemo(() => objectToArray(services.nonresident), [services.nonresident]);
@@ -565,6 +581,16 @@ function ClientProfilePageInner({ userId }) {
         if (alive) setTranslationsMap({});
         return;
       }
+
+      useEffect(() => {
+  if (!clientType) return;
+
+  if (selectedSection === "subscriptions" && clientType !== "company") {
+    setSelectedSection("personal");
+    if (typeof window !== "undefined") localStorage.setItem("selectedSection", "personal");
+  }
+}, [clientType, selectedSection]);
+
 
       // AR: no translation
       if (lang === "ar") {
@@ -723,7 +749,7 @@ function ClientProfilePageInner({ userId }) {
     return fields.some((f) => f.includes(term));
   }
 
-  // ---------- early render ----------
+  // ---------- conditional early render ----------
   if (loading || resolving || resolvedUserId === null) return <GlobalLoader />;
 
   if (!client) {
@@ -746,7 +772,7 @@ function ClientProfilePageInner({ userId }) {
     );
   }
 
-  // Dark mode overlay
+  // ====== Dark mode overlay animation ======
   const darkBgVariants = {
     initial: { opacity: 0 },
     animate: { opacity: darkMode ? 1 : 0, transition: { duration: 0.7 } },
@@ -871,6 +897,57 @@ function ClientProfilePageInner({ userId }) {
             {/* Notifications */}
             <NotificationWidget userId={client.customerId} lang={lang} darkMode={darkMode} />
 
+            {/* Messages */}
+            <div ref={messagesRef} className="relative group cursor-pointer" onClick={() => setShowMessagesMenu((v) => !v)}>
+              <motion.button
+                type="button"
+                className="relative flex items-center justify-center bg-transparent border-none p-0 m-0 rounded-full focus:outline-none cursor-pointer"
+                tabIndex={0}
+                style={{ minWidth: 36, minHeight: 36 }}
+                whileHover={{ scale: 1.18, rotate: -8, filter: "brightness(1.12)" }}
+                whileTap={{ scale: 0.97 }}
+                transition={{ type: "spring", stiffness: 250, damping: 18 }}
+              >
+                <FaEnvelopeOpenText
+                  className={`text-[27px] sm:text-[29px] lg:text-[32px] ${darkMode ? "text-cyan-300" : "text-cyan-400"} drop-shadow-lg transition-all duration-150`}
+                  style={{ filter: "drop-shadow(0 2px 8px #06b6d455)" }}
+                />
+                {client.unreadMessages > 0 && (
+                  <span className="absolute -top-2 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full px-1 shadow">
+                    {client.unreadMessages}
+                  </span>
+                )}
+              </motion.button>
+
+              <span
+                className={`absolute z-10 left-1/2 -translate-x-1/2 top-7 text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition pointer-events-none ${
+                  darkMode ? "bg-gray-800 text-white" : "bg-black/70 text-white"
+                }`}
+              >
+                {lang === "ar" ? "الرسائل الواردة" : "Admin Messages"}
+              </span>
+
+              {showMessagesMenu && (
+                <div className={`absolute top-10 right-0 w-64 shadow-xl rounded-lg p-4 z-50 ${darkMode ? "bg-gray-800 text-white" : "bg-white"}`}>
+                  <div className="font-bold text-cyan-800 mb-2">{lang === "ar" ? "الرسائل" : "Messages"}</div>
+
+                  {client.messages && client.messages.length > 0 ? (
+                    <ul className="space-y-2 max-h-60 overflow-y-auto">
+                      {client.messages.map((msg, i) => (
+                        <li key={i} className="border-b pb-2">
+                          <div className="font-bold text-cyan-700">{msg.title || ""}</div>
+                          <div className={`${darkMode ? "text-gray-200" : "text-gray-700"}`}>{msg.body || ""}</div>
+                          <div className="text-gray-400 text-[10px] mt-1">{msg.time || ""}</div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="text-gray-400 text-center">{lang === "ar" ? "لا توجد رسائل" : "No messages"}</div>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* Weather/time */}
             <span className="hidden sm:inline">
               <WeatherTimeWidget isArabic={lang === "ar"} />
@@ -959,22 +1036,24 @@ function ClientProfilePageInner({ userId }) {
           )}
 
           {selectedSection === "subscriptions" && (
-            clientType === "company" ? (
-              <>
-                <SectionTitle icon="company" color="blue">
-                  {lang === "ar" ? "الاشتراكات" : "Subscriptions"}
-                </SectionTitle>
+  clientType === "company" ? (
+    <>
+      <SectionTitle icon="company" color="blue">
+        {lang === "ar" ? "الاشتراكات" : "Subscriptions"}
+      </SectionTitle>
 
-                <CompanySubscriptionsSection lang={lang} darkMode={darkMode} />
-              </>
-            ) : null
-          )}
+      <CompanySubscriptionsSection lang={lang} darkMode={darkMode} />
+    </>
+  ) : null
+)}
+
 
           {["residentServices", "companyServices", "nonresidentServices", "otherServices"].includes(selectedSection) && (
             <>
               <SectionTitle icon={sectionTitles[selectedSection].icon} color={sectionTitles[selectedSection].color}>
                 {lang === "ar" ? sectionTitles[selectedSection].ar : sectionTitles[selectedSection].en}
               </SectionTitle>
+            
 
               {/* Search box */}
               <div className="w-full flex items-center gap-2 mb-5">
@@ -1016,11 +1095,14 @@ function ClientProfilePageInner({ userId }) {
                     const sid = srv?.serviceId || srv?.id || srv?.name;
                     const tr = translationsMap[sid] || {};
 
-                    const displayName = lang === "ar" ? srv.name || "" : tr?.name || srv.name_en || srv.name || "";
-                    const displayDesc = lang === "ar" ? srv.description || "" : tr?.description || srv.description_en || srv.description || "";
-                    const displayLong = lang === "ar"
-                      ? srv.longDescription || ""
-                      : tr?.longDescription || srv.longDescription_en || srv.longDescription || "";
+                    const displayName =
+                      lang === "ar" ? srv.name || "" : tr?.name || srv.name_en || srv.name || "";
+                    const displayDesc =
+                      lang === "ar" ? srv.description || "" : tr?.description || srv.description_en || srv.description || "";
+                    const displayLong =
+                      lang === "ar"
+                        ? srv.longDescription || ""
+                        : tr?.longDescription || srv.longDescription_en || srv.longDescription || "";
 
                     return (
                       <ServiceProfileCard
@@ -1063,7 +1145,7 @@ function ClientProfilePageInner({ userId }) {
           )}
         </main>
 
-        {/* Footer */}
+        {/* Footer / rights */}
         <footer className="w-full flex flex-col items-center justify-center mt-10 mb-4 z-10">
           <Image
             src="/logo-transparent-large.png"
@@ -1158,18 +1240,15 @@ function ClientProfilePageInner({ userId }) {
 }
 
 // =====================================
-// Page wrapper: userId from query (✅ inside Suspense)
+// Page wrapper: read userId from query
 // =====================================
-function ClientProfilePageShell() {
+export default function ClientProfilePage() {
   const searchParams = useSearchParams();
   const userId = searchParams.get("userId") || "";
-  return <ClientProfilePageInner userId={userId} />;
-}
 
-export default function ClientProfilePage() {
   return (
     <Suspense fallback={null}>
-      <ClientProfilePageShell />
+      <ClientProfilePageInner userId={userId} />
     </Suspense>
   );
 }
