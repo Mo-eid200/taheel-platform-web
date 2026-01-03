@@ -6,6 +6,7 @@ import {
 } from "react-icons/fa";
 import { firestore } from "@/lib/firebase.client";
 import { doc, getDoc } from "firebase/firestore";
+import { FaCrown } from "react-icons/fa";
 
 // الأقسام الأساسية
 const MAIN_SECTIONS = [
@@ -23,6 +24,7 @@ const SERVICE_SECTIONS = {
     { key: "otherServices", icon: <FaTag size={22} />, ar: "خدمات أخرى", en: "Other Services" },
   ],
   company: [
+    { key: "subscriptions", icon: <FaCrown size={22} />, ar: "اشتراك PRO", en: "PRO Subscription" },
     { key: "companyServices", icon: <FaBuilding size={22} />, ar: "خدمات الشركات", en: "Company Services" },
     { key: "residentServices", icon: <FaServicestack size={22} />, ar: "خدمات المقيم", en: "Resident Services" },
     { key: "otherServices", icon: <FaTag size={22} />, ar: "خدمات أخرى", en: "Other Services" },
@@ -117,6 +119,12 @@ export default function Sidebar({
 
   const handleServiceSectionClick = async (sectionKey) => {
     // لو نفس القسم مفتوح، اقفل السابكاتوجري واظهر كل الخدمات
+    if (sectionKey === "subscriptions") {
+  setShowSubcatsFor(null);
+  onSelect("subscriptions");
+  onSelectSubcategory("");
+  return;
+}
     if (showSubcatsFor === sectionKey) {
       setShowSubcatsFor(null);
       onSelect(sectionKey); // تظهر كل خدمات النوع فقط

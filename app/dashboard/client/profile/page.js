@@ -44,6 +44,7 @@ import WalletWidget from "@/components/clientheader/WalletWidget";
 import CoinsWidget from "@/components/clientheader/CoinsWidget";
 import NotificationWidget from "@/components/clientheader/NotificationWidget";
 import { translateServiceFields } from "@/utils/translate";
+import CompanySubscriptionsSection from "@/components/subscriptions/CompanySubscriptionsSection";
 
 // =====================================
 // Small helpers
@@ -298,7 +299,6 @@ function ClientProfilePageInner({ userId }) {
   const [search, setSearch] = useState("");
   const [reloadClient, setReloadClient] = useState(false);
   const [selectedSubcategory, setSelectedSubcategory] = useState("");
-
   const coinsRef = useRef();
   const walletRef = useRef();
   const messagesRef = useRef();
@@ -1030,6 +1030,17 @@ function ClientProfilePageInner({ userId }) {
               <SectionTitle icon={sectionTitles[selectedSection].icon} color={sectionTitles[selectedSection].color}>
                 {lang === "ar" ? sectionTitles[selectedSection].ar : sectionTitles[selectedSection].en}
               </SectionTitle>
+
+              {selectedSection === "subscriptions" && clientType === "company" && (
+  <>
+    <SectionTitle icon="company" color="blue">
+      {lang === "ar" ? "الاشتراكات" : "Subscriptions"}
+    </SectionTitle>
+
+    <CompanySubscriptionsSection lang={lang} darkMode={darkMode} />
+  </>
+)}
+
 
               {/* Search box */}
               <div className="w-full flex items-center gap-2 mb-5">
