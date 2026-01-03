@@ -62,12 +62,6 @@ function getDayGreeting(lang = "ar") {
   }
 }
 
-function asText(v) {
-  if (v == null) return "";
-  if (typeof v === "string") return v.trim().toLowerCase();
-  return String(v).trim().toLowerCase();
-}
-
 function getFullName(client, lang = "ar") {
   if (!client) return "";
   if (lang === "ar") {
@@ -157,7 +151,7 @@ function SectionTitle({ icon, color = "emerald", children }) {
     <div className="w-full flex items-center my-10 select-none">
       <div className={c.lineLeft} />
       <span className={c.bubble}>
-        {iconMap[icon] && iconMap[icon]} {children}
+        {iconMap[icon]} {children}
       </span>
       <div className={c.lineRight} />
     </div>
@@ -587,7 +581,6 @@ function ClientProfilePageInner({ userId }) {
         if (alive) setTranslationsMap({});
         return;
       }
-
 
       // AR: no translation
       if (lang === "ar") {
@@ -1032,25 +1025,22 @@ function ClientProfilePageInner({ userId }) {
             </>
           )}
 
-          {selectedSection === "subscriptions" && (
-  clientType === "company" ? (
-    <>
-      <SectionTitle icon="company" color="blue">
-        {lang === "ar" ? "الاشتراكات" : "Subscriptions"}
-      </SectionTitle>
-
-      <CompanySubscriptionsSection lang={lang} darkMode={darkMode} />
-    </>
-  ) : null
-)}
-
-
           {["residentServices", "companyServices", "nonresidentServices", "otherServices"].includes(selectedSection) && (
             <>
               <SectionTitle icon={sectionTitles[selectedSection].icon} color={sectionTitles[selectedSection].color}>
                 {lang === "ar" ? sectionTitles[selectedSection].ar : sectionTitles[selectedSection].en}
               </SectionTitle>
-            
+
+              {selectedSection === "subscriptions" && clientType === "company" && (
+  <>
+    <SectionTitle icon="company" color="blue">
+      {lang === "ar" ? "الاشتراكات" : "Subscriptions"}
+    </SectionTitle>
+
+    <CompanySubscriptionsSection lang={lang} darkMode={darkMode} />
+  </>
+)}
+
 
               {/* Search box */}
               <div className="w-full flex items-center gap-2 mb-5">
@@ -1085,8 +1075,7 @@ function ClientProfilePageInner({ userId }) {
                 {currentServices
                   .filter((srv) => {
                     const matchesSearch = advancedServiceFilter(srv);
-                    const matchesSubcat =
-                    !selectedSubcategory || asText(srv?.subcategory) === asText(selectedSubcategory);
+                    const matchesSubcat = !selectedSubcategory || srv.subcategory === selectedSubcategory;
                     return matchesSearch && matchesSubcat;
                   })
                   .map((srv, i) => {
@@ -1241,15 +1230,12 @@ function ClientProfilePageInner({ userId }) {
 // Page wrapper: read userId from query
 // =====================================
 export default function ClientProfilePage() {
-  return (
-    <Suspense fallback={<GlobalLoader />}>
-      <ClientProfilePageWithParams />
-    </Suspense>
-  );
-}
-
-function ClientProfilePageWithParams() {
   const searchParams = useSearchParams();
   const userId = searchParams.get("userId") || "";
-  return <ClientProfilePageInner userId={userId} />;
+
+  return (
+    <Suspense fallback={null}>
+      <ClientProfilePageInner userId={userId} />
+    </Suspense>
+  );
 }
