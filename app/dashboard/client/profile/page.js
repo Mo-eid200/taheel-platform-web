@@ -1025,21 +1025,24 @@ function ClientProfilePageInner({ userId }) {
             </>
           )}
 
-          {["residentServices", "companyServices", "nonresidentServices", "otherServices"].includes(selectedSection) && (
-            <>
-              <SectionTitle icon={sectionTitles[selectedSection].icon} color={sectionTitles[selectedSection].color}>
-                {lang === "ar" ? sectionTitles[selectedSection].ar : sectionTitles[selectedSection].en}
-              </SectionTitle>
-
-              {selectedSection === "subscriptions" && clientType === "company" && (
+          {selectedSection === "subscriptions" && clientType === "company" && (
   <>
     <SectionTitle icon="company" color="blue">
       {lang === "ar" ? "الاشتراكات" : "Subscriptions"}
     </SectionTitle>
 
-    <CompanySubscriptionsSection lang={lang} darkMode={darkMode} />
+    <div className="w-full">
+      <CompanySubscriptionsSection lang={lang} darkMode={darkMode} router={router} />
+    </div>
   </>
 )}
+
+
+          {["residentServices", "companyServices", "nonresidentServices", "otherServices"].includes(selectedSection) && (
+            <>
+              <SectionTitle icon={sectionTitles[selectedSection].icon} color={sectionTitles[selectedSection].color}>
+                {lang === "ar" ? sectionTitles[selectedSection].ar : sectionTitles[selectedSection].en}
+              </SectionTitle>
 
 
               {/* Search box */}

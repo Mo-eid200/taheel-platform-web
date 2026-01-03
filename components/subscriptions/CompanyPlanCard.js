@@ -1,46 +1,88 @@
 "use client";
 
-export default function CompanyPlanCard({ plan, lang = "ar", darkMode = false }) {
-  const name = lang === "ar" ? plan.nameAr || plan.name || "باقة" : plan.nameEn || plan.name || "Plan";
-  const desc = lang === "ar" ? plan.descriptionAr || plan.description || "" : plan.descriptionEn || plan.description || "";
-  const price = plan.price ?? plan.amount ?? 0;
-  const currency = plan.currency || "AED";
+import { useEffect, useMemo, useState } from "react";
+import { collection, getDocs } from "firebase/firestore";
+import { firestore } from "@/lib/firebase.client";
+import CompanyPlanCardPro from "./CompanyPlanCardPro";
+
+const PACKAGE_ORDER = { starter: 1, growth: 2, scale: 3, enterprise: 4 };
+
+export default function CompanySubscriptionsSection({ lang = "ar", darkMode = true, router }) {
+  const [plans, setPlans] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      setLoading(true);
+      try {
+        const snap = await getDocs(collection(firestore, "companySubscriptionPlans"));
+        const arr = snap.docs
+          .map((d) => ({ id: d.id, key: d.id, ...d.data() }))
+          .filter((p) => p.isActive !== false);
+
+        arr.sort((a, b) => (PACKAGE_ORDER[a.key] || 99) - (PACKAGE_ORDER[b.key] || 99));
+
+        if (alive) setPlans(arr);
+      } catch (e) {
+        console.error("Failed to load companySubscriptionPlans:", e);
+        if (alive) setPlans([]);
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+
+    return () => (alive = false);
+  }, []);
+
+  const onSubscribe = (payload) => {
+    // هنا هنحوّل المستخدم لفلو الدفع أو صفحة الاشتراك
+    // انت ممكن تخليه يروح /company-subscriptions?package=...&lang=...
+    const qs = new URLSearchParams();
+    qs.set("lang", lang);
+    qs.set("package", payload.package);
+    qs.set("duration", payload.duration);
+    qs.set("price", String(payload.price));
+    qs.set("months", String(payload.months));
+    // لو عندك راوتر جاهز من البروفايل: مرره props أو استعمل useRouter هنا
+    if (router?.push) router.push(`/company-subscriptions?${qs.toString()}`);
+    else window.location.href = `/company-subscriptions?${qs.toString()}`;
+  };
+
+  if (loading) {
+    return (
+      <div className={`w-full rounded-2xl p-6 text-center ${darkMode ? "bg-white/5 text-white" : "bg-white text-gray-800"}`}>
+        <div className="font-extrabold text-lg">{lang === "ar" ? "جاري تحميل الاشتراكات..." : "Loading plans..."}</div>
+      </div>
+    );
+  }
+
+  if (!plans.length) {
+    return (
+      <div className={`w-full rounded-2xl p-6 text-center ${darkMode ? "bg-white/5 text-white" : "bg-white text-gray-800"}`}>
+        <div className="font-extrabold text-lg text-red-400">
+          {lang === "ar" ? "لا توجد باقات متاحة حالياً" : "No plans available"}
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className={`rounded-2xl p-5 shadow-xl border transition hover:scale-[1.01]
-      ${darkMode ? "bg-gray-800 border-gray-700 text-white" : "bg-white/95 border-emerald-100 text-gray-900"}`}>
-      
-      <div className="flex items-center justify-between mb-3">
-        <div className="text-xl font-black">{name}</div>
-        {plan.isPopular && (
-          <span className="px-3 py-1 rounded-full text-xs font-extrabold bg-yellow-400 text-black">
-            {lang === "ar" ? "الأكثر طلباً" : "Popular"}
-          </span>
-        )}
+    <div className="w-full">
+      {/* top premium grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {plans.map((p) => (
+          <CompanyPlanCardPro key={p.id} plan={p} lang={lang} darkMode={darkMode} onSubscribe={onSubscribe} />
+        ))}
       </div>
 
-      {desc && <div className={`${darkMode ? "text-gray-200" : "text-gray-700"} text-sm mb-4`}>{desc}</div>}
-
-      <div className="text-3xl font-black text-emerald-500 mb-4">
-        {price} <span className="text-sm font-bold text-gray-400">{currency}</span>
+      {/* small hint */}
+      <div className="mt-6 text-center text-xs text-white/55">
+        {lang === "ar"
+          ? "اختر الباقة والمدة ثم تابع الاشتراك."
+          : "Pick a plan and duration, then continue to subscribe."}
       </div>
-
-      {!!plan.features?.length && (
-        <ul className="space-y-2 text-sm mb-5">
-          {plan.features.map((f, i) => (
-            <li key={i} className={`${darkMode ? "text-gray-200" : "text-gray-700"} flex gap-2`}>
-              <span className="text-emerald-500">✓</span> {f}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <button
-        className="w-full py-3 rounded-xl font-extrabold bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow hover:brightness-110 transition"
-        onClick={() => alert(lang === "ar" ? "هنوصل الدفع هنا" : "Payment flow here")}
-      >
-        {lang === "ar" ? "اشترك الآن" : "Subscribe Now"}
-      </button>
     </div>
   );
 }
