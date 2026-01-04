@@ -67,12 +67,10 @@ export default function Sidebar({
       const servicesArr = Object.entries(data)
         .filter(([key, val]) => key.startsWith("service") && typeof val === "object")
         .map(([key, val]) => val);
-      const uniqueSubcats = [
-        ...new Set(servicesArr.map(s => s.subcategory).filter(Boolean))
-      ];
-      setSubcategories(prev => ({ ...prev, [sectionKey]: uniqueSubcats }));
+      const uniqueSubcats = [...new Set(servicesArr.map((s) => s.subcategory).filter(Boolean))];
+      setSubcategories((prev) => ({ ...prev, [sectionKey]: uniqueSubcats }));
     } catch (error) {
-      setSubcategories(prev => ({ ...prev, [sectionKey]: [] }));
+      setSubcategories((prev) => ({ ...prev, [sectionKey]: [] }));
     }
     setLoadingSubcats(false);
   }
@@ -118,30 +116,35 @@ export default function Sidebar({
   };
 
   const handleServiceSectionClick = async (sectionKey) => {
-    // لو نفس القسم مفتوح، اقفل السابكاتوجري واظهر كل الخدمات
+    // subscriptions: no subcats
     if (sectionKey === "subscriptions") {
-  setShowSubcatsFor(null);
-  onSelect("subscriptions");
-  onSelectSubcategory("");
-  return;
-}
+      setShowSubcatsFor(null);
+      onSelect("subscriptions");
+      onSelectSubcategory("");
+      return;
+    }
+
+    // toggle subcats
     if (showSubcatsFor === sectionKey) {
       setShowSubcatsFor(null);
-      onSelect(sectionKey); // تظهر كل خدمات النوع فقط
-      onSelectSubcategory(""); // تلغي الفلتر الفرعي
+      onSelect(sectionKey);
+      onSelectSubcategory("");
     } else {
       setShowSubcatsFor(sectionKey);
-      onSelect(sectionKey); // تظهر كل خدمات النوع فقط
-      onSelectSubcategory(""); // تلغي الفلتر الفرعي
+      onSelect(sectionKey);
+      onSelectSubcategory("");
       await fetchSubcategories(sectionKey);
     }
   };
 
   // عند اختيار سابكاتوجري تظهر خدماته فقط
   const handleSubcategoryClick = (sectionKey, subcat) => {
-    onSelect(sectionKey); // نوع الخدمة
-    onSelectSubcategory(subcat); // التصنيف الفرعي
+    onSelect(sectionKey);
+    onSelectSubcategory(subcat);
   };
+
+  const isPro = (k) => k === "subscriptions";
+  const proActive = selected === "subscriptions";
 
   return (
     <aside
@@ -166,21 +169,33 @@ export default function Sidebar({
         flexDirection: "column",
       }}
     >
+      {/* ✅ Neon keyframes (local to component) */}
+      <style jsx>{`
+        @keyframes proPulse {
+          0%   { box-shadow: 0 0 0 0 rgba(34,211,238,.35), 0 0 18px rgba(168,85,247,.18); }
+          50%  { box-shadow: 0 0 0 0 rgba(34,211,238,.10), 0 0 34px rgba(168,85,247,.32); }
+          100% { box-shadow: 0 0 0 0 rgba(34,211,238,.35), 0 0 18px rgba(168,85,247,.18); }
+        }
+        @keyframes proSweep {
+          0% { transform: translateX(-120%) skewX(-12deg); opacity: 0; }
+          25% { opacity: 1; }
+          55% { opacity: 1; }
+          100% { transform: translateX(120%) skewX(-12deg); opacity: 0; }
+        }
+      `}</style>
+
       {/* زر فتح/غلق عائم صغير وديناميكي */}
       <button
         style={isHovered ? { ...floatingBtnStyle, ...floatingBtnHoverStyle } : floatingBtnStyle}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         onClick={() => {
-          setOpened(v => !v);
+          setOpened((v) => !v);
           if (opened) setShowSubcatsFor(null);
         }}
         title={opened ? (lang === "ar" ? "إغلاق القائمة" : "Close sidebar") : (lang === "ar" ? "فتح القائمة" : "Open sidebar")}
       >
-        {opened
-          ? <FaChevronLeft size={20} />
-          : <FaChevronRight size={20} />
-        }
+        {opened ? <FaChevronLeft size={20} /> : <FaChevronRight size={20} />}
       </button>
 
       {/* اللوجو */}
@@ -201,96 +216,176 @@ export default function Sidebar({
           <button
             key={section.key}
             className={`flex flex-row items-center gap-3 px-4 py-3 rounded-full transition-all font-bold text-base group
-              ${selected === section.key
-                ? "bg-emerald-700/20 text-emerald-300 shadow"
-                : "text-gray-100 hover:bg-emerald-400/20 hover:text-emerald-300"
-              }
-              `}
+              ${
+                selected === section.key
+                  ? "bg-emerald-700/20 text-emerald-300 shadow"
+                  : "text-gray-100 hover:bg-emerald-400/20 hover:text-emerald-300"
+              }`}
             onClick={() => {
               setShowSubcatsFor(null);
               onSelect(section.key);
               onSelectSubcategory("");
             }}
-            style={{
-              justifyContent: "flex-start",
-              cursor: "pointer",
-            }}
+            style={{ justifyContent: "flex-start", cursor: "pointer" }}
             tabIndex={0}
           >
             <span className={`transition-all ${opened ? "" : "mx-auto"}`}>{section.icon}</span>
-            {opened && (
-              <span className="whitespace-nowrap">{lang === "ar" ? section.ar : section.en}</span>
-            )}
+            {opened && <span className="whitespace-nowrap">{lang === "ar" ? section.ar : section.en}</span>}
           </button>
         ))}
 
         {/* أقسام الخدمات حسب نوع العميل */}
-        {serviceSections.map((section) => (
-          <div key={section.key}>
-            <button
-              className={`flex flex-row items-center gap-3 px-4 py-3 rounded-full transition-all font-bold text-base group
-                ${selected === section.key
-                  ? "bg-emerald-700/20 text-emerald-300 shadow"
-                  : "text-gray-100 hover:bg-emerald-400/20 hover:text-emerald-300"
-                }
+        {serviceSections.map((section) => {
+          const pro = isPro(section.key);
+          const active = selected === section.key;
+          const neonBase =
+            "text-cyan-50 border border-cyan-300/25 bg-gradient-to-r from-cyan-500/15 via-fuchsia-500/10 to-sky-500/15 hover:from-cyan-500/22 hover:via-fuchsia-500/16 hover:to-sky-500/22";
+          const neonActive =
+            "text-white border border-cyan-300/40 bg-gradient-to-r from-cyan-500/25 via-fuchsia-500/18 to-sky-500/25";
+
+          return (
+            <div key={section.key}>
+              <button
+                className={`relative overflow-hidden flex flex-row items-center gap-3 px-4 py-3 rounded-full transition-all font-bold text-base group
+                  ${
+                    pro
+                      ? active
+                        ? neonActive
+                        : neonBase
+                      : active
+                      ? "bg-emerald-700/20 text-emerald-300 shadow"
+                      : "text-gray-100 hover:bg-emerald-400/20 hover:text-emerald-300"
+                  }
                 `}
-              onClick={() => handleServiceSectionClick(section.key)}
-              style={{
-                justifyContent: "flex-start",
-                cursor: "pointer",
-              }}
-              tabIndex={0}
-            >
-              <span className={`transition-all ${opened ? "" : "mx-auto"}`}>{section.icon}</span>
-              {opened && (
-                <span className="whitespace-nowrap">{lang === "ar" ? section.ar : section.en}</span>
-              )}
-            </button>
-            {/* قائمة السابكاتوجري تظهر فقط لو القسم مفتوح ومختار */}
-            <div
-              style={{
-                maxHeight:
-                  showSubcatsFor === section.key &&
-                  subcategories[section.key] &&
-                  opened &&
-                  subcategories[section.key].length
-                    ? "500px"
-                    : "0px",
-                opacity:
-                  showSubcatsFor === section.key &&
-                  subcategories[section.key] &&
-                  opened &&
-                  subcategories[section.key].length
-                    ? 1
-                    : 0,
-                overflow: "hidden",
-                transition: "max-height 0.5s cubic-bezier(.4,0,.2,1), opacity 0.4s",
-              }}
-              className="pl-8 pr-2 mt-1 mb-2 flex flex-col gap-1"
-            >
-              {loadingSubcats ? (
-                <div className="text-xs text-gray-400 py-2">جاري التحميل...</div>
-              ) : (
-                <>
-                  {subcategories[section.key]?.map(subcat => (
-                    <button
-                      key={subcat}
-                      onClick={() => handleSubcategoryClick(section.key, subcat)}
-                      className={`text-sm rounded-full px-3 py-1 font-bold transition border
-                        ${selectedSubcategory === subcat
-                          ? "bg-emerald-400 text-white"
-                          : "bg-white text-emerald-800 border-emerald-200 hover:bg-emerald-100"}
-                      `}
-                      style={{ cursor: "pointer" }} // الماوس يد دائماً
-                    >
-                      {subcat}
-                    </button>
-                  ))}
-                </>
-              )}
+                onClick={() => handleServiceSectionClick(section.key)}
+                style={{
+                  justifyContent: "flex-start",
+                  cursor: "pointer",
+                  // ✅ neon pulse for PRO (always, stronger when active)
+                  animation: pro ? "proPulse 1.55s ease-in-out infinite" : undefined,
+                }}
+                tabIndex={0}
+              >
+                {/* ✅ shiny sweep layer for PRO */}
+                {pro ? (
+                  <span
+                    aria-hidden
+                    className="pointer-events-none absolute inset-0"
+                    style={{
+                      background:
+                        "linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent)",
+                      width: "55%",
+                      animation: "proSweep 1.8s ease-in-out infinite",
+                      mixBlendMode: "screen",
+                    }}
+                  />
+                ) : null}
+
+                {/* icon bubble */}
+                <span
+                  className={`transition-all ${opened ? "" : "mx-auto"}`}
+                  style={
+                    pro
+                      ? {
+                          filter: "drop-shadow(0 0 10px rgba(34,211,238,.35)) drop-shadow(0 0 18px rgba(168,85,247,.20))",
+                        }
+                      : undefined
+                  }
+                >
+                  {section.icon}
+                </span>
+
+                {opened && (
+                  <div className="flex items-center gap-2 min-w-0">
+                    {/* title */}
+                    <span className="whitespace-nowrap truncate">
+                      {lang === "ar" ? section.ar : section.en}
+                    </span>
+
+                    {/* ✅ PRO neon badge */}
+                    {pro ? (
+                      <span
+                        className="ml-1 text-[10px] font-extrabold px-2 py-[2px] rounded-full border"
+                        style={{
+                          background: "rgba(0,0,0,0.35)",
+                          borderColor: "rgba(34,211,238,0.35)",
+                          color: "#e0f2fe",
+                          boxShadow:
+                            "0 0 0 1px rgba(34,211,238,0.12), 0 0 18px rgba(34,211,238,0.18), 0 0 26px rgba(168,85,247,0.14)",
+                        }}
+                      >
+                        PRO
+                      </span>
+                    ) : null}
+                  </div>
+                )}
+
+                {/* right hint glow dot for PRO */}
+                {pro ? (
+                  <span
+                    className="absolute top-1/2 -translate-y-1/2"
+                    style={{
+                      right: dir === "rtl" ? undefined : "14px",
+                      left: dir === "rtl" ? "14px" : undefined,
+                      width: "8px",
+                      height: "8px",
+                      borderRadius: "999px",
+                      background: "rgba(34,211,238,0.9)",
+                      boxShadow: "0 0 14px rgba(34,211,238,.55), 0 0 26px rgba(168,85,247,.25)",
+                      opacity: proActive ? 1 : 0.75,
+                    }}
+                  />
+                ) : null}
+              </button>
+
+              {/* قائمة السابكاتوجري تظهر فقط لو القسم مفتوح ومختار */}
+              <div
+                style={{
+                  maxHeight:
+                    showSubcatsFor === section.key &&
+                    subcategories[section.key] &&
+                    opened &&
+                    subcategories[section.key].length
+                      ? "500px"
+                      : "0px",
+                  opacity:
+                    showSubcatsFor === section.key &&
+                    subcategories[section.key] &&
+                    opened &&
+                    subcategories[section.key].length
+                      ? 1
+                      : 0,
+                  overflow: "hidden",
+                  transition: "max-height 0.5s cubic-bezier(.4,0,.2,1), opacity 0.4s",
+                }}
+                className="pl-8 pr-2 mt-1 mb-2 flex flex-col gap-1"
+              >
+                {loadingSubcats ? (
+                  <div className="text-xs text-gray-400 py-2">جاري التحميل...</div>
+                ) : (
+                  <>
+                    {subcategories[section.key]?.map((subcat) => (
+                      <button
+                        key={subcat}
+                        onClick={() => handleSubcategoryClick(section.key, subcat)}
+                        className={`text-sm rounded-full px-3 py-1 font-bold transition border
+                          ${
+                            selectedSubcategory === subcat
+                              ? "bg-emerald-400 text-white"
+                              : "bg-white text-emerald-800 border-emerald-200 hover:bg-emerald-100"
+                          }
+                        `}
+                        style={{ cursor: "pointer" }}
+                      >
+                        {subcat}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </nav>
 
       {/* فراغ لحقوق الملكية بالأسفل */}
