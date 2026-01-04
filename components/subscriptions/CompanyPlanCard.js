@@ -5,44 +5,44 @@ import { Check } from "lucide-react";
 import { FaCrown, FaRocket, FaChartLine, FaBuilding } from "react-icons/fa";
 
 /* =========================
-   BRAND (same identity)
+   BRAND
 ========================= */
 const BRAND = {
   starter: {
     bar: "from-emerald-400 to-emerald-600",
     ring: "border-emerald-400/25 hover:border-emerald-400/70",
     dot: "bg-emerald-400",
-    pill: "bg-emerald-500/12 border-emerald-400/25 text-emerald-200",
     btn: "from-emerald-700 via-emerald-500 to-green-700",
     glow: "rgba(16,185,129,0.40)",
     icon: FaRocket,
+    offerChip: "bg-emerald-500 text-white border-emerald-200",
   },
   growth: {
     bar: "from-sky-400 to-sky-600",
     ring: "border-sky-400/25 hover:border-sky-400/70",
     dot: "bg-sky-400",
-    pill: "bg-sky-500/12 border-sky-400/25 text-sky-200",
     btn: "from-sky-700 via-sky-500 to-indigo-600",
     glow: "rgba(56,189,248,0.36)",
     icon: FaChartLine,
+    offerChip: "bg-sky-500 text-white border-sky-200",
   },
   scale: {
     bar: "from-purple-400 to-purple-600",
     ring: "border-purple-400/25 hover:border-purple-400/75",
     dot: "bg-purple-400",
-    pill: "bg-purple-500/12 border-purple-400/25 text-purple-200",
     btn: "from-purple-700 via-fuchsia-600 to-pink-600",
     glow: "rgba(168,85,247,0.36)",
     icon: FaCrown,
+    offerChip: "bg-purple-500 text-white border-purple-200",
   },
   enterprise: {
     bar: "from-yellow-400 to-orange-500",
     ring: "border-yellow-400/25 hover:border-yellow-400/75",
     dot: "bg-yellow-300",
-    pill: "bg-yellow-400/10 border-yellow-300/25 text-yellow-200",
     btn: "from-yellow-500 via-amber-400 to-orange-500 text-black",
     glow: "rgba(245,158,11,0.35)",
     icon: FaBuilding,
+    offerChip: "bg-amber-400 text-black border-yellow-100",
   },
 };
 
@@ -62,17 +62,6 @@ function pickText(v, lang) {
   if (isPlainObject(v)) return String(lang === "ar" ? v.ar || "" : v.en || "");
   return "";
 }
-function normalizeTag(tag) {
-  const t = (tag || "").toString().trim();
-  return t.length ? t : null;
-}
-function tagLabel(tag, lang) {
-  const t = normalizeTag(tag);
-  if (!t) return null;
-  if (t === "most") return lang === "ar" ? "الأكثر طلباً" : "Most Popular";
-  if (t === "offer") return lang === "ar" ? "عرض" : "Offer";
-  return t;
-}
 function pricingEntries(pricing) {
   if (!isPlainObject(pricing)) return [];
   return Object.entries(pricing)
@@ -84,7 +73,6 @@ function pricingEntries(pricing) {
       paidMonths: Number(val?.paidMonths ?? 0) || 0,
       bonus: Number(val?.bonus ?? 0) || 0,
       best: !!val?.best,
-      tag: normalizeTag(val?.tag),
       title: isPlainObject(val?.title) ? val.title : { ar: "", en: "" },
     }))
     .sort((a, b) => (a.monthsShown ?? 999) - (b.monthsShown ?? 999));
@@ -96,6 +84,11 @@ function pricingLabel(p, lang) {
   return "";
 }
 
+/** ✅ "Offer" means bonus > 0 (truth source) */
+function isOffer(p) {
+  return Number(p?.bonus || 0) > 0;
+}
+
 /* =========================
    Glow wrapper
 ========================= */
@@ -105,7 +98,7 @@ function GlowWrap({ active = false, radius = "rounded-3xl", glow = "rgba(16,185,
       <div
         className={cn("absolute -inset-[2px] z-0", radius, "transition-opacity duration-300")}
         style={{
-          background: `linear-gradient(90deg, ${glow}, rgba(56,189,248,0.22), rgba(168,85,247,0.18))`,
+          background: `linear-gradient(90deg, ${glow}, rgba(56,189,248,0.20), rgba(168,85,247,0.16))`,
           filter: "blur(14px)",
           opacity: active ? 0.55 : 0,
         }}
@@ -113,7 +106,7 @@ function GlowWrap({ active = false, radius = "rounded-3xl", glow = "rgba(16,185,
       <div
         className={cn("absolute -inset-[2px] z-0 opacity-0 group-hover:opacity-55 transition-opacity duration-300", radius)}
         style={{
-          background: `linear-gradient(90deg, ${glow}, rgba(56,189,248,0.22), rgba(168,85,247,0.18))`,
+          background: `linear-gradient(90deg, ${glow}, rgba(56,189,248,0.20), rgba(168,85,247,0.16))`,
           filter: "blur(14px)",
         }}
       />
@@ -123,7 +116,7 @@ function GlowWrap({ active = false, radius = "rounded-3xl", glow = "rgba(16,185,
 }
 
 /* =========================
-   Component (INSIDE cards)
+   Component
 ========================= */
 export default function CompanyPlanCard({
   plan,
@@ -132,14 +125,20 @@ export default function CompanyPlanCard({
   onSubscribe,
 }) {
   const dir = lang === "ar" ? "rtl" : "ltr";
+
   const planKey = (plan?.key || plan?.id || "starter").toString();
   const theme = BRAND[planKey] || BRAND.starter;
   const Icon = theme.icon;
 
   const pricingList = useMemo(() => pricingEntries(plan?.pricing), [plan?.pricing]);
 
+  // default: best OR yearly OR last
   const defaultKey =
-    pricingList.find((x) => x?.best)?.key || pricingList[pricingList.length - 1]?.key || pricingList[0]?.key || "";
+    pricingList.find((x) => x?.best)?.key ||
+    pricingList.find((x) => x?.key === "yearly")?.key ||
+    pricingList[pricingList.length - 1]?.key ||
+    pricingList[0]?.key ||
+    "";
 
   const [selectedKey, setSelectedKey] = useState(defaultKey);
 
@@ -150,7 +149,11 @@ export default function CompanyPlanCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pricingList.length, defaultKey]);
 
-  const selected = pricingList.find((x) => x.key === selectedKey) || pricingList[pricingList.length - 1] || pricingList[0] || null;
+  const selected =
+    pricingList.find((x) => x.key === selectedKey) ||
+    pricingList[pricingList.length - 1] ||
+    pricingList[0] ||
+    null;
 
   const title = pickText(plan?.name, lang) || (lang === "ar" ? "باقة" : "Plan");
   const fit = pickText(plan?.fit, lang);
@@ -166,19 +169,16 @@ export default function CompanyPlanCard({
     return [];
   }, [plan?.perks, lang]);
 
-  const price = selected?.price ?? 0;
-  const monthsShown = selected?.monthsShown ?? 0;
-  const paidMonths = selected?.paidMonths ?? 0;
-  const bonus = selected?.bonus ?? 0;
+  const price = Number(selected?.price ?? 0);
+  const monthsShown = Number(selected?.monthsShown ?? 0);
+  const paidMonths = Number(selected?.paidMonths ?? 0);
+  const bonus = Number(selected?.bonus ?? 0);
 
-  const tag = selected?.tag || (selected?.best ? "most" : null);
-  const tagText = tagLabel(tag, lang);
-
-  const canSubscribe = !!selectedKey && Number(price) > 0;
+  const canSubscribe = !!selectedKey && price > 0;
 
   return (
     <div dir={dir} className="w-full">
-      <GlowWrap glow={theme.glow} radius="rounded-3xl" active={!!selected?.best}>
+      <GlowWrap glow={theme.glow} radius="rounded-3xl" active={selected?.best || isOffer(selected)}>
         <div
           className={cn(
             "relative rounded-3xl border bg-white/5 backdrop-blur-xl overflow-hidden",
@@ -189,24 +189,8 @@ export default function CompanyPlanCard({
           {/* top gradient bar */}
           <div className={cn("absolute top-0 left-0 right-0 h-[5px] bg-gradient-to-r", theme.bar)} />
 
-          {/* badge */}
-          {tagText ? (
-            <div className={cn("absolute -top-3 z-20", lang === "ar" ? "right-5" : "left-5")}>
-              <span
-                className={cn(
-                  "px-3 py-1 rounded-full text-[11px] font-extrabold shadow border",
-                  tag === "most"
-                    ? "bg-purple-500 text-white border-purple-300/30"
-                    : "bg-white/10 text-white border-white/10"
-                )}
-              >
-                {tagText}
-              </span>
-            </div>
-          ) : null}
-
-          {/* header */}
           <div className={cn("p-6", lang === "ar" ? "text-right" : "text-left")}>
+            {/* header */}
             <div className={cn("flex items-start justify-between gap-4", lang === "ar" && "flex-row-reverse")}>
               <div className={cn("flex items-center gap-3 min-w-0", lang === "ar" && "flex-row-reverse")}>
                 <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-white/10 border border-white/10">
@@ -221,46 +205,53 @@ export default function CompanyPlanCard({
                   {fit ? <div className="mt-1 text-[12px] text-white/60 font-semibold">{fit}</div> : null}
                 </div>
               </div>
-
-              <div className={cn("px-3 py-1 rounded-full border text-xs font-extrabold", theme.pill)}>
-                PRO
-              </div>
             </div>
 
             {/* price row */}
             <div className={cn("mt-5 flex items-end gap-2 flex-wrap", lang === "ar" && "flex-row-reverse")}>
-              <div className="text-4xl font-black text-white">{Number(price).toLocaleString()}</div>
+              <div className="text-4xl font-black text-white">{price.toLocaleString()}</div>
               <div className="text-sm text-white/75 font-bold">{lang === "ar" ? "درهم" : "AED"}</div>
 
               {monthsShown > 0 ? (
                 <div className="text-xs text-white/55 font-semibold">
-                  {lang === "ar" ? `(${monthsShown} شهر عرض)` : `(${monthsShown} months shown)`}
+                  {lang === "ar" ? `(${monthsShown} شهر)` : `(${monthsShown} months)`}
                 </div>
               ) : null}
 
-              {bonus > 0 ? (
-                <div className="text-xs px-2 py-1 rounded-full bg-white/10 border border-white/10 text-emerald-200 font-extrabold">
-                  {lang === "ar" ? `+${bonus} شهر مجاني` : `+${bonus} bonus month`}
+              {/* ✅ show offer pill only when selected has bonus */}
+              {isOffer(selected) ? (
+                <div className={cn("text-xs px-2 py-1 rounded-full border font-extrabold", theme.offerChip)}>
+                  {lang === "ar" ? "عرض خاص" : "Special Offer"}
                 </div>
               ) : null}
             </div>
 
-            {/* offer explanation (Pay vs Shown) */}
-            <div className="mt-3 text-[12px] text-white/65 font-semibold">
-              {lang === "ar" ? (
-                <span>
-                  تدفع <b className="text-white">{paidMonths}</b> شهر • يظهر{" "}
-                  <b className="text-white">{monthsShown}</b> شهر
-                </span>
+            {/* ✅ Offer line EXACT format */}
+            <div className="mt-3 text-[12px] text-white/70 font-semibold">
+              {isOffer(selected) ? (
+                lang === "ar" ? (
+                  <span>
+                    تدفع <b className="text-white">{paidMonths}</b> أشهر +{" "}
+                    <b className="text-emerald-200">{bonus}</b> شهر مجاني ={" "}
+                    <b className="text-white">{monthsShown}</b> أشهر
+                  </span>
+                ) : (
+                  <span>
+                    Pay <b className="text-white">{paidMonths}</b> months +{" "}
+                    <b className="text-emerald-200">{bonus}</b> free month ={" "}
+                    <b className="text-white">{monthsShown}</b> months
+                  </span>
+                )
               ) : (
-                <span>
-                  Pay <b className="text-white">{paidMonths}</b> months • shown{" "}
-                  <b className="text-white">{monthsShown}</b> months
+                <span className="text-white/55">
+                  {lang === "ar"
+                    ? "بدون عرض — تدفع نفس مدة الاشتراك"
+                    : "No offer — pay equals subscription duration"}
                 </span>
               )}
             </div>
 
-            {/* duration selector - WORLD CLASS */}
+            {/* duration selector */}
             <div className="mt-4">
               <div className="text-xs text-white/55 font-extrabold mb-2">
                 {lang === "ar" ? "اختر المدة" : "Choose duration"}
@@ -271,8 +262,7 @@ export default function CompanyPlanCard({
                   const active = p.key === selectedKey;
                   const label = pricingLabel(p, lang) || p.key;
 
-                  const pill =
-                    p.best || p.tag ? (p.tag === "offer" ? "offer" : p.tag === "most" || p.best ? "most" : "") : "";
+                  const offer = isOffer(p);
 
                   return (
                     <button
@@ -280,31 +270,43 @@ export default function CompanyPlanCard({
                       type="button"
                       onClick={() => setSelectedKey(p.key)}
                       className={cn(
-                        "relative cursor-pointer rounded-2xl border p-3 bg-white/6 backdrop-blur-xl transition text-left",
-                        lang === "ar" && "text-right",
-                        active ? "border-emerald-400/55 bg-white/8" : "border-white/10 hover:border-white/20 hover:bg-white/7"
+                        "relative cursor-pointer rounded-2xl border p-3 bg-white/6 backdrop-blur-xl transition",
+                        lang === "ar" ? "text-right" : "text-left",
+                        active
+                          ? "border-emerald-400/60 bg-white/8"
+                          : "border-white/10 hover:border-white/20 hover:bg-white/7",
+                        offer && active ? "shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_18px_40px_-26px_rgba(16,185,129,0.55)]" : ""
                       )}
                     >
-                      {/* mini badge */}
-                      {pill ? (
+                      {/* ✅ show "عرض" ONLY for offers + only inside duration */}
+                      {offer ? (
                         <span
                           className={cn(
                             "absolute -top-2 px-2 py-0.5 rounded-full text-[10px] font-extrabold border",
                             lang === "ar" ? "left-3" : "right-3",
-                            pill === "most"
-                              ? "bg-purple-500 text-white border-purple-300/30"
-                              : "bg-white/10 text-white border-white/10"
+                            "bg-white/10 text-white border-white/10"
                           )}
                         >
-                          {pill === "most" ? (lang === "ar" ? "الأكثر" : "Best") : lang === "ar" ? "عرض" : "Offer"}
+                          {lang === "ar" ? "عرض" : "Offer"}
                         </span>
                       ) : null}
 
                       <div className="text-white font-extrabold text-sm">{label}</div>
+
                       <div className="mt-1 text-[11px] text-white/60 font-semibold">
-                        {Number(p.monthsShown || 1)} {lang === "ar" ? "شهر" : "mo"} • {Number(p.price || 0).toLocaleString()}{" "}
+                        {Number(p.monthsShown || 1)} {lang === "ar" ? "شهر" : "mo"} •{" "}
+                        {Number(p.price || 0).toLocaleString()}{" "}
                         <span className="text-white/50">{lang === "ar" ? "درهم" : "AED"}</span>
                       </div>
+
+                      {/* ✅ offer micro line for clarity */}
+                      {offer ? (
+                        <div className="mt-2 text-[11px] font-extrabold text-emerald-200">
+                          {lang === "ar"
+                            ? `تدفع ${p.paidMonths} + ${p.bonus} مجاني = ${p.monthsShown}`
+                            : `Pay ${p.paidMonths} + ${p.bonus} free = ${p.monthsShown}`}
+                        </div>
+                      ) : null}
 
                       {active ? (
                         <div className="mt-2 inline-flex items-center gap-2 text-emerald-200 text-[11px] font-extrabold">
@@ -346,7 +348,7 @@ export default function CompanyPlanCard({
                   monthsShown,
                   paidMonths,
                   bonus,
-                  tag: tag || null,
+                  isOffer: isOffer(selected),
                 })
               }
               className={cn(
