@@ -1,51 +1,74 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { collection, getDocs } from "firebase/firestore";
+import { firestore } from "@/lib/firebase.client";
 import CompanyPlanCard from "./CompanyPlanCard";
 
-export default function CompanySubscriptionsSection({ lang = "ar", darkMode = false, router }) {
-  const plans = [
-    {
-      id: "pro",
-      badge: lang === "ar" ? "الأكثر طلبًا" : "Most Popular",
-      title: lang === "ar" ? "اشتراك PRO" : "PRO Plan",
-      price: 499,
-      period: lang === "ar" ? "شهريًا" : "Monthly",
-      color: "emerald",
-      features:
-        lang === "ar"
-          ? ["لوحة تحكم احترافية", "أولوية في الدعم", "خصومات على الخدمات", "إدارة موظفين/طلبات"]
-          : ["Pro dashboard", "Priority support", "Service discounts", "Staff/Orders management"],
-    },
-    {
-      id: "business",
-      badge: lang === "ar" ? "للشركات" : "For Companies",
-      title: lang === "ar" ? "اشتراك BUSINESS" : "BUSINESS Plan",
-      price: 999,
-      period: lang === "ar" ? "شهريًا" : "Monthly",
-      color: "blue",
-      features:
-        lang === "ar"
-          ? ["كل مزايا PRO", "تقارير شهرية", "حسابات متعددة", "تخصيص أسعار أكثر"]
-          : ["Everything in PRO", "Monthly reports", "Multi accounts", "More pricing controls"],
-    },
-  ];
+export default function CompanySubscriptionsSection({
+  lang = "ar",
+  darkMode = false,
+  onSubscribe, // optional callback
+}) {
+  const [plans, setPlans] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const onSelectPlan = (planId) => {
-    // عدّل المسار حسب صفحة الدفع عندك
-    if (router?.push) router.push(`/checkout?plan=${planId}`);
-  };
+  useEffect(() => {
+    let alive = true;
+
+    async function load() {
+      setLoading(true);
+      try {
+        const snap = await getDocs(collection(firestore, "companySubscriptionPlans"));
+        const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+        // ✅ only active + sort
+        const filtered = arr
+          .filter((p) => p?.isActive !== false)
+          .sort((a, b) => (a?.sortIndex ?? 999) - (b?.sortIndex ?? 999));
+
+        if (alive) setPlans(filtered);
+      } catch (e) {
+        console.error("load plans failed:", e);
+        if (alive) setPlans([]);
+      } finally {
+        if (alive) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const emptyText = useMemo(
+    () => (lang === "ar" ? "لا توجد باقات متاحة حالياً." : "No plans available right now."),
+    [lang]
+  );
+
+  if (loading) {
+    return (
+      <div className="w-full flex justify-center py-10 text-white/80">
+        {lang === "ar" ? "جاري تحميل الباقات..." : "Loading plans..."}
+      </div>
+    );
+  }
+
+  if (!plans.length) {
+    return <div className="w-full text-center py-10 text-white/70">{emptyText}</div>;
+  }
 
   return (
     <div className="w-full">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {plans.map((p) => (
+        {plans.map((plan) => (
           <CompanyPlanCard
-            key={p.id}
-            plan={p}
+            key={plan.id}
+            plan={plan}
             lang={lang}
             darkMode={darkMode}
-            onSelect={() => onSelectPlan(p.id)}
+            onSubscribe={onSubscribe}
           />
         ))}
       </div>
