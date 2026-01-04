@@ -463,4 +463,4 @@ export default function CompanyPlanCard({ plan, lang = "ar", darkMode = true, on
       </GlowWrap>
     </div>
   );
-}
+} 

@@ -1,15 +1,18 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { collection, getDocs } from "firebase/firestore";
-import { firestore } from "@/lib/firebase.client";
+import { firestore, auth } from "@/lib/firebase.client";
+import { useRouter } from "next/navigation";
 import CompanyPlanCard from "./CompanyPlanCard";
 
 export default function CompanySubscriptionsSection({
   lang = "ar",
   darkMode = false,
-  onSubscribe, // optional callback
+  onSubscribe, // optional external callback (لو عايز تتحكم من برّه)
 }) {
+  const router = useRouter();
+
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -22,7 +25,6 @@ export default function CompanySubscriptionsSection({
         const snap = await getDocs(collection(firestore, "companySubscriptionPlans"));
         const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-        // ✅ only active + sort
         const filtered = arr
           .filter((p) => p?.isActive !== false)
           .sort((a, b) => (a?.sortIndex ?? 999) - (b?.sortIndex ?? 999));
@@ -41,6 +43,75 @@ export default function CompanySubscriptionsSection({
       alive = false;
     };
   }, []);
+
+  // ✅ ده اللي هيتنفّذ لما المستخدم يضغط "اشترك الآن"
+  const handleSubscribe = useCallback(
+    async ({ planKey, pricingKey, price, monthsShown, paidMonths, bonus, isOffer, isMost }) => {
+      // لو الأب باعت onSubscribe (من برّه) سيبه هو يتحكم
+      if (typeof onSubscribe === "function") {
+        return onSubscribe({ planKey, pricingKey, price, monthsShown, paidMonths, bonus, isOffer, isMost });
+      }
+
+      try {
+        const user = auth.currentUser;
+        if (!user) {
+          alert(lang === "ar" ? "لازم تسجل دخول الأول" : "Please login first");
+          router.push("/login");
+          return;
+        }
+
+        // ✅ نفس ستايل دفع الخدمات: create payment intent ثم redirect لصفحة الدفع
+        const payload = {
+          amount: Number(price), // AED
+          serviceId: `subscription-${planKey}`, // مثال: subscription-growth
+          serviceName: lang === "ar" ? `اشتراك ${planKey}` : `Subscription ${planKey}`,
+          customerId: user.uid,
+          userEmail: user.email,
+          clientType: "company",
+          attachments: {},
+          providers: [],
+
+          coinsUsed: 0,
+          coinsGiven: 0,
+          printingFee: 0,
+          processingFee: 0,
+
+          assignedTo: "",
+          assignedToName: "",
+          status: "pending",
+          employeeData: {},
+
+          // ✅ مهم للاشتراك (هتحتاجه في الويبهوك/confirm)
+          planKey,
+          pricingKey,
+          monthsShown,
+          paidMonths,
+          bonus,
+          isOffer,
+          isMost,
+          lang,
+        };
+
+        const r = await fetch("/api/create-payment-intent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await r.json();
+        if (!r.ok || !data?.ok) throw new Error(data?.error || "Failed to create payment intent");
+
+        // ✅ روح لصفحة الدفع (انت هتعملها /pay)
+        router.push(
+          `/pay?orderNumber=${encodeURIComponent(data.orderNumber)}&cs=${encodeURIComponent(data.clientSecret)}`
+        );
+      } catch (e) {
+        console.error("subscribe failed:", e);
+        alert(lang === "ar" ? "حصل خطأ أثناء بدء الدفع" : "Failed to start payment");
+      }
+    },
+    [onSubscribe, lang, router]
+  );
 
   const emptyText = useMemo(
     () => (lang === "ar" ? "لا توجد باقات متاحة حالياً." : "No plans available right now."),
@@ -68,7 +139,7 @@ export default function CompanySubscriptionsSection({
             plan={plan}
             lang={lang}
             darkMode={darkMode}
-            onSubscribe={onSubscribe}
+            onSubscribe={handleSubscribe} // ✅ هنا الربط الحقيقي
           />
         ))}
       </div>
