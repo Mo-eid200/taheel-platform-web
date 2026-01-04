@@ -1035,16 +1035,11 @@ function ClientProfilePageInner({ userId }) {
 <CompanySubscriptionsSection
   lang={lang}
   darkMode={darkMode}
-  onSubscribe={(payload) => {
-    // payload: { planKey, pricingKey, price, monthsShown, paidMonths, bonus, tag }
-    router.push(
-      `/checkout?plan=${payload.planKey}&p=${payload.pricingKey}&price=${payload.price}`
-    );
-  }}
 />
     </div>
   </>
 )}
+
 
 
           {["residentServices", "companyServices", "nonresidentServices", "otherServices"].includes(selectedSection) && (
