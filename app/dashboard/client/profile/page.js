@@ -1032,10 +1032,19 @@ function ClientProfilePageInner({ userId }) {
     </SectionTitle>
 
     <div className="w-full">
-      <CompanySubscriptionsSection lang={lang} darkMode={darkMode} router={router} />
+<CompanySubscriptionsSection
+  lang={lang}
+  darkMode={darkMode}
+  onSubscribe={(payload) => {
+    // payload: { planKey, pricingKey, price, monthsShown, paidMonths, bonus, tag }
+    router.push(
+      `/checkout?plan=${payload.planKey}&p=${payload.pricingKey}&price=${payload.price}`
+    );
+  }}
+/>
     </div>
   </>
-          )}
+)}
 
 
           {["residentServices", "companyServices", "nonresidentServices", "otherServices"].includes(selectedSection) && (
@@ -1233,12 +1242,15 @@ function ClientProfilePageInner({ userId }) {
 // Page wrapper: read userId from query
 // =====================================
 export default function ClientProfilePage() {
-  const searchParams = useSearchParams();
-  const userId = searchParams.get("userId") || "";
-
   return (
     <Suspense fallback={null}>
-      <ClientProfilePageInner userId={userId} />
+      <ClientProfilePageInnerWrapper />
     </Suspense>
   );
+}
+
+function ClientProfilePageInnerWrapper() {
+  const searchParams = useSearchParams();
+  const userId = searchParams.get("userId") || "";
+  return <ClientProfilePageInner userId={userId} />;
 }
