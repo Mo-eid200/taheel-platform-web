@@ -34,6 +34,11 @@ const LANG = {
     totalBeforeDiscount: "Total Before Discount",
     total: "Total",
     processing: "Processing...",
+
+    // ✅ ADD (Subscription labels)
+    subTitle: "Pay for Subscription",
+    subName: "Subscription",
+    subDays: "Duration (Days)",
   },
   ar: {
     title: "دفع الخدمة",
@@ -51,6 +56,11 @@ const LANG = {
     totalBeforeDiscount: "الإجمالي قبل الخصم",
     total: "الإجمالي",
     processing: "جارٍ الدفع...",
+
+    // ✅ ADD (Subscription labels)
+    subTitle: "دفع الاشتراك",
+    subName: "الاشتراك",
+    subDays: "المدة (بالأيام)",
   },
 };
 
@@ -67,38 +77,71 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
     paymentData?.service?.name ||
     paymentData?.serviceName ||
     "اسم غير متوفر";
+
   const servicePrice = Number(
     paymentData?.service?.price ?? paymentData?.price ?? 0
   );
+
   const printingFee = Number(
     paymentData?.service?.printingFee ??
       paymentData?.printingFee ??
       0
   );
+
   const vat = Number(
     paymentData?.service?.vat ?? paymentData?.vat ?? 0
   );
+
   const coinDiscount = Number(
     paymentData?.service?.coinDiscount ??
       paymentData?.coinDiscount ??
       0
   );
+
   const totalPrice = Number(
     paymentData?.totalPrice ?? paymentData?.price ?? 0
   );
+
   const finalPrice = Number(
     paymentData?.finalPrice ?? paymentData?.price ?? 0
   );
+
   const processingFee = Number(
     paymentData?.processingFee ?? 0
   );
+
   const orderNumber = paymentData?.orderNumber;
   const clientSecret = paymentData?.clientSecret;
+
   const userEmail =
     paymentData?.userEmail ||
     paymentData?.service?.userEmail ||
     "";
+
   const dir = lang === "ar" ? "rtl" : "ltr";
+
+  // ✅ ADD (Detect subscription + fields)
+  const isSubscription =
+    String(paymentData?.requestType || "").toLowerCase() === "subscription" ||
+    !!paymentData?.planKey ||
+    String(paymentData?.serviceId || "").startsWith("subscription-") ||
+    String(paymentData?.serviceName || "").includes("اشتراك") ||
+    String(paymentData?.serviceName || "").toLowerCase().includes("subscription");
+
+  const planKey = paymentData?.planKey || paymentData?.subscriptionName || "";
+
+  // مدة الاشتراك بالأيام (الأولوية: subscriptionDays)
+  const subscriptionDays = Number(
+    paymentData?.subscriptionDays ??
+      paymentData?.days ??
+      0
+  );
+
+  // fallback: لو عندك monthsShown نعتبر الشهر 30 يوم
+  const monthsShown = Number(paymentData?.monthsShown ?? 0);
+  const fallbackDays = monthsShown > 0 ? monthsShown * 30 : 0;
+
+  const subDaysToShow = subscriptionDays > 0 ? subscriptionDays : fallbackDays;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -206,6 +249,11 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
               paymentId: paymentIntent.id,
               paymentMethod: "gateway",
               lang,
+
+              // ✅ ADD (Subscription info - non-breaking)
+              requestType: isSubscription ? "subscription" : "service",
+              planKey: planKey || "",
+              subscriptionDays: subDaysToShow || 0,
             }),
           });
         } catch (err) {
@@ -271,9 +319,11 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
         alt="Logo"
         className="mx-auto mb-2 rounded-full bg-white shadow-lg ring-2 ring-emerald-500"
       />
+
       <div className="text-emerald-300 font-black text-xl mb-1 text-center">
-        {LANG[lang].title}
+        {isSubscription ? LANG[lang].subTitle : LANG[lang].title}
       </div>
+
       <div className="text-gray-200 text-sm mb-4 text-center">
         {LANG[lang].subtitle}
       </div>
@@ -289,6 +339,29 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
                 {serviceName}
               </td>
             </tr>
+
+            {/* ✅ ADD (Subscription details UI) */}
+            {isSubscription && (
+              <>
+                <tr>
+                  <td className="text-gray-300">
+                    {LANG[lang].subName}:
+                  </td>
+                  <td className="text-emerald-200 font-bold">
+                    {planKey || serviceName}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="text-gray-300">
+                    {LANG[lang].subDays}:
+                  </td>
+                  <td className="text-white">
+                    {subDaysToShow > 0 ? `${subDaysToShow} ${lang === "ar" ? "يوم" : "days"}` : "-"}
+                  </td>
+                </tr>
+              </>
+            )}
+
             <tr>
               <td className="text-gray-300">
                 {LANG[lang].amount}:
@@ -297,6 +370,7 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
                 {servicePrice.toFixed(2)} د.إ
               </td>
             </tr>
+
             {printingFee > 0 && (
               <tr>
                 <td className="text-gray-300">
@@ -307,6 +381,7 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
                 </td>
               </tr>
             )}
+
             {vat > 0 && (
               <tr>
                 <td className="text-gray-300">
@@ -315,6 +390,7 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
                 <td>{vat.toFixed(2)} د.إ</td>
               </tr>
             )}
+
             <tr>
               <td className="text-gray-300">
                 {LANG[lang].coinDiscount}:
@@ -328,6 +404,8 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
                   : "0 د.إ"}
               </td>
             </tr>
+
+            {/* ✅ processingFee موجود أصلاً - ده رسوم Stripe */}
             <tr>
               <td className="text-gray-300">
                 {LANG[lang].processingFee}:
@@ -340,6 +418,7 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
                   : "0 د.إ"}
               </td>
             </tr>
+
             <tr>
               <td className="text-gray-300">
                 {LANG[lang].totalBeforeDiscount}
@@ -349,6 +428,7 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
                 {totalPrice.toFixed(2)} د.إ
               </td>
             </tr>
+
             <tr>
               <td className="font-bold text-emerald-400">
                 {LANG[lang].total}:

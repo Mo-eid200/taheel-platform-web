@@ -47,6 +47,13 @@ export default async function handler(req, res) {
     status = "pending", // الطلب لسه مش مدفوع
     employeeData = {},  // معلومات الموظف اللي استلم الطلب (للأدمن)
     lang = "ar",        // "ar" | "en"
+
+    // ✅ ADD (Subscriptions - optional)
+    planKey = "",
+    pricingKey = "",
+    monthsShown = 0,
+    paidMonths = 0,
+    bonus = 0,
   } = req.body || {};
 
   // validations الأساسية
@@ -63,13 +70,25 @@ export default async function handler(req, res) {
     // هنبدأ دايمًا بإنشاء requestId بنفس الاستايل بتاعنا
     const requestId = generateOrderNumber();
 
+    // ✅ ADD (Detect subscription)
+const isSubscription =
+  String(serviceId || "").startsWith("sub_") ||
+  String(serviceId || "").startsWith("subscription_") ||
+  String(serviceId || "").startsWith("subscription-") || // ✅ add this
+  String(serviceName || "").toLowerCase().includes("subscription") ||
+  String(serviceName || "").includes("اشتراك") ||
+  String(planKey || "").trim().length > 0;
+
+
     // لو الخدمة دي عبارة عن شحن محفظة أو "Wallet Recharge"
     const requestType =
       serviceId === "wallet-recharge" ||
       serviceName === "شحن المحفظة" ||
       String(serviceName).toLowerCase().includes("wallet")
         ? "wallet_recharge"
-        : "service";
+        : isSubscription
+          ? "subscription" // ✅ ADD
+          : "service";
 
     // مهم: الويب هوك و confirmPayment بيعتمدوا على الـ metadata اللي بنبعتها هنا
     // علشان يربطوا العملية باليوزر والطلب ويكملوا التحديث
@@ -84,7 +103,7 @@ export default async function handler(req, res) {
         serviceName,
         clientType: clientType || "",
 
-        requestType,             // "wallet_recharge" | "service"
+        requestType,             // "wallet_recharge" | "service" | "subscription" ✅
 
         coinsUsed: String(coinsUsed || 0),
         coinsGiven: String(coinsGiven || 0),
@@ -111,6 +130,13 @@ export default async function handler(req, res) {
 
         // ممكن تحط أي بيانات تخص الـ employee اللي استلم الطلب وقت الإنشاء
         employeeData: JSON.stringify(employeeData || {}),
+
+        // ✅ ADD (Subscriptions metadata - optional)
+        planKey: String(planKey || ""),
+        pricingKey: String(pricingKey || ""),
+        monthsShown: String(monthsShown || 0),
+        paidMonths: String(paidMonths || 0),
+        bonus: String(bonus || 0),
       },
       description:
         lang === "en"
@@ -131,7 +157,7 @@ export default async function handler(req, res) {
       customerId, // ده نفس ID بتاع document في users
       serviceId: serviceId || "",
       serviceName,
-      requestType, // "wallet_recharge" / "service"
+      requestType, // "wallet_recharge" / "service" / "subscription" ✅
 
       paidAmount: Number(amount), // المبلغ المتوقع
       printingFee: Number(printingFee) || 0,
@@ -158,6 +184,13 @@ export default async function handler(req, res) {
       employeeData, // معلومات الموظف اللي استلم الطلب (لو applicable)
 
       lang,
+
+      // ✅ ADD (Subscriptions fields - optional)
+      planKey: planKey || "",
+      pricingKey: pricingKey || "",
+      monthsShown: Number(monthsShown) || 0,
+      paidMonths: Number(paidMonths) || 0,
+      bonus: Number(bonus) || 0,
 
       statusHistory: [
         {

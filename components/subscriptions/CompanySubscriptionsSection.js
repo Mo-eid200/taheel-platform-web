@@ -70,6 +70,7 @@ export default function CompanySubscriptionsSection({
           clientType: "company",
           attachments: {},
           providers: [],
+          requestType: "subscription",
 
           coinsUsed: 0,
           coinsGiven: 0,

@@ -43,6 +43,20 @@ function nowISO() {
   return new Date().toISOString();
 }
 
+// ✅ ADD (Subscriptions helpers)
+function safeStr(v) {
+  if (v == null) return "";
+  return String(v);
+}
+// إضافة شهور لتاريخ (بدقة شهرية)
+function addMonths(date, months) {
+  const d = new Date(date);
+  const day = d.getDate();
+  d.setMonth(d.getMonth() + Number(months || 0));
+  if (d.getDate() < day) d.setDate(0);
+  return d;
+}
+
 // نفس اللى في الويب هوك: نقرأ الخدمة من servicesByClientType
 async function fetchServiceFromByClientType(
   serviceId,
@@ -140,6 +154,17 @@ export default async function handler(req, res) {
     const assignedToMeta = md.assignedTo || md.assigned_to || "";
     const assignedToNameMeta =
       md.assignedToName || md.assigned_to_name || "";
+
+    // ✅ ADD (Subscriptions metadata)
+    const subPlanKey = safeStr(md.planKey || "");
+    const subPricingKey = safeStr(md.pricingKey || "");
+    const subMonthsShown = safeNum(md.monthsShown || 0);
+    const subPaidMonths = safeNum(md.paidMonths || 0);
+    const subBonus = safeNum(md.bonus || 0);
+
+    const isSubscription =
+      String(requestType).toLowerCase() === "subscription" ||
+      subPlanKey.trim().length > 0;
 
     // attachments ممكن تكون جايه كـ JSON string
     let attachmentsMeta = null;
@@ -389,6 +414,16 @@ export default async function handler(req, res) {
         updates.assignedToName =
           rdata.assignedToName || assignedToNameMeta || "";
 
+        // ✅ ADD (Subscriptions fields into request doc only if subscription)
+        if (isSubscription) {
+          updates.requestType = "subscription";
+          updates.planKey = subPlanKey;
+          updates.pricingKey = subPricingKey;
+          updates.monthsShown = subMonthsShown;
+          updates.paidMonths = subPaidMonths;
+          updates.bonus = subBonus;
+        }
+
         tx.update(requestRef, updates);
       } else {
         // --------------------------------
@@ -495,6 +530,17 @@ export default async function handler(req, res) {
                   serviceMap.requiredDocuments || [],
               }
             : {}),
+          // ✅ ADD (Subscriptions fields on create)
+          ...(isSubscription
+            ? {
+                requestType: "subscription",
+                planKey: subPlanKey,
+                pricingKey: subPricingKey,
+                monthsShown: subMonthsShown,
+                paidMonths: subPaidMonths,
+                bonus: subBonus,
+              }
+            : {}),
         };
 
         tx.set(db.collection("requests").doc(reqIdToUse), reqObj);
@@ -532,6 +578,57 @@ export default async function handler(req, res) {
         }
       }
 
+      // ✅ ADD (Subscription activation on user)
+      if (isSubscription) {
+        const start = new Date();
+        const end = addMonths(start, subMonthsShown > 0 ? subMonthsShown : 0);
+
+        const subObj = {
+          isActive: true,
+          status: "active",
+          planKey: subPlanKey,
+          pricingKey: subPricingKey,
+          monthsShown: subMonthsShown,
+          paidMonths: subPaidMonths,
+          bonus: subBonus,
+          requestId: finalRequestId,
+          paymentIntentId,
+          startedAt: start.toISOString(),
+          endsAt: end.toISOString(),
+          createdAt: nowISO(),
+          updatedAt: nowISO(),
+        };
+
+        tx.set(
+          userRef,
+          {
+            subscription: subObj,
+            subscriptionActive: true,
+            subscriptionPlanKey: subPlanKey,
+            subscriptionEndsAt: end.toISOString(),
+            lastSubscriptionUpdatedAt:
+              admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+
+        const subHistRef = db.collection("subscriptionHistory").doc();
+        tx.set(subHistRef, {
+          userId: userRef.id,
+          requestId: finalRequestId,
+          paymentIntentId,
+          planKey: subPlanKey,
+          pricingKey: subPricingKey,
+          monthsShown: subMonthsShown,
+          paidMonths: subPaidMonths,
+          bonus: subBonus,
+          startedAt: start.toISOString(),
+          endsAt: end.toISOString(),
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          status: "active",
+        });
+      }
+
       // --------------------------------
       // D) TRANSACTION LOG
       // --------------------------------
@@ -557,22 +654,43 @@ export default async function handler(req, res) {
         targetId: userRef.id,
         title:
           md.lang === "en"
-            ? "Payment Confirmed"
-            : "تم تأكيد الدفع",
+            ? (isSubscription ? "Subscription Confirmed" : "Payment Confirmed")
+            : (isSubscription ? "تم تفعيل الاشتراك" : "تم تأكيد الدفع"),
         body:
           md.lang === "en"
-            ? `Your payment of ${amountAED.toFixed(
-                2
-              )} AED was received. Order: ${finalRequestId}`
-            : `تم استلام دفعتك بقيمة ${amountAED.toFixed(
-                2
-              )} د.إ الآن. رقم الطلب: ${finalRequestId}`,
+            ? (isSubscription
+                ? `Your subscription is now active. Plan: ${subPlanKey || "N/A"} • Ends: ${(() => {
+                    try {
+                      const e = addMonths(new Date(), subMonthsShown > 0 ? subMonthsShown : 0);
+                      return e.toISOString().slice(0, 10);
+                    } catch {
+                      return "";
+                    }
+                  })()} • Order: ${finalRequestId}`
+                : `Your payment of ${amountAED.toFixed(
+                    2
+                  )} AED was received. Order: ${finalRequestId}`)
+            : (isSubscription
+                ? `تم تفعيل اشتراكك بنجاح. الخطة: ${subPlanKey || "—"} • رقم الطلب: ${finalRequestId}`
+                : `تم استلام دفعتك بقيمة ${amountAED.toFixed(
+                    2
+                  )} د.إ الآن. رقم الطلب: ${finalRequestId}`),
         timestamp:
           admin.firestore.FieldValue.serverTimestamp(),
         isRead: false,
         metadata: {
           orderId: finalRequestId,
           paymentIntentId,
+          ...(isSubscription
+            ? {
+                type: "subscription",
+                planKey: subPlanKey,
+                pricingKey: subPricingKey,
+                monthsShown: subMonthsShown,
+                paidMonths: subPaidMonths,
+                bonus: subBonus,
+              }
+            : {}),
         },
       });
 
@@ -592,6 +710,18 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       orderNumber: finalRequestId,
+      // ✅ ADD (hint for frontend/email flow if needed)
+      ...(isSubscription
+        ? {
+            subscription: {
+              planKey: subPlanKey,
+              pricingKey: subPricingKey,
+              monthsShown: subMonthsShown,
+              paidMonths: subPaidMonths,
+              bonus: subBonus,
+            },
+          }
+        : {}),
     });
   } catch (err) {
     if (err.message === "ALREADY_PROCESSED") {
