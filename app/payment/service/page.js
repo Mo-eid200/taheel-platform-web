@@ -250,7 +250,7 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
         const orderForRedirect = orderNumber || null;
 
         if (orderForRedirect) {
-          router.push(`/payment/PaymentSuccess?order=${encodeURIComponent(orderForRedirect)}`);
+          router.push(`/payment/PaymentSuccess?order=${encodeURIComponent(orderForRedirect)}&lang=${encodeURIComponent(lang)}`);
         } else {
           router.push(`/payment/PaymentSuccess?pi=${encodeURIComponent(paymentIntent.id)}`);
         }
