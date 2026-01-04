@@ -55,6 +55,32 @@ function cn(...a) {
 }
 
 /* =========================
+   Plan chip styling per plan
+========================= */
+const PLAN_CHIP = {
+  starter: {
+    pill: "border-emerald-400/25 bg-emerald-500/10 text-emerald-200",
+    dot: "bg-emerald-400",
+    glow: "shadow-[0_18px_55px_-38px_rgba(16,185,129,0.55)]",
+  },
+  growth: {
+    pill: "border-sky-400/25 bg-sky-500/10 text-sky-200",
+    dot: "bg-sky-400",
+    glow: "shadow-[0_18px_55px_-38px_rgba(56,189,248,0.55)]",
+  },
+  scale: {
+    pill: "border-purple-400/25 bg-purple-500/10 text-purple-200",
+    dot: "bg-purple-400",
+    glow: "shadow-[0_18px_55px_-38px_rgba(168,85,247,0.55)]",
+  },
+  enterprise: {
+    pill: "border-amber-300/30 bg-amber-400/15 text-amber-200",
+    dot: "bg-amber-300",
+    glow: "shadow-[0_18px_55px_-38px_rgba(245,158,11,0.55)]",
+  },
+};
+
+/* =========================
    Safe helpers
 ========================= */
 function isPlainObject(v) {
@@ -84,7 +110,11 @@ function pricingEntries(pricing) {
       title: isPlainObject(val?.title) ? val.title : { ar: "", en: "" },
     }));
 
-  list.sort((a, b) => (DUR_ORDER.indexOf(a.key) === -1 ? 99 : DUR_ORDER.indexOf(a.key)) - (DUR_ORDER.indexOf(b.key) === -1 ? 99 : DUR_ORDER.indexOf(b.key)));
+  list.sort(
+    (a, b) =>
+      (DUR_ORDER.indexOf(a.key) === -1 ? 99 : DUR_ORDER.indexOf(a.key)) -
+      (DUR_ORDER.indexOf(b.key) === -1 ? 99 : DUR_ORDER.indexOf(b.key))
+  );
   return list;
 }
 function pricingLabel(p, lang) {
@@ -149,22 +179,23 @@ const DURATION_LABELS = {
   semiannual: { ar: "نصف سنوي", en: "Semiannual" },
   yearly: { ar: "سنوي", en: "Yearly" },
 };
-const moLabel = (lang, n) => (lang === "ar" ? (n === 1 ? "شهر" : "شهور") : n === 1 ? "month" : "months");
+const moLabel = (lang, n) =>
+  lang === "ar" ? (n === 1 ? "شهر" : "شهور") : n === 1 ? "month" : "months";
 
 /* =========================
    Component
 ========================= */
-export default function CompanyPlanCard({
-  plan,
-  lang = "ar",
-  darkMode = true,
-  onSubscribe,
-}) {
+export default function CompanyPlanCard({ plan, lang = "ar", darkMode = true, onSubscribe }) {
   const dir = lang === "ar" ? "rtl" : "ltr";
 
-  const planKey = (plan?.key || plan?.id || "starter").toString();
+  const planKeyRaw = (plan?.key || plan?.id || "starter").toString();
+  const planKey = planKeyRaw.toLowerCase();
   const theme = BRAND[planKey] || BRAND.starter;
   const Icon = theme.icon;
+
+  // ✅ plan chip (colored by plan)
+  const chipTheme = PLAN_CHIP[planKey] || PLAN_CHIP.starter;
+  const planChipText = planKey.toUpperCase();
 
   const pricingList = useMemo(() => pricingEntries(plan?.pricing), [plan?.pricing]);
 
@@ -218,11 +249,7 @@ export default function CompanyPlanCard({
 
   return (
     <div dir={dir} className="w-full">
-      <GlowWrap
-        glow={theme.glow}
-        radius="rounded-3xl"
-        active={showMost || showOffer}
-      >
+      <GlowWrap glow={theme.glow} radius="rounded-3xl" active={showMost || showOffer}>
         <div
           className={cn(
             "relative rounded-3xl border bg-white/5 backdrop-blur-xl overflow-hidden",
@@ -244,15 +271,31 @@ export default function CompanyPlanCard({
                 <div className="min-w-0">
                   <div className={cn("flex items-center gap-2 flex-wrap", lang === "ar" && "flex-row-reverse")}>
                     <span className={cn("w-2 h-2 rounded-full", theme.dot)} />
-                    <div className="text-white font-extrabold text-xl truncate">{title}</div>
 
-                    {/* ✅ Most chosen chip only when yearly is best/most */}
-                    {showMost ? (
-                      <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-white text-black border border-white/50">
-                        {lang === "ar" ? "الأكثر اختيارًا" : "Most chosen"}
+                    {/* ✅ Title + plan colored chip */}
+                    <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                      <div className="text-white font-extrabold text-xl truncate">{title}</div>
+
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-[11px] font-extrabold border",
+                          chipTheme.pill,
+                          chipTheme.glow
+                        )}
+                      >
+                        <span className={cn("w-2 h-2 rounded-full", chipTheme.dot)} />
+                        {planChipText}
                       </span>
-                    ) : null}
+
+                      {/* ✅ Most chosen chip only when yearly is best/most */}
+                      {showMost ? (
+                        <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-white text-black border border-white/50">
+                          {lang === "ar" ? "الأكثر اختيارًا" : "Most chosen"}
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
+
                   {fit ? <div className="mt-1 text-[12px] text-white/60 font-semibold">{fit}</div> : null}
                 </div>
               </div>
@@ -265,7 +308,7 @@ export default function CompanyPlanCard({
 
               {monthsShown > 0 ? (
                 <div className="text-xs text-white/55 font-semibold">
-                  {lang === "ar" ? `(${monthsShown} ${moLabel(lang, monthsShown)})` : `(${monthsShown} ${moLabel(lang, monthsShown)})`}
+                  ({monthsShown} {moLabel(lang, monthsShown)})
                 </div>
               ) : null}
 
@@ -383,10 +426,7 @@ export default function CompanyPlanCard({
                 <div className="text-white font-extrabold mb-3">{lang === "ar" ? "المميزات" : "Perks"}</div>
                 <div className="space-y-2 text-sm text-white/80">
                   {perks.slice(0, 6).map((x, i) => (
-                    <div
-                      key={i}
-                      className={cn("flex items-start gap-2", lang === "ar" && "flex-row-reverse text-right")}
-                    >
+                    <div key={i} className={cn("flex items-start gap-2", lang === "ar" && "flex-row-reverse text-right")}>
                       <Check className="w-4 h-4 text-emerald-300 mt-[2px] shrink-0" />
                       <span className="break-words">{String(x)}</span>
                     </div>
