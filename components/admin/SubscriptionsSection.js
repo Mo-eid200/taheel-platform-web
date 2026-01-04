@@ -912,7 +912,7 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                                           onChange={(e) =>
                                             setNested(p.id, ["pricing", k, "price"], Number(e.target.value || 0))
                                           }
-                                          className={cn(inputBaseDark, brand.focus)}
+                                          className={cn(inputBaseDark, brand.focus,"text-lg tracking-wide")}
                                         />
                                       </div>
 
