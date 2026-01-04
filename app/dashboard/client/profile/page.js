@@ -1032,20 +1032,10 @@ function ClientProfilePageInner({ userId }) {
     </SectionTitle>
 
     <div className="w-full">
-<CompanySubscriptionsSection
-  lang={lang}
-  darkMode={darkMode}
-  onSubscribe={(payload) => {
-    // payload = { planKey, pricingKey, price, monthsShown, paidMonths, bonus, tag }
-    // هنا تروح للـ checkout أو تفتح مودال الدفع
-    router.push(
-      `/checkout?plan=${payload.planKey}&p=${payload.pricingKey}&price=${payload.price}`
-    );
-  }}
-/>
+      <CompanySubscriptionsSection lang={lang} darkMode={darkMode} router={router} />
     </div>
   </>
-)}
+          )}
 
 
           {["residentServices", "companyServices", "nonresidentServices", "otherServices"].includes(selectedSection) && (
