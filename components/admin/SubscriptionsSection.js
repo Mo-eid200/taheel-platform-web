@@ -1,7 +1,13 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { collection, doc, getDocs, serverTimestamp, setDoc } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDocs,
+  serverTimestamp,
+  setDoc,
+} from "firebase/firestore";
 import { firestore } from "@/lib/firebase.client";
 import {
   Zap,
@@ -172,11 +178,17 @@ function SafeToast({ toast, isAr }) {
     <div
       className={cn(
         "px-3 py-2 rounded-xl text-sm font-extrabold inline-flex items-center gap-2",
-        toast.type === "ok" ? "bg-emerald-500/15 text-emerald-100 border border-emerald-400/20" : "bg-rose-500/15 text-rose-100 border border-rose-400/20",
+        toast.type === "ok"
+          ? "bg-emerald-500/15 text-emerald-100 border border-emerald-400/20"
+          : "bg-rose-500/15 text-rose-100 border border-rose-400/20",
         isAr && "flex-row-reverse"
       )}
     >
-      {toast.type === "ok" ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+      {toast.type === "ok" ? (
+        <CheckCircle2 className="w-4 h-4" />
+      ) : (
+        <AlertTriangle className="w-4 h-4" />
+      )}
       {toast.msg}
     </div>
   );
@@ -189,7 +201,9 @@ function Toggle({ checked, onChange }) {
       onClick={() => onChange(!checked)}
       className={cn(
         "w-12 h-7 rounded-full border transition relative",
-        checked ? "bg-emerald-500/30 border-emerald-400/25" : "bg-white/8 border-white/10"
+        checked
+          ? "bg-emerald-500/30 border-emerald-400/25"
+          : "bg-white/8 border-white/10"
       )}
     >
       <span
@@ -211,7 +225,7 @@ export default function SubscriptionsSection({ lang = "ar" }) {
   const [toast, setToast] = useState(null);
   const [plans, setPlans] = useState([]);
   const [tabByPlan, setTabByPlan] = useState({});
-  const [expanded, setExpanded] = useState({}); // {id:true}
+  const [expanded, setExpanded] = useState({});
   const [query, setQuery] = useState("");
   const [onlyActive, setOnlyActive] = useState(false);
 
@@ -283,13 +297,11 @@ export default function SubscriptionsSection({ lang = "ar" }) {
     const v = String(tag || "").trim().toLowerCase();
     if (!v) return "";
     if (v === "offer" || v === "most") return v;
-    return ""; // ✅ only allow these
+    return "";
   };
 
   const validatePlan = (plan) => {
     const issues = [];
-
-    // pricing sanity + offers rules
     for (const dur of DURATION_ORDER) {
       const v = plan.pricing?.[dur] || {};
       const monthsShown = Number(v.monthsShown ?? 1);
@@ -301,23 +313,14 @@ export default function SubscriptionsSection({ lang = "ar" }) {
       if (paidMonths <= 0) issues.push(`${dur}: paidMonths <= 0`);
       if (bonus < 0) issues.push(`${dur}: bonus < 0`);
 
-      // ✅ Offer allowed only for semiannual/yearly
       if ((tag === "offer" || bonus > 0) && !isOfferDuration(dur)) {
         issues.push(`${dur}: offer/bonus not allowed (only semiannual/yearly)`);
       }
 
-      // ✅ prevent nonsense like monthsShown not matching paid+bonus (optional strict)
-      // Here: we don't force match, but we will cap shown months to a reasonable display:
-      // If you want strict: uncomment next lines.
-      // const total = paidMonths + bonus;
-      // if (monthsShown !== total) issues.push(`${dur}: monthsShown should equal paid+bonus (${total})`);
-
-      // ✅ if tag is "most" it should ideally be yearly
       if (tag === "most" && dur !== "yearly") {
         issues.push(`${dur}: tag 'most' should be yearly`);
       }
     }
-
     return issues;
   };
 
@@ -326,7 +329,6 @@ export default function SubscriptionsSection({ lang = "ar" }) {
       setSavingId(plan.id);
       setToast(null);
 
-      // ✅ sanitize tags + enforce offer rule at save time
       const pricingOut = Object.fromEntries(
         DURATION_ORDER.map((k) => {
           const v = plan.pricing?.[k] || {};
@@ -336,20 +338,17 @@ export default function SubscriptionsSection({ lang = "ar" }) {
 
           let tag = sanitizeTag(v.tag);
 
-          // Offer only semiannual/yearly, and only if bonus>0
           if (!isOfferDuration(k)) {
-            // strip offer & bonus if someone mistakenly set it
-            tag = tag === "most" ? tag : ""; // allow most only if you want; we keep it but validate above
+            tag = tag === "most" ? tag : "";
           }
           const safeBonus = isOfferDuration(k) ? bonus : 0;
-          const safePaid = paidMonths;
 
           return [
             k,
             {
               title: { ar: String(v.title?.ar || ""), en: String(v.title?.en || "") },
               monthsShown: Number(monthsShown ?? 1),
-              paidMonths: Number(safePaid ?? 1),
+              paidMonths: Number(paidMonths ?? 1),
               bonus: Number(safeBonus ?? 0),
               price: Number(v.price ?? 0),
               tag,
@@ -374,7 +373,6 @@ export default function SubscriptionsSection({ lang = "ar" }) {
       };
 
       await setDoc(doc(firestore, COLLECTION, plan.id), payload, { merge: true });
-
       setToast({ type: "ok", msg: t.saved });
     } catch (e) {
       console.error("Save plan error:", e);
@@ -395,8 +393,7 @@ export default function SubscriptionsSection({ lang = "ar" }) {
     return plans.filter((p) => {
       if (onlyActive && !p.isActive) return false;
       if (!q) return true;
-      const hay =
-        `${p.id} ${p.key} ${p.name?.ar || ""} ${p.name?.en || ""} ${p.fit?.ar || ""} ${p.fit?.en || ""}`.toLowerCase();
+      const hay = `${p.id} ${p.key} ${p.name?.ar || ""} ${p.name?.en || ""} ${p.fit?.ar || ""} ${p.fit?.en || ""}`.toLowerCase();
       return hay.includes(q);
     });
   }, [plans, query, onlyActive]);
@@ -476,20 +473,20 @@ export default function SubscriptionsSection({ lang = "ar" }) {
               const yearly = p.pricing?.yearly || {};
               const yearlyTag = String(yearly.tag || "").toLowerCase();
               const badge =
-                yearly.best || yearlyTag === "most"
-                  ? (isAr ? "الأكثر اختيارًا" : "Most chosen")
-                  : null;
+                yearly.best || yearlyTag === "most" ? (isAr ? "الأكثر اختيارًا" : "Most chosen") : null;
 
               return (
                 <div key={p.id} className={cn(softCard, "ring-1", brand.ring, open ? brand.glow : "")}>
-                  {/* top gradient bar */}
                   <div className={cn("h-[5px] bg-gradient-to-r", brand.bar)} />
 
                   {/* header */}
                   <button
                     type="button"
                     onClick={() => setExpanded((prev) => ({ ...prev, [p.id]: !prev[p.id] }))}
-                    className={cn("w-full p-4 sm:p-5 flex items-start justify-between gap-3 text-left cursor-pointer", isAr && "flex-row-reverse text-right")}
+                    className={cn(
+                      "w-full p-4 sm:p-5 flex items-start justify-between gap-3 text-left cursor-pointer",
+                      isAr && "flex-row-reverse text-right"
+                    )}
                   >
                     <div className={cn("flex items-start gap-3 min-w-0", isAr && "flex-row-reverse")}>
                       <div className="w-12 h-12 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center shrink-0">
@@ -513,7 +510,14 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                             PRO
                           </span>
 
-                          <span className={cn("px-2.5 py-1 rounded-full text-[11px] font-extrabold border", isOk ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-200" : "border-amber-400/20 bg-amber-500/10 text-amber-200")}>
+                          <span
+                            className={cn(
+                              "px-2.5 py-1 rounded-full text-[11px] font-extrabold border",
+                              isOk
+                                ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-200"
+                                : "border-amber-400/20 bg-amber-500/10 text-amber-200"
+                            )}
+                          >
                             {isOk ? t.ok : t.fix}
                           </span>
                         </div>
@@ -541,8 +545,12 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                         <Toggle checked={!!p.isActive} onChange={(v) => setField(p.id, { isActive: v })} />
                       </div>
 
-                      <div className={cn("w-10 h-10 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center transition", open ? "rotate-180" : "")}>
-                        {/* chevron visual */}
+                      <div
+                        className={cn(
+                          "w-10 h-10 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center transition",
+                          open ? "rotate-180" : ""
+                        )}
+                      >
                         <span className="text-white/70 font-extrabold">⌄</span>
                       </div>
                     </div>
@@ -551,93 +559,6 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                   {/* expanded content */}
                   {open ? (
                     <div className="px-4 sm:px-5 pb-5">
-                      {/* quick summary */}
-                      <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                        <div className={cn("flex items-center justify-between gap-3", isAr && "flex-row-reverse")}>
-                          <div className="text-white font-extrabold">{t.quickSummary}</div>
-
-                          <button
-                            onClick={() => savePlan(p)}
-                            disabled={savingId === p.id}
-                            className={cn(
-                              "cursor-pointer inline-flex items-center gap-2 px-4 py-2 rounded-xl font-extrabold text-white shadow-sm transition active:scale-[0.98]",
-                              savingId === p.id ? "bg-white/20" : brand.btn
-                            )}
-                          >
-                            <Save className="w-4 h-4" />
-                            {savingId === p.id ? t.saving : t.save}
-                          </button>
-                        </div>
-
-                        {!isOk ? (
-                          <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-500/10 p-3 text-amber-100">
-                            <div className="font-extrabold text-sm">
-                              {isAr ? "ملاحظات" : "Notes"}
-                            </div>
-                            <ul className={cn("mt-2 text-xs font-bold space-y-1", isAr && "text-right")}>
-                              {issues.slice(0, 6).map((x, i) => (
-                                <li key={i}>• {x}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        ) : null}
-
-                        <div className="mt-3 grid grid-cols-1 sm:grid-cols-4 gap-2">
-                          {DURATION_ORDER.map((k) => {
-                            const row = p.pricing?.[k] || {};
-                            const tag = String(row.tag || "").toLowerCase();
-                            const tagLabel = tag === "offer" ? t.offer : tag === "most" ? t.most : "";
-                            const tagOk =
-                              tag === "" ||
-                              (tag === "most" && k === "yearly") ||
-                              (tag === "offer" && isOfferDuration(k));
-
-                            return (
-                              <div
-                                key={k}
-                                className={cn(
-                                  "rounded-2xl border p-3 bg-white/5",
-                                  "border-white/10"
-                                )}
-                              >
-                                <div className={cn("flex items-center justify-between", isAr && "flex-row-reverse")}>
-                                  <div className="text-white/85 font-extrabold text-sm">
-                                    {DUR_LABELS[k][isAr ? "ar" : "en"]}
-                                  </div>
-                                  {tagLabel ? (
-                                    <span
-                                      className={cn(
-                                        "px-2 py-1 rounded-full text-[10px] font-extrabold border",
-                                        tagOk
-                                          ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-200"
-                                          : "border-amber-400/20 bg-amber-500/10 text-amber-200"
-                                      )}
-                                    >
-                                      {tagLabel}
-                                    </span>
-                                  ) : null}
-                                </div>
-
-                                <div className="mt-2 text-white font-extrabold text-xl">
-                                  {Number(row.price || 0).toLocaleString()}
-                                  <span className="text-xs text-white/45 font-bold"> AED</span>
-                                </div>
-
-                                {isOfferDuration(k) && Number(row.bonus || 0) > 0 ? (
-                                  <div className="mt-1 text-[11px] font-extrabold text-amber-200">
-                                    {t.offerLine}: {Number(row.paidMonths || row.monthsShown || 1)} + {Number(row.bonus || 0)}
-                                  </div>
-                                ) : (
-                                  <div className="mt-1 text-[11px] font-bold text-white/45">
-                                    {isAr ? "بدون عرض" : "No offer"}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-
                       {/* tabs */}
                       <div className={cn("mt-4 flex items-center gap-2", isAr && "flex-row-reverse")}>
                         {[
@@ -660,7 +581,6 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                         ))}
                       </div>
 
-                      {/* tab content */}
                       <div className="mt-3">
                         {/* META */}
                         {tab === "meta" ? (
@@ -727,7 +647,6 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                         {/* PERKS */}
                         {tab === "perks" ? (
                           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                            {/* perks ar */}
                             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                               <div className={cn("flex items-center justify-between", isAr && "flex-row-reverse")}>
                                 <div className="text-sm font-extrabold text-white">{t.perksAr}</div>
@@ -768,7 +687,6 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                               </div>
                             </div>
 
-                            {/* perks en */}
                             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                               <div className={cn("flex items-center justify-between", isAr && "flex-row-reverse")}>
                                 <div className="text-sm font-extrabold text-white">{t.perksEn}</div>
@@ -811,7 +729,7 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                           </div>
                         ) : null}
 
-                        {/* PRICING */}
+                        {/* PRICING ✅ (STACKED FIELDS) */}
                         {tab === "pricing" ? (
                           <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                             <div className={cn("flex items-center justify-between gap-3 mb-2", isAr && "flex-row-reverse")}>
@@ -843,7 +761,9 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                                           <span
                                             className={cn(
                                               "px-3 py-1 rounded-full text-[11px] font-extrabold border",
-                                              tagBad ? "border-amber-400/20 bg-amber-500/10 text-amber-200" : "border-emerald-400/20 bg-emerald-500/10 text-emerald-200"
+                                              tagBad
+                                                ? "border-amber-400/20 bg-amber-500/10 text-amber-200"
+                                                : "border-emerald-400/20 bg-emerald-500/10 text-emerald-200"
                                             )}
                                           >
                                             {tagLabel}
@@ -858,31 +778,36 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                                       </div>
                                     </div>
 
-                                    <div className="mt-3 grid grid-cols-2 lg:grid-cols-6 gap-2">
-                                      <div>
-                                        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.monthsShown}</div>
-                                        <input
-                                          type="number"
-                                          value={row.monthsShown ?? 1}
-                                          onChange={(e) =>
-                                            setNested(p.id, ["pricing", k, "monthsShown"], Number(e.target.value || 1))
-                                          }
-                                          className={cn(inputBaseDark, brand.focus)}
-                                        />
+                                    {/* ✅ stacked layout */}
+                                    <div className="mt-3 space-y-3">
+                                      {/* monthsShown + paidMonths */}
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        <div>
+                                          <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.monthsShown}</div>
+                                          <input
+                                            type="number"
+                                            value={row.monthsShown ?? 1}
+                                            onChange={(e) =>
+                                              setNested(p.id, ["pricing", k, "monthsShown"], Number(e.target.value || 1))
+                                            }
+                                            className={cn(inputBaseDark, brand.focus)}
+                                          />
+                                        </div>
+
+                                        <div>
+                                          <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.paidMonths}</div>
+                                          <input
+                                            type="number"
+                                            value={row.paidMonths ?? row.monthsShown ?? 1}
+                                            onChange={(e) =>
+                                              setNested(p.id, ["pricing", k, "paidMonths"], Number(e.target.value || 1))
+                                            }
+                                            className={cn(inputBaseDark, brand.focus)}
+                                          />
+                                        </div>
                                       </div>
 
-                                      <div>
-                                        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.paidMonths}</div>
-                                        <input
-                                          type="number"
-                                          value={row.paidMonths ?? row.monthsShown ?? 1}
-                                          onChange={(e) =>
-                                            setNested(p.id, ["pricing", k, "paidMonths"], Number(e.target.value || 1))
-                                          }
-                                          className={cn(inputBaseDark, brand.focus)}
-                                        />
-                                      </div>
-
+                                      {/* bonus */}
                                       <div>
                                         <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.bonus}</div>
                                         <input
@@ -891,11 +816,7 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                                           onChange={(e) =>
                                             setNested(p.id, ["pricing", k, "bonus"], Number(e.target.value || 0))
                                           }
-                                          className={cn(
-                                            inputBaseDark,
-                                            brand.focus,
-                                            bonusBad ? "border-amber-400/30" : ""
-                                          )}
+                                          className={cn(inputBaseDark, brand.focus, bonusBad ? "border-amber-400/30" : "")}
                                         />
                                         {bonusBad ? (
                                           <div className={cn("mt-1 text-[11px] font-extrabold text-amber-200", isAr && "text-right")}>
@@ -904,6 +825,7 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                                         ) : null}
                                       </div>
 
+                                      {/* price (full width ✅) */}
                                       <div>
                                         <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.price}</div>
                                         <input
@@ -912,37 +834,40 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                                           onChange={(e) =>
                                             setNested(p.id, ["pricing", k, "price"], Number(e.target.value || 0))
                                           }
-                                          className={cn(inputBaseDark, brand.focus,"text-lg tracking-wide")}
+                                          className={cn(inputBaseDark, brand.focus, "text-lg tracking-wide")}
                                         />
                                       </div>
 
-                                      <div>
-                                        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.tag}</div>
-                                        <input
-                                          value={row.tag || ""}
-                                          onChange={(e) =>
-                                            setNested(p.id, ["pricing", k, "tag"], e.target.value.trim().toLowerCase())
-                                          }
-                                          className={cn(inputBaseDark, brand.focus, tagBad ? "border-amber-400/30" : "")}
-                                          placeholder="most / offer"
-                                        />
-                                        {tagBad ? (
-                                          <div className={cn("mt-1 text-[11px] font-extrabold text-amber-200", isAr && "text-right")}>
-                                            {t.helperTag}
-                                          </div>
-                                        ) : null}
-                                      </div>
-
-                                      <div className={cn("flex items-end", isAr && "justify-end")}>
-                                        <label className={cn("cursor-pointer flex items-center gap-2 text-sm font-extrabold text-white/80", isAr && "flex-row-reverse")}>
+                                      {/* tag + best */}
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        <div>
+                                          <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.tag}</div>
                                           <input
-                                            type="checkbox"
-                                            checked={!!row.best}
-                                            onChange={(e) => setNested(p.id, ["pricing", k, "best"], e.target.checked)}
-                                            className="w-5 h-5 cursor-pointer"
+                                            value={row.tag || ""}
+                                            onChange={(e) =>
+                                              setNested(p.id, ["pricing", k, "tag"], e.target.value.trim().toLowerCase())
+                                            }
+                                            className={cn(inputBaseDark, brand.focus, tagBad ? "border-amber-400/30" : "")}
+                                            placeholder="most / offer"
                                           />
-                                          {t.best}
-                                        </label>
+                                          {tagBad ? (
+                                            <div className={cn("mt-1 text-[11px] font-extrabold text-amber-200", isAr && "text-right")}>
+                                              {t.helperTag}
+                                            </div>
+                                          ) : null}
+                                        </div>
+
+                                        <div className={cn("flex items-end", isAr && "justify-end")}>
+                                          <label className={cn("cursor-pointer flex items-center gap-2 text-sm font-extrabold text-white/80", isAr && "flex-row-reverse")}>
+                                            <input
+                                              type="checkbox"
+                                              checked={!!row.best}
+                                              onChange={(e) => setNested(p.id, ["pricing", k, "best"], e.target.checked)}
+                                              className="w-5 h-5 cursor-pointer"
+                                            />
+                                            {t.best}
+                                          </label>
+                                        </div>
                                       </div>
                                     </div>
                                   </div>
