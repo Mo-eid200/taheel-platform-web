@@ -9,7 +9,7 @@ import CompanyPlanCard from "./CompanyPlanCard";
 export default function CompanySubscriptionsSection({
   lang = "ar",
   darkMode = false,
-  onSubscribe, // optional external callback (لو عايز تتحكم من برّه)
+  onSubscribe, // optional external callback
 }) {
   const router = useRouter();
 
@@ -22,7 +22,9 @@ export default function CompanySubscriptionsSection({
     async function load() {
       setLoading(true);
       try {
-        const snap = await getDocs(collection(firestore, "companySubscriptionPlans"));
+        const snap = await getDocs(
+          collection(firestore, "companySubscriptionPlans")
+        );
         const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
         const filtered = arr
@@ -46,10 +48,34 @@ export default function CompanySubscriptionsSection({
 
   // ✅ ده اللي هيتنفّذ لما المستخدم يضغط "اشترك الآن"
   const handleSubscribe = useCallback(
-    async ({ planKey, pricingKey, price, monthsShown, paidMonths, bonus, isOffer, isMost }) => {
-      // لو الأب باعت onSubscribe (من برّه) سيبه هو يتحكم
+    async ({
+      planKey,
+      pricingKey,
+      price,
+      monthsShown,
+      paidMonths,
+      bonus,
+      isOffer,
+      isMost,
+
+      // ✅ optional values from card (لو ضفناهم)
+      subscriptionName,
+      subscriptionDays,
+    }) => {
+      // لو الأب باعت onSubscribe سيبه هو يتحكم
       if (typeof onSubscribe === "function") {
-        return onSubscribe({ planKey, pricingKey, price, monthsShown, paidMonths, bonus, isOffer, isMost });
+        return onSubscribe({
+          planKey,
+          pricingKey,
+          price,
+          monthsShown,
+          paidMonths,
+          bonus,
+          isOffer,
+          isMost,
+          subscriptionName,
+          subscriptionDays,
+        });
       }
 
       try {
@@ -60,21 +86,38 @@ export default function CompanySubscriptionsSection({
           return;
         }
 
+        // ✅ مدة الاشتراك بالأيام (لو مش مبعوتة نحسبها من monthsShown)
+        const days =
+          Number(subscriptionDays || 0) > 0
+            ? Number(subscriptionDays)
+            : Number(monthsShown || 0) > 0
+            ? Number(monthsShown) * 30
+            : 0;
+
+        const subName =
+          subscriptionName ||
+          (lang === "ar" ? `اشتراك ${planKey}` : `Subscription ${planKey}`);
+
         // ✅ نفس ستايل دفع الخدمات: create payment intent
         const payload = {
-          amount: Number(price), // AED
-          serviceId: `subscription_${planKey}`, // ✅ خليها underscore عشان detect يبقى ثابت
-          serviceName: lang === "ar" ? `اشتراك ${planKey}` : `Subscription ${planKey}`,
-          customerId: user.uid, // نفس doc id في users
+          amount: Number(price), // AED (قيمة الاشتراك فقط)
+          serviceId: `subscription_${planKey}`, // ✅ underscore
+          serviceName: subName,
+
+          customerId: user.uid,
           userEmail: user.email,
           clientType: "company",
           attachments: {},
           providers: [],
           requestType: "subscription",
 
+          // ✅ لا VAT ولا طباعة ولا كوينز في الاشتراك
           coinsUsed: 0,
           coinsGiven: 0,
           printingFee: 0,
+          vat: 0,
+
+          // ✅ رسوم Stripe هتيجي من السيرفر (processingFee)
           processingFee: 0,
 
           assignedTo: "",
@@ -82,7 +125,7 @@ export default function CompanySubscriptionsSection({
           status: "pending",
           employeeData: {},
 
-          // ✅ مهم للاشتراك (هتحتاجه في الويبهوك/confirm)
+          // ✅ بيانات الاشتراك
           planKey,
           pricingKey,
           monthsShown,
@@ -90,6 +133,8 @@ export default function CompanySubscriptionsSection({
           bonus,
           isOffer,
           isMost,
+          subscriptionDays: days,
+          subscriptionName: subName,
           lang,
         };
 
@@ -100,38 +145,46 @@ export default function CompanySubscriptionsSection({
         });
 
         const data = await r.json();
-        if (!r.ok || !data?.ok) throw new Error(data?.error || "Failed to create payment intent");
+        if (!r.ok || !data?.ok)
+          throw new Error(data?.error || "Failed to create payment intent");
 
-        // ✅ جهّز paymentData لصفحة /payment/service (نفس منطق الخدمات)
-        const subscriptionDays = Math.round(Number(monthsShown || 0) * 30); // باليوم
+        // ✅ هنا التعديل المهم:
+        // نخزن paymentData ونروح لنفس بوابة دفع الخدمات: /payment/service
+        const processingFeeFromServer = Number(data?.processingFee ?? 0);
+        const totalBefore = Number(price);
+        const final = Number(data?.finalPrice ?? totalBefore + processingFeeFromServer);
 
-        const paymentData = {
+        const paymentDataForUI = {
+          lang,
+          requestType: "subscription",
+
+          // required by payment page:
           clientSecret: data.clientSecret,
           orderNumber: data.orderNumber,
-          userEmail: user.email,
-          lang,
 
-          requestType: "subscription",
+          // display:
+          serviceId: `subscription_${planKey}`,
+          serviceName: subName,
+          subscriptionName: subName,
           planKey,
           pricingKey,
-          subscriptionName: lang === "ar" ? `اشتراك ${planKey}` : `Subscription ${planKey}`,
-          subscriptionDays,
+          subscriptionDays: days,
 
-          // مبالغ
-          price: Number(price),
-          totalPrice: Number(price),
-          finalPrice: Number(price),
+          price: totalBefore, // قيمة الاشتراك
+          totalPrice: totalBefore, // قبل رسوم Stripe
+          finalPrice: final, // بعد رسوم Stripe
 
-          // رسوم
-          processingFee: 0,
           printingFee: 0,
           vat: 0,
           coinDiscount: 0,
+          processingFee: processingFeeFromServer,
+
+          userEmail: user.email,
         };
 
-        localStorage.setItem("paymentData", JSON.stringify(paymentData));
+        localStorage.setItem("paymentData", JSON.stringify(paymentDataForUI));
 
-        // ✅ روح لنفس صفحة دفع الخدمات
+        // ✅ نفس صفحة الخدمات بالظبط
         router.push("/payment/service");
       } catch (e) {
         console.error("subscribe failed:", e);
@@ -167,7 +220,7 @@ export default function CompanySubscriptionsSection({
             plan={plan}
             lang={lang}
             darkMode={darkMode}
-            onSubscribe={handleSubscribe} // ✅ هنا الربط الحقيقي
+            onSubscribe={handleSubscribe} // ✅ الربط الحقيقي
           />
         ))}
       </div>

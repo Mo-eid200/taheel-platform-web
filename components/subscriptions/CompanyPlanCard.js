@@ -449,6 +449,8 @@ export default function CompanyPlanCard({ plan, lang = "ar", darkMode = true, on
                   bonus,
                   isOffer: showOffer,
                   isMost: showMost,
+                  subscriptionName: title,
+                  subscriptionDays: monthsShown > 0 ? monthsShown * 30 : 0,
                 })
               }
               className={cn(
