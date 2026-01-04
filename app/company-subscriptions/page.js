@@ -44,7 +44,6 @@ function safeArray(x) {
 
 /* =========================
    ✅ Offer logic (ONLY semiannual + yearly)
-   - No more nonsense like "pay 3 + 7 free"
    - Offer = paidMonths + bonus => total months
 ========================= */
 function isOfferDuration(durKey) {
@@ -131,6 +130,11 @@ const DEFAULT_BRAND = {
 
 const DURATION_ORDER = { monthly: 1, quarterly: 2, semiannual: 3, yearly: 4 };
 const PACKAGE_ORDER = { starter: 1, growth: 2, scale: 3, enterprise: 4 };
+
+// ✅ chip label helper
+function packageLabel(key) {
+  return String(key || "").toUpperCase();
+}
 
 export default function CompanySubscriptionsPage() {
   const sp = useSearchParams();
@@ -245,7 +249,7 @@ export default function CompanySubscriptionsPage() {
               return {
                 key: durKey,
                 title,
-                monthsShown, // (display months if you keep using it)
+                monthsShown,
                 paidMonths,
                 bonus,
                 price,
@@ -310,7 +314,6 @@ export default function CompanySubscriptionsPage() {
     qs.set("package", pkgObj.key);
     qs.set("duration", durationObj.key);
     qs.set("price", String(durationObj.price));
-    // ✅ months that user actually gets = paid + bonus (only if offer, else use monthsShown)
     const totalMonths = Number(durationObj.paidMonths || 0) + Number(durationObj.bonus || 0);
     qs.set("months", String(totalMonths || durationObj.monthsShown || 1));
     router.push(`/login?${qs.toString()}`);
@@ -353,7 +356,6 @@ export default function CompanySubscriptionsPage() {
 
               <div className={cn("hidden sm:block", isArabic && "text-right")}>
                 <div className="text-white font-extrabold leading-none">{t.pageTitle}</div>
-                {/* ✅ removed PRO line */}
               </div>
             </div>
           </div>
@@ -420,6 +422,17 @@ export default function CompanySubscriptionsPage() {
                             <div className="text-white font-extrabold text-lg sm:text-xl truncate max-w-[70vw] sm:max-w-[420px]">
                               {asText(p.name, p.key)}
                             </div>
+
+                            {/* ✅ Package key chip (starter/growth/scale/enterprise) colored per plan */}
+                            <span
+                              className={cn(
+                                "inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-[11px] font-extrabold border",
+                                p.brand?.pill || "bg-white/8 border-white/15 text-white/80"
+                              )}
+                            >
+                              <span className={cn("w-2 h-2 rounded-full", p.brand?.dot || "bg-white/40")} />
+                              {packageLabel(p.key)}
+                            </span>
                           </div>
 
                           {p.fit ? (
@@ -431,7 +444,6 @@ export default function CompanySubscriptionsPage() {
                       </div>
 
                       <div className={cn("flex items-center gap-3 shrink-0", isArabic && "flex-row-reverse")}>
-                        {/* ✅ removed PRO pill */}
                         <ChevronDown className={cn("w-5 h-5 text-white/60 transition", isOpen ? "rotate-180" : "")} />
                       </div>
                     </button>
@@ -468,7 +480,6 @@ export default function CompanySubscriptionsPage() {
                                             : "border-white/10 hover:border-white/20 hover:bg-white/7"
                                         )}
                                       >
-                                        {/* ✅ Show Special Offer badge ONLY for semiannual/yearly and only if bonus>0 */}
                                         {d.hasOffer ? (
                                           <div className={cn("absolute -top-3 z-20", isArabic ? "right-3" : "left-3")}>
                                             <span className="px-3 py-1 rounded-full text-[11px] font-extrabold shadow border bg-amber-400 text-black border-amber-200/40">
@@ -479,14 +490,12 @@ export default function CompanySubscriptionsPage() {
 
                                         <div className="text-white font-extrabold text-base">{asText(d.title, d.key)}</div>
 
-                                        {/* ✅ Offer line (Pay X + Y free = Z) ONLY for semiannual/yearly */}
                                         {d.hasOffer ? (
-                                          <div className="mt-1 text-[12px] font-extrabold text-amber-200">
-                                            {d.offerLine}
-                                          </div>
+                                          <div className="mt-1 text-[12px] font-extrabold text-amber-200">{d.offerLine}</div>
                                         ) : (
                                           <div className="mt-1 text-[12px] text-white/60 font-semibold">
-                                            {Number(d.monthsShown || 1)} {Number(d.monthsShown || 1) === 1 ? t.month : t.months}
+                                            {Number(d.monthsShown || 1)}{" "}
+                                            {Number(d.monthsShown || 1) === 1 ? t.month : t.months}
                                           </div>
                                         )}
 
@@ -523,9 +532,7 @@ export default function CompanySubscriptionsPage() {
 
                                 <div className="mt-4 rounded-2xl bg-white/6 border border-white/10 p-4">
                                   <div className="text-white/55 text-xs">{t.duration}</div>
-                                  <div className="mt-1 text-white font-extrabold">
-                                    {asText(selectedDur?.title, "")}
-                                  </div>
+                                  <div className="mt-1 text-white font-extrabold">{asText(selectedDur?.title, "")}</div>
 
                                   <div className="mt-2 text-white/60 text-sm">
                                     {selectedDur?.hasOffer ? (
@@ -540,7 +547,10 @@ export default function CompanySubscriptionsPage() {
                                   <div className="text-white font-extrabold mb-3">{t.perks}</div>
                                   <div className="space-y-2 text-sm text-white/80">
                                     {safeArray(p.perks).map((x, i) => (
-                                      <div key={i} className={cn("flex items-start gap-2", isArabic && "flex-row-reverse text-right")}>
+                                      <div
+                                        key={i}
+                                        className={cn("flex items-start gap-2", isArabic && "flex-row-reverse text-right")}
+                                      >
                                         <Check className="w-4 h-4 text-emerald-300 mt-[2px] shrink-0" />
                                         <span className="break-words">{asText(x, "")}</span>
                                       </div>
@@ -588,8 +598,20 @@ export default function CompanySubscriptionsPage() {
             <div className={cn("flex items-center justify-between gap-3", isArabic && "flex-row-reverse")}>
               <div className={cn("min-w-0", isArabic && "text-right")}>
                 <div className="text-[11px] text-white/55 font-bold">
-                  {t.package}: <span className="text-white/85">{asText(pkgObj?.name, "")}</span> • {t.duration}:{" "}
-                  <span className="text-white/85">{asText(durationObj?.title, "")}</span>
+                  {t.package}: <span className="text-white/85">{asText(pkgObj?.name, "")}</span>
+                  {/* ✅ package chip in bottom bar */}
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-2 px-2 py-0.5 rounded-full text-[10px] font-extrabold border",
+                      isArabic ? "mr-2" : "ml-2",
+                      pkgObj?.brand?.pill || "bg-white/8 border-white/15 text-white/80"
+                    )}
+                  >
+                    <span className={cn("w-2 h-2 rounded-full", pkgObj?.brand?.dot || "bg-white/40")} />
+                    {packageLabel(pkgObj?.key)}
+                  </span>
+                  {" • "}
+                  {t.duration}: <span className="text-white/85">{asText(durationObj?.title, "")}</span>
                 </div>
 
                 {durationObj?.hasOffer ? (
