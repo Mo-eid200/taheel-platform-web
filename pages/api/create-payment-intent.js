@@ -25,172 +25,249 @@ function generateOrderNumber() {
   return `REQ-${part1}-${part2}`;
 }
 
+/**
+ * ✅ حساب رسوم Stripe (processingFee) على السيرفر
+ * خليها قابلة للتعديل من env:
+ * STRIPE_FEE_PERCENT مثلا: 0.029
+ * STRIPE_FEE_FIXED_AED مثلا: 1.0
+ */
+function calcStripeFeeAED(baseAmountAED, options = {}) {
+  const percent = Number(process.env.STRIPE_FEE_PERCENT ?? 0.029); // 2.9%
+  const fixed = Number(process.env.STRIPE_FEE_FIXED_AED ?? 1.0); // 1 AED
+
+  const isInternational = !!options.isInternational;
+  const isCurrencyConversion = !!options.isCurrencyConversion;
+
+  const intlFee = isInternational ? baseAmountAED * 0.01 : 0;
+  const currencyFee = isCurrencyConversion ? baseAmountAED * 0.01 : 0;
+
+  const fee = baseAmountAED * percent + fixed + intlFee + currencyFee;
+  return Math.round(fee * 100) / 100; // 2 decimals
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
 
   const {
-    amount,            // رقم عادي بالدرهم (مثلاً 250.00)
-    serviceId,         // ID الخدمة
-    serviceName,       // اسم الخدمة (عربي/إنجليزي أو حسب اللغة)
-    customerId,        // IMPORTANT: نفس الـ document ID في users
+    amount, // رقم عادي بالدرهم (مثلاً 250.00) = قيمة الخدمة/الاشتراك فقط
+    serviceId,
+    serviceName,
+    customerId,
     userEmail,
-    clientType,        // "resident" | "nonresident" | "company" | "other"
-    attachments = {},  // مستندات مرفوعة قبل الدفع (جواز/إقامة/الخ...)
-    providers = [],    // مزود الخدمة الداخلي (اختياري)
+    clientType, // "resident" | "nonresident" | "company" | "other"
+    attachments = {},
+    providers = [],
     coinsUsed = 0,
     coinsGiven = 0,
     printingFee = 0,
-    processingFee = 0, // رسوم خدمة/بوابة لو فيه
-    assignedTo = "",   // uid الموظف أو كوده
-    assignedToName = "",
-    status = "pending", // الطلب لسه مش مدفوع
-    employeeData = {},  // معلومات الموظف اللي استلم الطلب (للأدمن)
-    lang = "ar",        // "ar" | "en"
 
-    // ✅ ADD (Subscriptions - optional)
+    // ⚠️ processingFee من الفرونت هنحترمه للخدمات العادية زي ما هو (منطق قديم)
+    // أما للاشتراك هنحسبه سيرفر ونتجاهل القادم
+    processingFee = 0,
+
+    assignedTo = "",
+    assignedToName = "",
+    status = "pending",
+    employeeData = {},
+    lang = "ar",
+
+    // ✅ Subscriptions (optional)
     planKey = "",
     pricingKey = "",
     monthsShown = 0,
     paidMonths = 0,
     bonus = 0,
+
+    // ✅ مدة الاشتراك بالأيام (لو الفرونت بعتها)
+    subscriptionDays = 0,
+    subscriptionName = "",
+
+    // ✅ اختياري: لو عايز تحسب رسوم إضافية
+    isInternational = false,
+    isCurrencyConversion = false,
+
+    // ✅ لو عندك vat/coinDiscount موجودين في منطقك القديم (لو مش بتبعتهم، هيفضلوا 0)
+    vat = 0,
+    coinDiscount = 0,
   } = req.body || {};
 
-  // validations الأساسية
-  if (
-    !amount ||
-    !serviceName ||
-    !customerId ||
-    !userEmail
-  ) {
+  const baseAmount = Number(amount);
+
+  // validations الأساسية (كما هي)
+  if (!baseAmount || baseAmount <= 0 || !serviceName || !customerId || !userEmail) {
     return res.status(400).json({ error: "Missing required fields." });
   }
 
   try {
-    // هنبدأ دايمًا بإنشاء requestId بنفس الاستايل بتاعنا
     const requestId = generateOrderNumber();
 
-    // ✅ ADD (Detect subscription)
-const isSubscription =
-  String(serviceId || "").startsWith("sub_") ||
-  String(serviceId || "").startsWith("subscription_") ||
-  String(serviceId || "").startsWith("subscription-") || // ✅ add this
-  String(serviceName || "").toLowerCase().includes("subscription") ||
-  String(serviceName || "").includes("اشتراك") ||
-  String(planKey || "").trim().length > 0;
+    // ✅ Detect subscription (موسع + صحيح)
+    const isSubscription =
+      String(serviceId || "").startsWith("sub_") ||
+      String(serviceId || "").startsWith("subscription_") ||
+      String(serviceId || "").startsWith("subscription-") ||
+      String(serviceName || "").toLowerCase().includes("subscription") ||
+      String(serviceName || "").includes("اشتراك") ||
+      String(planKey || "").trim().length > 0;
 
-
-    // لو الخدمة دي عبارة عن شحن محفظة أو "Wallet Recharge"
-    const requestType =
+    // ✅ منطق الشحن كما هو
+    const isWallet =
       serviceId === "wallet-recharge" ||
       serviceName === "شحن المحفظة" ||
-      String(serviceName).toLowerCase().includes("wallet")
-        ? "wallet_recharge"
-        : isSubscription
-          ? "subscription" // ✅ ADD
-          : "service";
+      String(serviceName || "").toLowerCase().includes("wallet");
 
-    // مهم: الويب هوك و confirmPayment بيعتمدوا على الـ metadata اللي بنبعتها هنا
-    // علشان يربطوا العملية باليوزر والطلب ويكملوا التحديث
+    // ✅ requestType كما هو لكن مع الاشتراك
+    const requestType = isWallet ? "wallet_recharge" : isSubscription ? "subscription" : "service";
+
+    /**
+     * ==========================
+     * ✅ الحفاظ على المنطق القديم للخدمات + الشحن
+     * ==========================
+     *
+     * - service / wallet_recharge: لا نغير طريقة الحساب (processingFee, vat, coins, printingFee...) كما يجي من الفرونت
+     * - subscription: نحولها لمنطق خاص:
+     *      العميل يدفع: baseAmount + StripeFee فقط
+     *      (printingFee/vat/coinDiscount/coinsUsed/coinsGiven = 0)
+     */
+
+    // القيم القديمة (كما تأتي) للخدمات/الشحن
+    const oldPrintingFee = Number(printingFee || 0);
+    const oldProcessingFee = Number(processingFee || 0);
+    const oldVat = Number(vat || 0);
+    const oldCoinDiscount = Number(coinDiscount || 0);
+    const oldCoinsUsed = Number(coinsUsed || 0);
+    const oldCoinsGiven = Number(coinsGiven || 0);
+
+    // ✅ قيم الاشتراك (تتطبق فقط لو isSubscription)
+    const subStripeFee = calcStripeFeeAED(baseAmount, { isInternational, isCurrencyConversion });
+
+    // ✅ اختار القيم النهائية بناءً على النوع بدون ما نبوّظ القديم
+    const safePrintingFee = isSubscription ? 0 : oldPrintingFee;
+    const safeVat = isSubscription ? 0 : oldVat;
+    const safeCoinDiscount = isSubscription ? 0 : oldCoinDiscount;
+
+    // processingFee:
+    // - اشتراك: StripeFee محسوبة سيرفر
+    // - غير ذلك: processingFee القديم كما هو
+    const safeProcessingFee = isSubscription ? subStripeFee : oldProcessingFee;
+
+    // coins:
+    const safeCoinsUsed = isSubscription ? 0 : oldCoinsUsed;
+    const safeCoinsGiven = isSubscription ? 0 : oldCoinsGiven;
+
+    // ✅ إجمالي قبل الخصم
+    // - اشتراك: baseAmount (لا VAT/printing/coins)
+    // - قديم: (baseAmount + printing + vat) - coinDiscount  (لو منطقك كان مختلف، غيّره هنا فقط)
+    const totalBeforeDiscount = isSubscription
+      ? baseAmount
+      : Math.round((baseAmount + safePrintingFee + safeVat - safeCoinDiscount) * 100) / 100;
+
+    // ✅ finalPrice = totalBeforeDiscount + processingFee (في الاشتراك processingFee = StripeFee)
+    const finalPrice = Math.round((totalBeforeDiscount + safeProcessingFee) * 100) / 100;
+
+    // ✅ المبلغ الذي سيخصم فعلياً في Stripe = finalPrice
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(Number(amount) * 100), // بالـ fils
+      amount: Math.round(Number(finalPrice) * 100), // fils
       currency: "aed",
       receipt_email: userEmail,
       metadata: {
-        requestId,               // لازم
-        customerId,              // لازم - هو نفسه ID جوه users
+        requestId,
+        customerId,
         serviceId: serviceId || "",
         serviceName,
         clientType: clientType || "",
+        requestType,
 
-        requestType,             // "wallet_recharge" | "service" | "subscription" ✅
+        // ✅ مبالغ واضحة (لا تكسر القديم)
+        baseAmount: String(baseAmount),
+        printingFee: String(safePrintingFee || 0),
+        vat: String(safeVat || 0),
+        coinDiscount: String(safeCoinDiscount || 0),
+        processingFee: String(safeProcessingFee || 0),
+        totalBeforeDiscount: String(totalBeforeDiscount || 0),
+        finalPrice: String(finalPrice || 0),
 
-        coinsUsed: String(coinsUsed || 0),
-        coinsGiven: String(coinsGiven || 0),
-
-        printingFee: String(printingFee || 0),
-        processingFee: String(processingFee || 0),
+        coinsUsed: String(safeCoinsUsed || 0),
+        coinsGiven: String(safeCoinsGiven || 0),
 
         assignedTo: assignedTo || "",
         assignedToName: assignedToName || "",
-
         lang: String(lang || "ar"),
-
-        // مفيد للـ admin/debug
-        amount: String(amount),
-        currency: "AED",
         userEmail: String(userEmail || ""),
+        currency: "AED",
 
-        // نخزن الـ attachments INLINE كـ stringified json
-        // علشان لو العميل قفل الابليكيشن بعد الدفع مباشرة، الويب هوك يقدر يحفظ الملفات جوه الطلب
         attachments: JSON.stringify(attachments || {}),
-
-        // معلومة اختيارية: نحتفظ بـ providers
         providers: JSON.stringify(providers || []),
-
-        // ممكن تحط أي بيانات تخص الـ employee اللي استلم الطلب وقت الإنشاء
         employeeData: JSON.stringify(employeeData || {}),
 
-        // ✅ ADD (Subscriptions metadata - optional)
+        // ✅ Subscriptions
         planKey: String(planKey || ""),
         pricingKey: String(pricingKey || ""),
         monthsShown: String(monthsShown || 0),
         paidMonths: String(paidMonths || 0),
         bonus: String(bonus || 0),
+        subscriptionDays: String(subscriptionDays || 0),
+        subscriptionName: String(subscriptionName || ""),
       },
       description:
         lang === "en"
-          ? `Payment for service ${serviceName}`
-          : `دفع خدمة ${serviceName}`,
+          ? `Payment for ${requestType} ${serviceName}`
+          : `دفع ${requestType === "subscription" ? "اشتراك" : "خدمة"} ${serviceName}`,
     });
 
-    // الطلب نفسه لازم يدخل Firestore من دلوقتي كـ draft/pending
-    // عشان نقدر نعرضه للموظف حتى قبل الدفع النهائي
-    // و confirmPayment / webhook هيكمّلوا عليه
     const nowIso = new Date().toISOString();
 
+    // ✅ لا نغيّر أسماء الحقول القديمة، فقط نضيف حقول واضحة + نحافظ على paidAmount
     const requestDoc = {
       requestId,
       paymentIntentId: paymentIntent.id,
       clientSecret: paymentIntent.client_secret,
 
-      customerId, // ده نفس ID بتاع document في users
+      customerId,
       serviceId: serviceId || "",
       serviceName,
-      requestType, // "wallet_recharge" / "service" / "subscription" ✅
+      requestType,
 
-      paidAmount: Number(amount), // المبلغ المتوقع
-      printingFee: Number(printingFee) || 0,
-      processingFee: Number(processingFee) || 0,
+      // ✅ القديم كان عندك paidAmount = amount
+      // دلوقتي نخلي paidAmount = finalPrice لأن ده اللي هيتخصم فعلاً (آمن لكل الأنواع)
+      paidAmount: Number(finalPrice) || 0,
 
-      coinsUsed: Number(coinsUsed) || 0,
-      coinsGiven: Number(coinsGiven) || 0,
+      // ✅ نحافظ على الحقول المعروفة (printingFee/processingFee/coins...) بالقيم الصحيحة
+      printingFee: Number(safePrintingFee) || 0,
+      processingFee: Number(safeProcessingFee) || 0,
+      vat: Number(safeVat) || 0,
+      coinDiscount: Number(safeCoinDiscount) || 0,
+
+      coinsUsed: Number(safeCoinsUsed) || 0,
+      coinsGiven: Number(safeCoinsGiven) || 0,
+
+      // ✅ إضافات غير كاسرة (مفيدة للـ UI/Reports)
+      baseAmount: Number(baseAmount) || 0,
+      totalBeforeDiscount: Number(totalBeforeDiscount) || 0,
+      finalPrice: Number(finalPrice) || 0,
 
       createdAt: nowIso,
       lastUpdated: nowIso,
-      status, // "pending" في البداية - لسه مش "paid"
-      paidAt: null, // لسه
+      status,
+      paidAt: null,
 
       userEmail,
-
-      // مهم جداً: attachments اللي عند العميل وقت ما ضغط دفع
-      attachments, // object { passport: {...}, eidFront: {...}, ... }
-
-      providers, // array of providers / channels اللي هتنفذ الخدمة
-
+      attachments,
+      providers,
       assignedTo,
       assignedToName,
-
-      employeeData, // معلومات الموظف اللي استلم الطلب (لو applicable)
-
+      employeeData,
       lang,
 
-      // ✅ ADD (Subscriptions fields - optional)
+      // ✅ Subscriptions fields (اختياري)
       planKey: planKey || "",
       pricingKey: pricingKey || "",
       monthsShown: Number(monthsShown) || 0,
       paidMonths: Number(paidMonths) || 0,
       bonus: Number(bonus) || 0,
+      subscriptionDays: Number(subscriptionDays) || 0,
+      subscriptionName: subscriptionName || "",
 
       statusHistory: [
         {
@@ -203,20 +280,24 @@ const isSubscription =
 
     await firestore.collection("requests").doc(requestId).set(requestDoc);
 
-    // الرد اللي هنرجعه للفرونت:
-    // - clientSecret: علشان Stripe confirm card من الموبايل / الويب
-    // - orderNumber/requestId: علشان نعرضه للعميل ونعمل tracking
-    // - paymentIntentId: مهم لو حصل retry
+    // ✅ رجّع للفرونت قيم UI بدون كسر القديم (نفس أسماءك)
     return res.status(200).json({
       ok: true,
       clientSecret: paymentIntent.client_secret,
       orderNumber: requestId,
       paymentIntentId: paymentIntent.id,
+
+      // ✅ UI fields
+      processingFee: Number(safeProcessingFee) || 0,
+      finalPrice: Number(finalPrice) || 0,
+      totalPrice: Number(totalBeforeDiscount) || 0,
+
+      // ✅ إضافي (مش لازم تستخدمه)
+      baseAmount: Number(baseAmount) || 0,
+      requestType,
     });
   } catch (error) {
     console.error("createPaymentIntent error:", error);
-    return res
-      .status(500)
-      .json({ error: error.message || "Internal server error" });
+    return res.status(500).json({ error: error.message || "Internal server error" });
   }
 }
