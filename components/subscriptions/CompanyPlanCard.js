@@ -453,7 +453,7 @@ export default function CompanyPlanCard({ plan, lang = "ar", darkMode = true, on
               }
               className={cn(
                 "mt-6 w-full py-3 rounded-full font-extrabold shadow-lg transition hover:scale-[1.02] active:scale-[0.99]",
-                canSubscribe ? `bg-gradient-to-r ${theme.btn}` : "bg-gray-500/40 text-white/60 cursor-not-allowed"
+                canSubscribe ? `cursor-pointer bg-gradient-to-r ${theme.btn}` : "cursor-not-allowed bg-gray-500/40 text-white/60"
               )}
             >
               {lang === "ar" ? "اشترك الآن" : "Subscribe Now"}
