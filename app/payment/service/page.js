@@ -35,7 +35,7 @@ const LANG = {
     total: "Total",
     processing: "Processing...",
 
-    // ✅ ADD (Subscription labels)
+    // ✅ Subscription labels
     subTitle: "Pay for Subscription",
     subName: "Subscription",
     subDays: "Duration (Days)",
@@ -57,7 +57,7 @@ const LANG = {
     total: "الإجمالي",
     processing: "جارٍ الدفع...",
 
-    // ✅ ADD (Subscription labels)
+    // ✅ Subscription labels
     subTitle: "دفع الاشتراك",
     subName: "الاشتراك",
     subDays: "المدة (بالأيام)",
@@ -73,7 +73,9 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
   const [payMsg, setPayMsg] = useState("");
   const [msgSuccess, setMsgSuccess] = useState(false);
 
+  // ✅ اسم الخدمة/الاشتراك
   const serviceName =
+    paymentData?.subscriptionName ||
     paymentData?.service?.name ||
     paymentData?.serviceName ||
     "اسم غير متوفر";
@@ -106,9 +108,7 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
     paymentData?.finalPrice ?? paymentData?.price ?? 0
   );
 
-  const processingFee = Number(
-    paymentData?.processingFee ?? 0
-  );
+  const processingFee = Number(paymentData?.processingFee ?? 0);
 
   const orderNumber = paymentData?.orderNumber;
   const clientSecret = paymentData?.clientSecret;
@@ -120,15 +120,19 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
 
   const dir = lang === "ar" ? "rtl" : "ltr";
 
-  // ✅ ADD (Detect subscription + fields)
+  // ✅ Detect subscription + fields
   const isSubscription =
     String(paymentData?.requestType || "").toLowerCase() === "subscription" ||
     !!paymentData?.planKey ||
     String(paymentData?.serviceId || "").startsWith("subscription-") ||
+    String(paymentData?.serviceId || "").startsWith("subscription_") || // ✅ ADD
     String(paymentData?.serviceName || "").includes("اشتراك") ||
     String(paymentData?.serviceName || "").toLowerCase().includes("subscription");
 
-  const planKey = paymentData?.planKey || paymentData?.subscriptionName || "";
+  const planKey =
+    paymentData?.planKey ||
+    paymentData?.subscriptionName ||
+    "";
 
   // مدة الاشتراك بالأيام (الأولوية: subscriptionDays)
   const subscriptionDays = Number(
@@ -156,16 +160,13 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
     }
     if (!clientSecret) {
       setPayMsg(
-        lang === "ar"
-          ? "بيانات الدفع ناقصة."
-          : "Missing payment data."
+        lang === "ar" ? "بيانات الدفع ناقصة." : "Missing payment data."
       );
       setLoading(false);
       return;
     }
 
     try {
-      // خطوة الخصم الفعلي من البطاقة
       const { error: stripeError, paymentIntent } =
         await stripe.confirmCardPayment(clientSecret, {
           payment_method: {
@@ -176,48 +177,30 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
       if (stripeError) {
         setPayMsg(
           stripeError.message ||
-            (lang === "ar"
-              ? "فشل الدفع."
-              : "Payment failed.")
+            (lang === "ar" ? "فشل الدفع." : "Payment failed.")
         );
         setLoading(false);
         return;
       }
 
       if (!paymentIntent) {
-        setPayMsg(
-          lang === "ar"
-            ? "لم يتم استلام نتيجة الدفع."
-            : "No payment result."
-        );
+        setPayMsg(lang === "ar" ? "لم يتم استلام نتيجة الدفع." : "No payment result.");
         setLoading(false);
         return;
       }
 
-      if (
-        String(paymentIntent.status).toLowerCase() !==
-        "succeeded"
-      ) {
-        setPayMsg(
-          (lang === "ar" ? "الحالة: " : "Status: ") +
-            paymentIntent.status
-        );
+      if (String(paymentIntent.status).toLowerCase() !== "succeeded") {
+        setPayMsg((lang === "ar" ? "الحالة: " : "Status: ") + paymentIntent.status);
         setLoading(false);
         return;
       }
 
-      // بعد نجاح الدفع:
-      // 1) نخبر السيرفر إنه يؤكد الطلب ويعمل:
-      //    - تحديث الطلب في requests
-      //    - تحديث المحفظة / coins
-      //    - إنشاء notification + transaction
+      // 1) confirmPayment
       (async () => {
         try {
           await fetch("/api/confirmPayment", {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               paymentIntentId: paymentIntent.id,
               requestId: orderNumber ?? null,
@@ -228,14 +211,12 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
         }
       })();
 
-      // 2) نبعت الإيميل للعميل (اختياري/غير مانع)
+      // 2) send email
       (async () => {
         try {
           await fetch("/api/sendOrderEmail", {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               to: userEmail,
               orderNumber,
@@ -250,7 +231,7 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
               paymentMethod: "gateway",
               lang,
 
-              // ✅ ADD (Subscription info - non-breaking)
+              // ✅ Subscription info (non-breaking)
               requestType: isSubscription ? "subscription" : "service",
               planKey: planKey || "",
               subscriptionDays: subDaysToShow || 0,
@@ -261,41 +242,26 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
         }
       })();
 
-      // 3) UI: أظهر رسالة نجاح، وبعدها روّح صفحة النجاح
+      // 3) UI
       setMsgSuccess(true);
       setPayMsg(LANG[lang].success);
 
       setTimeout(() => {
-        const orderForRedirect =
-          orderNumber || null;
+        const orderForRedirect = orderNumber || null;
+
         if (orderForRedirect) {
-          router.push(
-            `/payment/PaymentSuccess?order=${encodeURIComponent(
-              orderForRedirect
-            )}`
-          );
+          router.push(`/payment/PaymentSuccess?order=${encodeURIComponent(orderForRedirect)}`);
         } else {
-          router.push(
-            `/payment/PaymentSuccess?pi=${encodeURIComponent(
-              paymentIntent.id
-            )}`
-          );
+          router.push(`/payment/PaymentSuccess?pi=${encodeURIComponent(paymentIntent.id)}`);
         }
 
         if (typeof onSuccess === "function") {
-          onSuccess(
-            paymentIntent.id,
-            orderForRedirect
-          );
+          onSuccess(paymentIntent.id, orderForRedirect);
         }
       }, 700);
     } catch (err) {
       console.error("Payment flow error:", err);
-      setPayMsg(
-        lang === "ar"
-          ? "حدث خطأ أثناء معالجة الدفع."
-          : "Unexpected payment error."
-      );
+      setPayMsg(lang === "ar" ? "حدث خطأ أثناء معالجة الدفع." : "Unexpected payment error.");
     } finally {
       setLoading(false);
     }
@@ -332,110 +298,68 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
         <table className="w-full text-sm text-right mb-2 border-separate border-spacing-y-1">
           <tbody>
             <tr>
-              <td className="text-gray-300">
-                {LANG[lang].service}:
-              </td>
-              <td className="text-emerald-200 font-bold">
-                {serviceName}
-              </td>
+              <td className="text-gray-300">{LANG[lang].service}:</td>
+              <td className="text-emerald-200 font-bold">{serviceName}</td>
             </tr>
 
-            {/* ✅ ADD (Subscription details UI) */}
             {isSubscription && (
               <>
                 <tr>
-                  <td className="text-gray-300">
-                    {LANG[lang].subName}:
-                  </td>
-                  <td className="text-emerald-200 font-bold">
-                    {planKey || serviceName}
-                  </td>
+                  <td className="text-gray-300">{LANG[lang].subName}:</td>
+                  <td className="text-emerald-200 font-bold">{planKey || serviceName}</td>
                 </tr>
                 <tr>
-                  <td className="text-gray-300">
-                    {LANG[lang].subDays}:
-                  </td>
+                  <td className="text-gray-300">{LANG[lang].subDays}:</td>
                   <td className="text-white">
-                    {subDaysToShow > 0 ? `${subDaysToShow} ${lang === "ar" ? "يوم" : "days"}` : "-"}
+                    {subDaysToShow > 0
+                      ? `${subDaysToShow} ${lang === "ar" ? "يوم" : "days"}`
+                      : "-"}
                   </td>
                 </tr>
               </>
             )}
 
             <tr>
-              <td className="text-gray-300">
-                {LANG[lang].amount}:
-              </td>
-              <td>
-                {servicePrice.toFixed(2)} د.إ
-              </td>
+              <td className="text-gray-300">{LANG[lang].amount}:</td>
+              <td>{servicePrice.toFixed(2)} د.إ</td>
             </tr>
 
             {printingFee > 0 && (
               <tr>
-                <td className="text-gray-300">
-                  {LANG[lang].print}:
-                </td>
-                <td>
-                  {printingFee.toFixed(2)} د.إ
-                </td>
+                <td className="text-gray-300">{LANG[lang].print}:</td>
+                <td>{printingFee.toFixed(2)} د.إ</td>
               </tr>
             )}
 
             {vat > 0 && (
               <tr>
-                <td className="text-gray-300">
-                  {LANG[lang].vat}:
-                </td>
+                <td className="text-gray-300">{LANG[lang].vat}:</td>
                 <td>{vat.toFixed(2)} د.إ</td>
               </tr>
             )}
 
             <tr>
-              <td className="text-gray-300">
-                {LANG[lang].coinDiscount}:
-              </td>
+              <td className="text-gray-300">{LANG[lang].coinDiscount}:</td>
               <td>
-                {coinDiscount &&
-                Number(coinDiscount) > 0
-                  ? `-${Number(
-                      coinDiscount
-                    ).toFixed(2)} د.إ`
-                  : "0 د.إ"}
-              </td>
-            </tr>
-
-            {/* ✅ processingFee موجود أصلاً - ده رسوم Stripe */}
-            <tr>
-              <td className="text-gray-300">
-                {LANG[lang].processingFee}:
-              </td>
-              <td>
-                {processingFee
-                  ? `${processingFee.toFixed(
-                      2
-                    )} د.إ`
+                {coinDiscount && Number(coinDiscount) > 0
+                  ? `-${Number(coinDiscount).toFixed(2)} د.إ`
                   : "0 د.إ"}
               </td>
             </tr>
 
             <tr>
-              <td className="text-gray-300">
-                {LANG[lang].totalBeforeDiscount}
-                :
-              </td>
-              <td>
-                {totalPrice.toFixed(2)} د.إ
-              </td>
+              <td className="text-gray-300">{LANG[lang].processingFee}:</td>
+              <td>{processingFee ? `${processingFee.toFixed(2)} د.إ` : "0 د.إ"}</td>
             </tr>
 
             <tr>
-              <td className="font-bold text-emerald-400">
-                {LANG[lang].total}:
-              </td>
-              <td className="font-bold text-emerald-300">
-                {finalPrice.toFixed(2)} د.إ
-              </td>
+              <td className="text-gray-300">{LANG[lang].totalBeforeDiscount}:</td>
+              <td>{totalPrice.toFixed(2)} د.إ</td>
+            </tr>
+
+            <tr>
+              <td className="font-bold text-emerald-400">{LANG[lang].total}:</td>
+              <td className="font-bold text-emerald-300">{finalPrice.toFixed(2)} د.إ</td>
             </tr>
           </tbody>
         </table>
@@ -455,9 +379,7 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
                   fontFamily: "inherit",
                   direction: dir,
                   letterSpacing: "0.8px",
-                  "::placeholder": {
-                    color: "#94a3b8",
-                  },
+                  "::placeholder": { color: "#94a3b8" },
                 },
                 invalid: {
                   color: "#dc2626",
@@ -473,24 +395,18 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
         type="submit"
         disabled={!stripe || loading}
         className={`w-full py-3 rounded-full bg-gradient-to-r from-emerald-600 via-emerald-500 to-green-700 text-white font-black text-lg mt-3 shadow-lg transition hover:scale-105 hover:brightness-110 ${
-          loading
-            ? "opacity-40 cursor-not-allowed"
-            : "cursor-pointer"
+          loading ? "opacity-40 cursor-not-allowed" : "cursor-pointer"
         }`}
       >
         {loading
           ? LANG[lang].processing
-          : `${LANG[lang].payBtn} (${finalPrice.toFixed(
-              2
-            )} د.إ)`}
+          : `${LANG[lang].payBtn} (${finalPrice.toFixed(2)} د.إ)`}
       </button>
 
       {payMsg && (
         <div
           className={`mt-3 text-center font-bold text-xs flex items-center justify-center gap-1 ${
-            msgSuccess
-              ? "text-emerald-400"
-              : "text-red-600"
+            msgSuccess ? "text-emerald-400" : "text-red-600"
           }`}
         >
           {msgSuccess ? <span>✅</span> : <span>⚠️</span>}
@@ -537,28 +453,17 @@ export default function CardPaymentPage() {
     return (
       <PaymentSuccessPage
         paymentId={paymentId}
-        amount={
-          paymentData.finalPrice || paymentData.price || 0
-        }
+        amount={paymentData.finalPrice || paymentData.price || 0}
         serviceName={
+          paymentData.subscriptionName ||
           paymentData.service?.name ||
           paymentData.serviceName ||
           "اسم غير متوفر"
         }
         orderNumber={orderNumber}
-        printingFee={
-          paymentData.service?.printingFee ||
-          paymentData.printingFee ||
-          0
-        }
-        vat={
-          paymentData.service?.vat ||
-          paymentData.vat ||
-          0
-        }
-        processingFee={
-          paymentData.processingFee || 0
-        }
+        printingFee={paymentData.service?.printingFee || paymentData.printingFee || 0}
+        vat={paymentData.service?.vat || paymentData.vat || 0}
+        processingFee={paymentData.processingFee || 0}
         lang={paymentData.lang}
       />
     );
