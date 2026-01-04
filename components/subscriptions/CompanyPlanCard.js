@@ -15,7 +15,8 @@ const BRAND = {
     btn: "from-emerald-700 via-emerald-500 to-green-700",
     glow: "rgba(16,185,129,0.40)",
     icon: FaRocket,
-    offerChip: "bg-emerald-500 text-white border-emerald-200",
+    offerChip: "bg-emerald-500 text-white border-emerald-200/50",
+    offerLine: "text-emerald-200",
   },
   growth: {
     bar: "from-sky-400 to-sky-600",
@@ -24,7 +25,8 @@ const BRAND = {
     btn: "from-sky-700 via-sky-500 to-indigo-600",
     glow: "rgba(56,189,248,0.36)",
     icon: FaChartLine,
-    offerChip: "bg-sky-500 text-white border-sky-200",
+    offerChip: "bg-sky-500 text-white border-sky-200/50",
+    offerLine: "text-sky-200",
   },
   scale: {
     bar: "from-purple-400 to-purple-600",
@@ -33,7 +35,8 @@ const BRAND = {
     btn: "from-purple-700 via-fuchsia-600 to-pink-600",
     glow: "rgba(168,85,247,0.36)",
     icon: FaCrown,
-    offerChip: "bg-purple-500 text-white border-purple-200",
+    offerChip: "bg-purple-500 text-white border-purple-200/50",
+    offerLine: "text-purple-200",
   },
   enterprise: {
     bar: "from-yellow-400 to-orange-500",
@@ -42,7 +45,8 @@ const BRAND = {
     btn: "from-yellow-500 via-amber-400 to-orange-500 text-black",
     glow: "rgba(245,158,11,0.35)",
     icon: FaBuilding,
-    offerChip: "bg-amber-400 text-black border-yellow-100",
+    offerChip: "bg-amber-400 text-black border-yellow-100/60",
+    offerLine: "text-amber-200",
   },
 };
 
@@ -62,9 +66,12 @@ function pickText(v, lang) {
   if (isPlainObject(v)) return String(lang === "ar" ? v.ar || "" : v.en || "");
   return "";
 }
+
+/** pricing entries — keep stable order: monthly -> quarterly -> semiannual -> yearly */
+const DUR_ORDER = ["monthly", "quarterly", "semiannual", "yearly"];
 function pricingEntries(pricing) {
   if (!isPlainObject(pricing)) return [];
-  return Object.entries(pricing)
+  const list = Object.entries(pricing)
     .filter(([_, val]) => isPlainObject(val))
     .map(([key, val]) => ({
       key,
@@ -73,9 +80,12 @@ function pricingEntries(pricing) {
       paidMonths: Number(val?.paidMonths ?? 0) || 0,
       bonus: Number(val?.bonus ?? 0) || 0,
       best: !!val?.best,
+      tag: String(val?.tag || "").trim().toLowerCase(),
       title: isPlainObject(val?.title) ? val.title : { ar: "", en: "" },
-    }))
-    .sort((a, b) => (a.monthsShown ?? 999) - (b.monthsShown ?? 999));
+    }));
+
+  list.sort((a, b) => (DUR_ORDER.indexOf(a.key) === -1 ? 99 : DUR_ORDER.indexOf(a.key)) - (DUR_ORDER.indexOf(b.key) === -1 ? 99 : DUR_ORDER.indexOf(b.key)));
+  return list;
 }
 function pricingLabel(p, lang) {
   const t = p?.title;
@@ -84,15 +94,27 @@ function pricingLabel(p, lang) {
   return "";
 }
 
-/** ✅ "Offer" means bonus > 0 (truth source) */
+/** ✅ Offer truth source: (tag === "offer") OR (bonus > 0) */
 function isOffer(p) {
-  return Number(p?.bonus || 0) > 0;
+  const tag = String(p?.tag || "").toLowerCase().trim();
+  return tag === "offer" || Number(p?.bonus || 0) > 0;
+}
+
+/** ✅ Most truth source: tag === "most" OR best === true (Yearly only ideally) */
+function isMost(p) {
+  const tag = String(p?.tag || "").toLowerCase().trim();
+  return tag === "most" || !!p?.best;
 }
 
 /* =========================
    Glow wrapper
 ========================= */
-function GlowWrap({ active = false, radius = "rounded-3xl", glow = "rgba(16,185,129,0.35)", children }) {
+function GlowWrap({
+  active = false,
+  radius = "rounded-3xl",
+  glow = "rgba(16,185,129,0.35)",
+  children,
+}) {
   return (
     <div className={cn("relative group", radius)}>
       <div
@@ -104,7 +126,10 @@ function GlowWrap({ active = false, radius = "rounded-3xl", glow = "rgba(16,185,
         }}
       />
       <div
-        className={cn("absolute -inset-[2px] z-0 opacity-0 group-hover:opacity-55 transition-opacity duration-300", radius)}
+        className={cn(
+          "absolute -inset-[2px] z-0 opacity-0 group-hover:opacity-55 transition-opacity duration-300",
+          radius
+        )}
         style={{
           background: `linear-gradient(90deg, ${glow}, rgba(56,189,248,0.20), rgba(168,85,247,0.16))`,
           filter: "blur(14px)",
@@ -114,6 +139,17 @@ function GlowWrap({ active = false, radius = "rounded-3xl", glow = "rgba(16,185,
     </div>
   );
 }
+
+/* =========================
+   Duration chips order + labels
+========================= */
+const DURATION_LABELS = {
+  monthly: { ar: "شهري", en: "Monthly" },
+  quarterly: { ar: "3 شهور", en: "Quarterly" },
+  semiannual: { ar: "نصف سنوي", en: "Semiannual" },
+  yearly: { ar: "سنوي", en: "Yearly" },
+};
+const moLabel = (lang, n) => (lang === "ar" ? (n === 1 ? "شهر" : "شهور") : n === 1 ? "month" : "months");
 
 /* =========================
    Component
@@ -132,8 +168,9 @@ export default function CompanyPlanCard({
 
   const pricingList = useMemo(() => pricingEntries(plan?.pricing), [plan?.pricing]);
 
-  // default: best OR yearly OR last
+  // ✅ default: "most" OR best OR yearly OR last
   const defaultKey =
+    pricingList.find((x) => isMost(x) && x.key === "yearly")?.key ||
     pricingList.find((x) => x?.best)?.key ||
     pricingList.find((x) => x?.key === "yearly")?.key ||
     pricingList[pricingList.length - 1]?.key ||
@@ -176,9 +213,16 @@ export default function CompanyPlanCard({
 
   const canSubscribe = !!selectedKey && price > 0;
 
+  const showOffer = isOffer(selected);
+  const showMost = isMost(selected) && selected?.key === "yearly";
+
   return (
     <div dir={dir} className="w-full">
-      <GlowWrap glow={theme.glow} radius="rounded-3xl" active={selected?.best || isOffer(selected)}>
+      <GlowWrap
+        glow={theme.glow}
+        radius="rounded-3xl"
+        active={showMost || showOffer}
+      >
         <div
           className={cn(
             "relative rounded-3xl border bg-white/5 backdrop-blur-xl overflow-hidden",
@@ -198,9 +242,16 @@ export default function CompanyPlanCard({
                 </div>
 
                 <div className="min-w-0">
-                  <div className={cn("flex items-center gap-2", lang === "ar" && "flex-row-reverse")}>
+                  <div className={cn("flex items-center gap-2 flex-wrap", lang === "ar" && "flex-row-reverse")}>
                     <span className={cn("w-2 h-2 rounded-full", theme.dot)} />
                     <div className="text-white font-extrabold text-xl truncate">{title}</div>
+
+                    {/* ✅ Most chosen chip only when yearly is best/most */}
+                    {showMost ? (
+                      <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-white text-black border border-white/50">
+                        {lang === "ar" ? "الأكثر اختيارًا" : "Most chosen"}
+                      </span>
+                    ) : null}
                   </div>
                   {fit ? <div className="mt-1 text-[12px] text-white/60 font-semibold">{fit}</div> : null}
                 </div>
@@ -214,39 +265,37 @@ export default function CompanyPlanCard({
 
               {monthsShown > 0 ? (
                 <div className="text-xs text-white/55 font-semibold">
-                  {lang === "ar" ? `(${monthsShown} شهر)` : `(${monthsShown} months)`}
+                  {lang === "ar" ? `(${monthsShown} ${moLabel(lang, monthsShown)})` : `(${monthsShown} ${moLabel(lang, monthsShown)})`}
                 </div>
               ) : null}
 
-              {/* ✅ show offer pill only when selected has bonus */}
-              {isOffer(selected) ? (
+              {/* ✅ Offer pill only when offer */}
+              {showOffer ? (
                 <div className={cn("text-xs px-2 py-1 rounded-full border font-extrabold", theme.offerChip)}>
-                  {lang === "ar" ? "عرض خاص" : "Special Offer"}
+                  {lang === "ar" ? "عرض" : "Offer"}
                 </div>
               ) : null}
             </div>
 
             {/* ✅ Offer line EXACT format */}
-            <div className="mt-3 text-[12px] text-white/70 font-semibold">
-              {isOffer(selected) ? (
+            <div className={cn("mt-3 text-[12px] text-white/70 font-semibold", lang === "ar" ? "leading-6" : "")}>
+              {showOffer ? (
                 lang === "ar" ? (
-                  <span>
-                    تدفع <b className="text-white">{paidMonths}</b> أشهر +{" "}
-                    <b className="text-emerald-200">{bonus}</b> شهر مجاني ={" "}
-                    <b className="text-white">{monthsShown}</b> أشهر
+                  <span className={cn(theme.offerLine)}>
+                    تدفع <b className="text-white">{paidMonths}</b> {moLabel(lang, paidMonths)} +{" "}
+                    <b className="text-white">{bonus}</b> {moLabel(lang, bonus)} مجاني ={" "}
+                    <b className="text-white">{monthsShown}</b> {moLabel(lang, monthsShown)}
                   </span>
                 ) : (
-                  <span>
-                    Pay <b className="text-white">{paidMonths}</b> months +{" "}
-                    <b className="text-emerald-200">{bonus}</b> free month ={" "}
-                    <b className="text-white">{monthsShown}</b> months
+                  <span className={cn(theme.offerLine)}>
+                    Pay <b className="text-white">{paidMonths}</b> {moLabel(lang, paidMonths)} +{" "}
+                    <b className="text-white">{bonus}</b> free {moLabel(lang, bonus)} ={" "}
+                    <b className="text-white">{monthsShown}</b> {moLabel(lang, monthsShown)}
                   </span>
                 )
               ) : (
                 <span className="text-white/55">
-                  {lang === "ar"
-                    ? "بدون عرض — تدفع نفس مدة الاشتراك"
-                    : "No offer — pay equals subscription duration"}
+                  {lang === "ar" ? "بدون عرض — تدفع نفس مدة الاشتراك" : "No offer — pay equals subscription duration"}
                 </span>
               )}
             </div>
@@ -260,9 +309,13 @@ export default function CompanyPlanCard({
               <div className="grid grid-cols-2 gap-2">
                 {pricingList.map((p) => {
                   const active = p.key === selectedKey;
-                  const label = pricingLabel(p, lang) || p.key;
+
+                  const rawLabel = pricingLabel(p, lang);
+                  const durLabel = DURATION_LABELS[p.key]?.[lang] || p.key;
+                  const label = rawLabel || durLabel;
 
                   const offer = isOffer(p);
+                  const most = isMost(p) && p.key === "yearly";
 
                   return (
                     <button
@@ -275,33 +328,36 @@ export default function CompanyPlanCard({
                         active
                           ? "border-emerald-400/60 bg-white/8"
                           : "border-white/10 hover:border-white/20 hover:bg-white/7",
-                        offer && active ? "shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_18px_40px_-26px_rgba(16,185,129,0.55)]" : ""
+                        offer && active
+                          ? "shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_18px_40px_-26px_rgba(16,185,129,0.55)]"
+                          : ""
                       )}
                     >
-                      {/* ✅ show "عرض" ONLY for offers + only inside duration */}
-                      {offer ? (
-                        <span
-                          className={cn(
-                            "absolute -top-2 px-2 py-0.5 rounded-full text-[10px] font-extrabold border",
-                            lang === "ar" ? "left-3" : "right-3",
-                            "bg-white/10 text-white border-white/10"
-                          )}
-                        >
-                          {lang === "ar" ? "عرض" : "Offer"}
-                        </span>
-                      ) : null}
+                      {/* ✅ chips: Offer + Most (only if true) */}
+                      <div className={cn("absolute -top-2 flex items-center gap-1", lang === "ar" ? "left-3" : "right-3")}>
+                        {offer ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold border bg-white/10 text-white border-white/10">
+                            {lang === "ar" ? "عرض" : "Offer"}
+                          </span>
+                        ) : null}
+                        {most ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold border bg-white text-black border-white/50">
+                            {lang === "ar" ? "الأكثر" : "Most"}
+                          </span>
+                        ) : null}
+                      </div>
 
                       <div className="text-white font-extrabold text-sm">{label}</div>
 
                       <div className="mt-1 text-[11px] text-white/60 font-semibold">
-                        {Number(p.monthsShown || 1)} {lang === "ar" ? "شهر" : "mo"} •{" "}
+                        {Number(p.monthsShown || 1)} {moLabel(lang, Number(p.monthsShown || 1))} •{" "}
                         {Number(p.price || 0).toLocaleString()}{" "}
                         <span className="text-white/50">{lang === "ar" ? "درهم" : "AED"}</span>
                       </div>
 
-                      {/* ✅ offer micro line for clarity */}
+                      {/* ✅ offer micro line (only if offer) */}
                       {offer ? (
-                        <div className="mt-2 text-[11px] font-extrabold text-emerald-200">
+                        <div className={cn("mt-2 text-[11px] font-extrabold", theme.offerLine)}>
                           {lang === "ar"
                             ? `تدفع ${p.paidMonths} + ${p.bonus} مجاني = ${p.monthsShown}`
                             : `Pay ${p.paidMonths} + ${p.bonus} free = ${p.monthsShown}`}
@@ -327,7 +383,10 @@ export default function CompanyPlanCard({
                 <div className="text-white font-extrabold mb-3">{lang === "ar" ? "المميزات" : "Perks"}</div>
                 <div className="space-y-2 text-sm text-white/80">
                   {perks.slice(0, 6).map((x, i) => (
-                    <div key={i} className={cn("flex items-start gap-2", lang === "ar" && "flex-row-reverse text-right")}>
+                    <div
+                      key={i}
+                      className={cn("flex items-start gap-2", lang === "ar" && "flex-row-reverse text-right")}
+                    >
                       <Check className="w-4 h-4 text-emerald-300 mt-[2px] shrink-0" />
                       <span className="break-words">{String(x)}</span>
                     </div>
@@ -348,14 +407,13 @@ export default function CompanyPlanCard({
                   monthsShown,
                   paidMonths,
                   bonus,
-                  isOffer: isOffer(selected),
+                  isOffer: showOffer,
+                  isMost: showMost,
                 })
               }
               className={cn(
                 "mt-6 w-full py-3 rounded-full font-extrabold shadow-lg transition hover:scale-[1.02] active:scale-[0.99]",
-                canSubscribe
-                  ? `bg-gradient-to-r ${theme.btn}`
-                  : "bg-gray-500/40 text-white/60 cursor-not-allowed"
+                canSubscribe ? `bg-gradient-to-r ${theme.btn}` : "bg-gray-500/40 text-white/60 cursor-not-allowed"
               )}
             >
               {lang === "ar" ? "اشترك الآن" : "Subscribe Now"}

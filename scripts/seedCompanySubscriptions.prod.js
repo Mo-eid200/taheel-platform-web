@@ -21,13 +21,79 @@ const db = getFirestore(app);
 const COLLECTION = "companySubscriptionPlans";
 
 /** ✅ Version for safe migrations */
-const VERSION = 1;
+const VERSION = 2;
 
-/** ✅ Plans payload */
+/* =========================
+   ✅ NORMALIZERS (الحل الحقيقي)
+========================= */
+function toNum(x, fallback = 0) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function normTitle(title) {
+  // ensure map {ar,en}
+  if (title && typeof title === "object") {
+    return { ar: String(title.ar || ""), en: String(title.en || "") };
+  }
+  return { ar: "", en: "" };
+}
+
+function normName(name) {
+  // convert string -> {ar,en}
+  if (name && typeof name === "object") {
+    return { ar: String(name.ar || ""), en: String(name.en || "") };
+  }
+  if (typeof name === "string") {
+    return { ar: name, en: name };
+  }
+  return { ar: "", en: "" };
+}
+
+function normalizePricing(pricing) {
+  const out = {};
+  const allowed = ["monthly", "quarterly", "semiannual", "yearly"];
+
+  for (const durKey of allowed) {
+    const v = pricing?.[durKey] || {};
+
+    const paidMonths = toNum(v.paidMonths, 0);
+    let bonus = toNum(v.bonus, 0);
+
+    // ✅ Offer only on semiannual & yearly
+    const isOfferAllowed = durKey === "semiannual" || durKey === "yearly";
+    if (!isOfferAllowed) bonus = 0;
+
+    const monthsShown = paidMonths + bonus;
+
+    // ✅ tag rules
+    let tag = String(v.tag || "").trim();
+    if (!isOfferAllowed) tag = ""; // no tags on monthly/quarterly
+    if (durKey === "semiannual") tag = bonus > 0 ? "offer" : "";
+    if (durKey === "yearly") tag = "most"; // yearly is "Most" default
+
+    // ✅ best rules (ONLY yearly)
+    const best = durKey === "yearly";
+
+    out[durKey] = {
+      title: normTitle(v.title),
+      price: toNum(v.price, 0),
+      paidMonths,
+      bonus,
+      monthsShown,
+      tag,
+      best,
+    };
+  }
+
+  return out;
+}
+
+/** ✅ Plans payload (مظبوط + موحّد) */
 const plans = {
   starter: {
     key: "starter",
-    name: "Starter PRO",
+    name: { ar: "Starter PRO", en: "Starter PRO" },
     fit: { ar: "للشركات الصغيرة (1–5)", en: "Small companies (1–5)" },
     isActive: true,
     sortIndex: 1,
@@ -36,16 +102,16 @@ const plans = {
       en: ["Printing fees waived", "Direct support", "Fast activation", "Easier tracking"],
     },
     pricing: {
-      monthly: { title: { ar: "شهري", en: "Monthly" }, monthsShown: 1, paidMonths: 1, bonus: 0, price: 299 },
-      quarterly: { title: { ar: "3 شهور", en: "3 Months" }, monthsShown: 3, paidMonths: 3, bonus: 0, price: 799 },
-      semiannual: { title: { ar: "نصف سنوي", en: "Semiannual" }, monthsShown: 7, paidMonths: 6, bonus: 1, tag: "offer", price: 1799 },
-      yearly: { title: { ar: "سنوي", en: "Yearly" }, monthsShown: 13, paidMonths: 12, bonus: 1, tag: "most", best: true, price: 3499 },
+      monthly:   { title: { ar: "شهري", en: "Monthly" },     paidMonths: 1,  bonus: 0, price: 299 },
+      quarterly: { title: { ar: "3 شهور", en: "3 Months" },  paidMonths: 3,  bonus: 0, price: 799 },
+      semiannual:{ title: { ar: "نصف سنوي", en: "Semiannual" }, paidMonths: 6, bonus: 1, price: 1799 }, // ✅ pay 6 + 1 free = 7
+      yearly:    { title: { ar: "سنوي", en: "Yearly" },      paidMonths: 12, bonus: 1, price: 3499 },  // ✅ pay 12 + 1 free = 13
     },
   },
 
   growth: {
     key: "growth",
-    name: "Growth PRO",
+    name: { ar: "Growth PRO", en: "Growth PRO" },
     fit: { ar: "للشركات المتوسطة (5–10)", en: "Mid teams (5–10)" },
     isActive: true,
     sortIndex: 2,
@@ -54,16 +120,16 @@ const plans = {
       en: ["Faster tracking", "Printing fees waived", "Higher priority", "Simplified reports"],
     },
     pricing: {
-      monthly: { title: { ar: "شهري", en: "Monthly" }, monthsShown: 1, paidMonths: 1, bonus: 0, price: 499 },
-      quarterly: { title: { ar: "3 شهور", en: "3 Months" }, monthsShown: 3, paidMonths: 3, bonus: 0, price: 1399 },
-      semiannual: { title: { ar: "نصف سنوي", en: "Semiannual" }, monthsShown: 7, paidMonths: 6, bonus: 1, tag: "offer", price: 2999 },
-      yearly: { title: { ar: "سنوي", en: "Yearly" }, monthsShown: 13, paidMonths: 12, bonus: 1, tag: "most", best: true, price: 5999 },
+      monthly:   { title: { ar: "شهري", en: "Monthly" },     paidMonths: 1,  bonus: 0, price: 499 },
+      quarterly: { title: { ar: "3 شهور", en: "3 Months" },  paidMonths: 3,  bonus: 0, price: 1399 },
+      semiannual:{ title: { ar: "نصف سنوي", en: "Semiannual" }, paidMonths: 6, bonus: 1, price: 2999 }, // ✅ 6+1=7
+      yearly:    { title: { ar: "سنوي", en: "Yearly" },      paidMonths: 12, bonus: 1, price: 5999 },  // ✅ 12+1=13
     },
   },
 
   scale: {
     key: "scale",
-    name: "Scale PRO",
+    name: { ar: "Scale PRO", en: "Scale PRO" },
     fit: { ar: "للشركات الكبيرة (10–20)", en: "Larger teams (10–20)" },
     isActive: true,
     sortIndex: 3,
@@ -72,16 +138,16 @@ const plans = {
       en: ["Higher priority", "Printing fees waived", "Cleaner reports", "More workload"],
     },
     pricing: {
-      monthly: { title: { ar: "شهري", en: "Monthly" }, monthsShown: 1, paidMonths: 1, bonus: 0, price: 799 },
-      quarterly: { title: { ar: "3 شهور", en: "3 Months" }, monthsShown: 3, paidMonths: 3, bonus: 0, price: 2199 },
-      semiannual: { title: { ar: "نصف سنوي", en: "Semiannual" }, monthsShown: 7, paidMonths: 6, bonus: 1, tag: "offer", price: 4999 },
-      yearly: { title: { ar: "سنوي", en: "Yearly" }, monthsShown: 13, paidMonths: 12, bonus: 1, tag: "most", best: true, price: 9999 },
+      monthly:   { title: { ar: "شهري", en: "Monthly" },     paidMonths: 1,  bonus: 0, price: 799 },
+      quarterly: { title: { ar: "3 شهور", en: "3 Months" },  paidMonths: 3,  bonus: 0, price: 2199 },
+      semiannual:{ title: { ar: "نصف سنوي", en: "Semiannual" }, paidMonths: 6, bonus: 1, price: 4999 }, // ✅ 6+1=7
+      yearly:    { title: { ar: "سنوي", en: "Yearly" },      paidMonths: 12, bonus: 1, price: 9999 },  // ✅ 12+1=13
     },
   },
 
   enterprise: {
     key: "enterprise",
-    name: "Enterprise PRO",
+    name: { ar: "Enterprise PRO", en: "Enterprise PRO" },
     fit: { ar: "مؤسسات / 20+", en: "Enterprise / 20+" },
     isActive: true,
     sortIndex: 4,
@@ -90,44 +156,42 @@ const plans = {
       en: ["SLA & dedicated support", "Maximum priority", "Tailored solutions", "Account manager"],
     },
     pricing: {
-      monthly: { title: { ar: "شهري", en: "Monthly" }, monthsShown: 1, paidMonths: 1, bonus: 0, price: 1299 },
-      quarterly: { title: { ar: "3 شهور", en: "3 Months" }, monthsShown: 3, paidMonths: 3, bonus: 0, price: 3599 },
-      semiannual: { title: { ar: "نصف سنوي", en: "Semiannual" }, monthsShown: 7, paidMonths: 6, bonus: 1, tag: "offer", price: 7999 },
-      yearly: { title: { ar: "سنوي", en: "Yearly" }, monthsShown: 13, paidMonths: 12, bonus: 1, tag: "most", best: true, price: 15999 },
+      monthly:   { title: { ar: "شهري", en: "Monthly" },     paidMonths: 1,  bonus: 0, price: 1299 },
+      quarterly: { title: { ar: "3 شهور", en: "3 Months" },  paidMonths: 3,  bonus: 0, price: 3599 },
+      semiannual:{ title: { ar: "نصف سنوي", en: "Semiannual" }, paidMonths: 6, bonus: 1, price: 7999 },  // ✅ 6+1=7
+      yearly:    { title: { ar: "سنوي", en: "Yearly" },      paidMonths: 12, bonus: 1, price: 15999 }, // ✅ 12+1=13
     },
   },
 };
 
 /**
- * ✅ SAFE MODE:
- * - if a doc already exists => SKIP (no overwrite)
- * - use { overwrite: true } if you want forced updates later
+ * ✅ FORCE UPDATE MODE:
+ * - always merge & normalize
+ * - updates old docs instead of skipping
  */
-async function upsertPlan(planKey, data, { overwrite = false } = {}) {
+async function upsertPlan(planKey, data) {
   const ref = doc(db, COLLECTION, planKey);
   const snap = await getDoc(ref);
 
-  if (snap.exists() && !overwrite) {
-    console.log(`⏭ SKIP (exists): ${planKey}`);
-    return;
-  }
-
+  // ✅ normalize to prevent UI madness
   const payload = {
     ...data,
+    name: normName(data.name),
+    pricing: normalizePricing(data.pricing),
     version: VERSION,
     updatedAt: serverTimestamp(),
     ...(snap.exists() ? {} : { createdAt: serverTimestamp() }),
   };
 
-  await setDoc(ref, payload, { merge: true }); // merge = safer for prod
-  console.log(`✅ WRITE: ${planKey} ${snap.exists() ? "(merged)" : "(created)"}`);
+  await setDoc(ref, payload, { merge: true });
+  console.log(`✅ UPDATED: ${planKey} ${snap.exists() ? "(merged)" : "(created)"}`);
 }
 
 async function run() {
   for (const key of Object.keys(plans)) {
-    await upsertPlan(key, plans[key], { overwrite: false });
+    await upsertPlan(key, plans[key]);
   }
-  console.log("🎉 DONE. Company subscription plans are live.");
+  console.log("🎉 DONE. Company subscription plans are normalized + updated.");
 }
 
 run().catch((e) => {

@@ -24,7 +24,6 @@ function asText(v, fallback = "") {
   if (typeof v === "object") {
     if (typeof v.ar === "string") return v.ar;
     if (typeof v.en === "string") return v.en;
-    // if it is Firestore Timestamp or other object -> ignore
   }
   return fallback;
 }
@@ -33,7 +32,6 @@ function localized(obj, lang, fallback = "") {
   if (obj == null) return fallback;
   if (typeof obj === "string" || typeof obj === "number") return String(obj);
   if (typeof obj === "object") {
-    // {ar,en} OR any map
     const v = obj?.[lang];
     return asText(v, asText(obj, fallback));
   }
@@ -42,6 +40,29 @@ function localized(obj, lang, fallback = "") {
 
 function safeArray(x) {
   return Array.isArray(x) ? x : [];
+}
+
+/* =========================
+   ✅ Offer logic (ONLY semiannual + yearly)
+   - No more nonsense like "pay 3 + 7 free"
+   - Offer = paidMonths + bonus => total months
+========================= */
+function isOfferDuration(durKey) {
+  return durKey === "semiannual" || durKey === "yearly";
+}
+
+function offerText(d, isArabic, t) {
+  const paid = Number(d?.paidMonths || 0);
+  const bonus = Number(d?.bonus || 0);
+  const total = paid + bonus;
+
+  if (!paid || bonus <= 0) return "";
+  if (isArabic) {
+    const paidLabel = paid === 1 ? t.month : t.months;
+    const totalLabel = total === 1 ? t.month : t.months;
+    return `${t.pay} ${paid} ${paidLabel} + ${bonus} ${t.free} = ${total} ${totalLabel}`;
+  }
+  return `${t.pay} ${paid} mo + ${bonus} ${t.free} = ${total} mo`;
 }
 
 /** ✅ Quiet glow wrapper (ONLY for buttons/cards) */
@@ -123,11 +144,8 @@ export default function CompanySubscriptionsPage() {
     const ar = {
       back: "رجوع",
       pageTitle: "اشتراكات الشركات",
-      pro: "PRO",
-      most: "الأكثر اختيارًا",
-      offer: "عرض",
       chooseDuration: "اختر المدة",
-      months: "شهور",
+      months: "أشهر",
       month: "شهر",
       total: "الإجمالي",
       subscribeNow: "اشترك الآن",
@@ -143,15 +161,14 @@ export default function CompanySubscriptionsPage() {
       loading: "جاري تحميل الباقات...",
       empty: "لا توجد باقات متاحة الآن.",
       noOffer: "بدون عرض",
-      freeMonth: "شهر مجاني",
+      free: "مجانًا",
+      pay: "تدفع",
+      specialOffer: "عرض خاص",
     };
 
     const en = {
       back: "Back",
       pageTitle: "Company Subscriptions",
-      pro: "PRO",
-      most: "Most chosen",
-      offer: "Offer",
       chooseDuration: "Choose duration",
       months: "Months",
       month: "Month",
@@ -169,7 +186,9 @@ export default function CompanySubscriptionsPage() {
       loading: "Loading packages...",
       empty: "No packages available right now.",
       noOffer: "No offer",
-      freeMonth: "free month",
+      free: "free",
+      pay: "Pay",
+      specialOffer: "Special Offer",
     };
 
     return isArabic ? ar : en;
@@ -198,7 +217,6 @@ export default function CompanySubscriptionsPage() {
       try {
         setLoading(true);
 
-        // ✅ Firestore collection
         const snap = await getDocs(collection(firestore, "companySubscriptionPlans"));
 
         const rows = snap.docs.map((docSnap) => {
@@ -206,51 +224,51 @@ export default function CompanySubscriptionsPage() {
           const key = docSnap.id;
 
           const Icon = ICONS_BY_KEY[key] || Sparkles;
-
           const brand = data.brand || DEFAULT_BRAND[key] || DEFAULT_BRAND.starter;
 
-          // durations
+          // ✅ durations (NEW SEED LOGIC)
           const rawPricing = data.pricing || {};
-          const durations = Object.entries(rawPricing).map(([durKey, v]) => {
-            const vv = v || {};
-            const title = localized(vv.title, isArabic ? "ar" : "en", durKey);
-            const tagKey = asText(vv.tag, ""); // "offer" | "most" | ""
-            const tag =
-              tagKey === "offer" ? t.offer : tagKey === "most" ? t.most : "";
+          const durations = Object.entries(rawPricing)
+            .map(([durKey, v]) => {
+              const vv = v || {};
+              const title = localized(vv.title, isArabic ? "ar" : "en", durKey);
 
-            return {
-              key: durKey,
-              title,
-              monthsShown: Number(vv.monthsShown ?? 1),
-              paidMonths: Number(vv.paidMonths ?? vv.monthsShown ?? 1),
-              bonus: Number(vv.bonus ?? 0),
-              price: Number(vv.price ?? 0),
-              best: Boolean(vv.best),
-              tag: tag || null,
-            };
-          });
+              const monthsShown = Number(vv.monthsShown ?? 1);
+              const paidMonths = Number(vv.paidMonths ?? monthsShown);
+              const bonus = Number(vv.bonus ?? 0);
+              const price = Number(vv.price ?? 0);
 
-          durations.sort((a, b) => (DURATION_ORDER[a.key] || 99) - (DURATION_ORDER[b.key] || 99));
+              // ✅ Offer is ONLY allowed for semiannual/yearly AND bonus>0
+              const hasOffer = isOfferDuration(durKey) && bonus > 0 && paidMonths > 0;
+              const offerLine = hasOffer ? offerText({ paidMonths, bonus }, isArabic, t) : "";
+
+              return {
+                key: durKey,
+                title,
+                monthsShown, // (display months if you keep using it)
+                paidMonths,
+                bonus,
+                price,
+                offerLine,
+                hasOffer,
+              };
+            })
+            .sort((a, b) => (DURATION_ORDER[a.key] || 99) - (DURATION_ORDER[b.key] || 99));
 
           // perks
           const perksLocale = data.perks?.[isArabic ? "ar" : "en"];
-          const perks = safeArray(perksLocale ?? data.perks).map((x) => asText(x, "")).filter(Boolean);
-
-          // badge (safe)
-          const badgeFromKey =
-            data.badgeKey === "most" ? t.most : data.badgeKey === "offer" ? t.offer : "";
-          const badge = badgeFromKey || localized(data.badge, isArabic ? "ar" : "en", "");
+          const perks = safeArray(perksLocale ?? data.perks)
+            .map((x) => asText(x, ""))
+            .filter(Boolean);
 
           return {
             key,
             name: localized(data.name, isArabic ? "ar" : "en", key),
             fit: localized(data.fit, isArabic ? "ar" : "en", ""),
             icon: Icon,
-            badge: badge ? String(badge) : null,
-            most: Boolean(data.most),
             brand,
             perks,
-            durations: durations.length ? durations : [],
+            durations,
           };
         });
 
@@ -268,7 +286,7 @@ export default function CompanySubscriptionsPage() {
     return () => {
       mounted = false;
     };
-  }, [isArabic, t.offer, t.most]);
+  }, [isArabic, t]);
 
   const PACKAGES = packages;
 
@@ -292,7 +310,9 @@ export default function CompanySubscriptionsPage() {
     qs.set("package", pkgObj.key);
     qs.set("duration", durationObj.key);
     qs.set("price", String(durationObj.price));
-    qs.set("months", String(durationObj.monthsShown));
+    // ✅ months that user actually gets = paid + bonus (only if offer, else use monthsShown)
+    const totalMonths = Number(durationObj.paidMonths || 0) + Number(durationObj.bonus || 0);
+    qs.set("months", String(totalMonths || durationObj.monthsShown || 1));
     router.push(`/login?${qs.toString()}`);
   };
 
@@ -333,7 +353,7 @@ export default function CompanySubscriptionsPage() {
 
               <div className={cn("hidden sm:block", isArabic && "text-right")}>
                 <div className="text-white font-extrabold leading-none">{t.pageTitle}</div>
-                <div className="text-[11px] text-white/45 mt-1">{t.pro}</div>
+                {/* ✅ removed PRO line */}
               </div>
             </div>
           </div>
@@ -400,12 +420,6 @@ export default function CompanySubscriptionsPage() {
                             <div className="text-white font-extrabold text-lg sm:text-xl truncate max-w-[70vw] sm:max-w-[420px]">
                               {asText(p.name, p.key)}
                             </div>
-
-                            {p.badge ? (
-                              <span className="px-3 py-1 rounded-full text-[11px] font-extrabold bg-red-500 text-white cursor-default">
-                                {String(p.badge)}
-                              </span>
-                            ) : null}
                           </div>
 
                           {p.fit ? (
@@ -417,9 +431,7 @@ export default function CompanySubscriptionsPage() {
                       </div>
 
                       <div className={cn("flex items-center gap-3 shrink-0", isArabic && "flex-row-reverse")}>
-                        <div className={cn("px-2.5 py-1 rounded-full border text-xs font-extrabold", p.brand?.pill)}>
-                          PRO
-                        </div>
+                        {/* ✅ removed PRO pill */}
                         <ChevronDown className={cn("w-5 h-5 text-white/60 transition", isOpen ? "rotate-180" : "")} />
                       </div>
                     </button>
@@ -456,34 +468,27 @@ export default function CompanySubscriptionsPage() {
                                             : "border-white/10 hover:border-white/20 hover:bg-white/7"
                                         )}
                                       >
-                                        {d.tag ? (
+                                        {/* ✅ Show Special Offer badge ONLY for semiannual/yearly and only if bonus>0 */}
+                                        {d.hasOffer ? (
                                           <div className={cn("absolute -top-3 z-20", isArabic ? "right-3" : "left-3")}>
-                                            <span
-                                              className={cn(
-                                                "px-3 py-1 rounded-full text-[11px] font-extrabold shadow border",
-                                                d.best
-                                                  ? "bg-purple-500 text-white border-purple-300/30"
-                                                  : "bg-white/10 text-white border-white/10"
-                                              )}
-                                            >
-                                              {String(d.tag)}
+                                            <span className="px-3 py-1 rounded-full text-[11px] font-extrabold shadow border bg-amber-400 text-black border-amber-200/40">
+                                              {t.specialOffer}
                                             </span>
                                           </div>
                                         ) : null}
 
                                         <div className="text-white font-extrabold text-base">{asText(d.title, d.key)}</div>
 
-                                        <div className="mt-1 text-[12px] text-white/60 font-semibold">
-                                          {Number(d.monthsShown || 1)}{" "}
-                                          {Number(d.monthsShown || 1) === 1 ? t.month : t.months}
-                                          {Number(d.bonus || 0) ? (
-                                            <span className={cn("ml-2 font-extrabold", isArabic ? "mr-2 ml-0" : "")}>
-                                              <span className="text-emerald-200">
-                                                {isArabic ? `(+${d.bonus} مجاني)` : `(+${d.bonus} free)`}
-                                              </span>
-                                            </span>
-                                          ) : null}
-                                        </div>
+                                        {/* ✅ Offer line (Pay X + Y free = Z) ONLY for semiannual/yearly */}
+                                        {d.hasOffer ? (
+                                          <div className="mt-1 text-[12px] font-extrabold text-amber-200">
+                                            {d.offerLine}
+                                          </div>
+                                        ) : (
+                                          <div className="mt-1 text-[12px] text-white/60 font-semibold">
+                                            {Number(d.monthsShown || 1)} {Number(d.monthsShown || 1) === 1 ? t.month : t.months}
+                                          </div>
+                                        )}
 
                                         <div className="mt-3">
                                           <div className="text-white/55 text-xs">{t.finalPrice}</div>
@@ -519,18 +524,12 @@ export default function CompanySubscriptionsPage() {
                                 <div className="mt-4 rounded-2xl bg-white/6 border border-white/10 p-4">
                                   <div className="text-white/55 text-xs">{t.duration}</div>
                                   <div className="mt-1 text-white font-extrabold">
-                                    {asText(selectedDur?.title, "")} • {Number(selectedDur?.monthsShown || 1)}{" "}
-                                    {Number(selectedDur?.monthsShown || 1) === 1 ? t.month : t.months}
+                                    {asText(selectedDur?.title, "")}
                                   </div>
 
                                   <div className="mt-2 text-white/60 text-sm">
-                                    {Number(selectedDur?.bonus || 0) ? (
-                                      <span>
-                                        {t.includes}{" "}
-                                        <span className="font-extrabold text-emerald-200">
-                                          +{Number(selectedDur?.bonus || 0)} {isArabic ? t.freeMonth : t.freeMonth}
-                                        </span>
-                                      </span>
+                                    {selectedDur?.hasOffer ? (
+                                      <span className="font-extrabold text-amber-200">{selectedDur.offerLine}</span>
                                     ) : (
                                       <span className="text-white/45">{t.noOffer}</span>
                                     )}
@@ -592,6 +591,11 @@ export default function CompanySubscriptionsPage() {
                   {t.package}: <span className="text-white/85">{asText(pkgObj?.name, "")}</span> • {t.duration}:{" "}
                   <span className="text-white/85">{asText(durationObj?.title, "")}</span>
                 </div>
+
+                {durationObj?.hasOffer ? (
+                  <div className="mt-1 text-[12px] font-extrabold text-amber-200">{durationObj.offerLine}</div>
+                ) : null}
+
                 <div className="text-white font-extrabold text-lg leading-none mt-1">
                   {t.total}: {Number(durationObj?.price || 0).toLocaleString()}{" "}
                   <span className="text-[12px] text-white/55 font-semibold">{t.aed}</span>
