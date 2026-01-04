@@ -160,7 +160,9 @@ export default function ServiceProfileCard({
   longDescription,
   longDescription_en,
   provider,
+  freePrinting = false,
 }) {
+
   useEffect(() => {
     if (!customerId) {
       console.error("❌ customerId is missing in ServiceProfileCard! يجب تمريره من الكمبوننت الأب.");
@@ -168,7 +170,7 @@ export default function ServiceProfileCard({
   }, [customerId]);
 
   const style = CATEGORY_STYLES[category] || CATEGORY_STYLES.resident;
-
+  const effectivePrintingFee = category === "company" && freePrinting ? 0 : (Number(printingFee) || 0);
   const [wallet, setWallet] = useState(userWallet);
   const [coinsBalance, setCoinsBalance] = useState(userCoins);
   const [showPayModal, setShowPayModal] = useState(false);
@@ -296,16 +298,21 @@ export default function ServiceProfileCard({
   // الأسعار
   const baseServiceCount = repeatable ? quantity : 1;
   const basePaperCount = allowPaperCount ? paperCount : 1;
+
   const servicePriceTotal = (Number(price) || 0) * baseServiceCount;
-  const printingTotal = (Number(printingFee) || 0) * basePaperCount;
+
+  const printingTotal = effectivePrintingFee * basePaperCount;
+
   const taxTotal =
     typeof tax !== "undefined"
       ? Number(tax) * basePaperCount
-      : +(Number(printingFee) * 0.05 * basePaperCount).toFixed(2);
+      : +(effectivePrintingFee * 0.05 * basePaperCount).toFixed(2);
+
   const totalServicePrice =
     typeof clientPrice !== "undefined"
       ? Number(clientPrice) * baseServiceCount
       : servicePriceTotal + printingTotal + taxTotal;
+
 
   // التحقق: يعتمد على المفاتيح الثابتة فقط
   const allDocsUploaded =
@@ -538,7 +545,7 @@ export default function ServiceProfileCard({
               <tr>
                 <td>{lang === "ar" ? "رسوم الطباعة" : "Printing Fee"}</td>
                 <td className="text-right">
-                  {(Number(printingFee) || 0) * (allowPaperCount ? paperCount : 1)}{" "}
+                  {effectivePrintingFee * (allowPaperCount ? paperCount : 1)}{" "}
                   {lang === "ar" ? "د.إ" : "AED"}
                 </td>
               </tr>
@@ -553,9 +560,7 @@ export default function ServiceProfileCard({
                     typeof tax !== "undefined"
                       ? Number(tax) * (allowPaperCount ? paperCount : 1)
                       : +(
-                          Number(printingFee) *
-                          0.05 *
-                          (allowPaperCount ? paperCount : 1)
+                          effectivePrintingFee * 0.05 * (allowPaperCount ? paperCount : 1)
                         ).toFixed(2)
                   )}{" "}
                   {lang === "ar" ? "د.إ" : "AED"}
@@ -664,23 +669,27 @@ export default function ServiceProfileCard({
       </div>
 
       {/* المودال */}
-      <ServicePayModal
-        open={showPayModal}
-        onClose={() => setShowPayModal(false)}
-        serviceName={name}
-        totalPrice={totalServicePrice}
-        printingFee={printingFee}
-        coinsBalance={coinsBalance}
-        cashbackCoins={coins}
-        userWallet={wallet}
-        lang={lang}
-        customerId={customerId}
-        userId={userId}
-        userEmail={userEmail}
-        uploadedDocs={uploadedDocs}
-        onPaid={handlePaid}
-        provider={Array.isArray(provider) ? provider : provider ? [provider] : []}
-      />
+<ServicePayModal
+  open={showPayModal}
+  onClose={() => setShowPayModal(false)}
+  serviceName={name}
+  totalPrice={totalServicePrice}
+  printingFee={effectivePrintingFee}
+  freePrinting={freePrinting}
+  tax={tax}  
+  clientType={category}
+  coinsBalance={coinsBalance}
+  cashbackCoins={coins}
+  userWallet={wallet}
+  lang={lang}
+  customerId={customerId}
+  userId={userId}
+  userEmail={userEmail}
+  uploadedDocs={uploadedDocs}
+  onPaid={handlePaid}
+  provider={Array.isArray(provider) ? provider : provider ? [provider] : []}
+/>
+
       <div className="absolute -bottom-6 right-0 left-0 w-full h-8 bg-gradient-to-t from-emerald-100/60 via-white/20 to-transparent blur-2xl opacity-80 z-0 pointer-events-none"></div>
     </div>
   );

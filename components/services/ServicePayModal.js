@@ -63,6 +63,7 @@ export default function ServicePayModal({
   provider,
   totalPrice,
   printingFee,
+  tax,
   coinsBalance,
   cashbackCoins,
   userWallet,
@@ -73,6 +74,10 @@ export default function ServicePayModal({
   uploadedDocs,
   onPaid,
   clientType = "resident",
+
+  // ✅ NEW: لو الشركة عندها اشتراك فعّال
+  freePrinting = false,
+
   assignedTo, // اضف هنا الـ id الخاص بالموظف (مثلاً من props أو state)
   assignedToName // اضف هنا اسم الموظف (مثلاً من props أو state)
 }) {
@@ -84,11 +89,20 @@ export default function ServicePayModal({
 
   const router = useRouter();
 
+  // ✅ effective printing fee (subscription => 0 for companies)
+  const effectivePrintingFee =
+    clientType === "company" && freePrinting ? 0 : (Number(printingFee) || 0);
+
+  // ✅ totalPrice is assumed to already include printingFee,
+  // so we replace it with effectivePrintingFee
+  const effectiveTotalPrice =
+    (Number(totalPrice) || 0) - (Number(printingFee) || 0) + effectivePrintingFee;
+
   // حسابات الكوينات
-  const maxCoinDiscount = Math.floor(printingFee * 0.1 * 100);
+  const maxCoinDiscount = Math.floor(effectivePrintingFee * 0.1 * 100);
   const coinDiscount = useCoins ? Math.min(coinsBalance, maxCoinDiscount) : 0;
   const coinDiscountValue = coinDiscount / 100;
-  const finalPrice = totalPrice - coinDiscountValue;
+  const finalPrice = effectiveTotalPrice - coinDiscountValue;
   const willGetCashback = !useCoins;
 
   // Stripe
@@ -173,7 +187,7 @@ export default function ServicePayModal({
         serviceId: serviceData.serviceId || serviceId || "",
         providers,
         paidAmount: finalPrice,
-        printingFee,
+        printingFee: effectivePrintingFee, // ✅ هنا
         coinsUsed: useCoins ? coinDiscountValue : 0,
         coinsGiven: willGetCashback ? cashbackCoins : 0,
         uploadedDocs,
@@ -241,7 +255,7 @@ export default function ServicePayModal({
           serviceName: uiServiceName,
           customerId,
           userEmail,
-          printingFee,
+          printingFee: effectivePrintingFee, // ✅ هنا
           vat: 0
         }),
       });
@@ -253,13 +267,13 @@ export default function ServicePayModal({
           service: {
             name: uiServiceName,
             id: serviceId,
-            price: (totalPrice - printingFee - (typeof tax !== "undefined" ? tax : +(printingFee * 0.05).toFixed(2))),
-            printingFee,
-            vat: (typeof tax !== "undefined" ? tax : +(printingFee * 0.05).toFixed(2)),
+            price: (effectiveTotalPrice - effectivePrintingFee - (typeof tax !== "undefined" ? tax : +(effectivePrintingFee * 0.05).toFixed(2))),
+            printingFee: effectivePrintingFee,
+            vat: (typeof tax !== "undefined" ? tax : +(effectivePrintingFee * 0.05).toFixed(2)),
             coinDiscount: useCoins ? coinDiscountValue : 0,
             userEmail
           },
-          totalPrice,
+          totalPrice: effectiveTotalPrice,
           finalPrice: finalPriceWithFees,
           processingFee: stripeFeeValue,
           customerId,
@@ -324,15 +338,17 @@ export default function ServicePayModal({
             <tbody>
               <tr>
                 <td>{lang === "ar" ? "سعر الخدمة" : "Service Price"}</td>
-                <td className="text-right">{(totalPrice - printingFee - (typeof tax !== "undefined" ? tax : +(printingFee * 0.05).toFixed(2))).toFixed(2)} د.إ</td>
+                <td className="text-right">
+                  {(effectiveTotalPrice - effectivePrintingFee - (typeof tax !== "undefined" ? tax : +(effectivePrintingFee * 0.05).toFixed(2))).toFixed(2)} د.إ
+                </td>
               </tr>
               <tr>
                 <td>{lang === "ar" ? "رسوم الطباعة" : "Printing Fee"}</td>
-                <td className="text-right">{printingFee.toFixed(2)} د.إ</td>
+                <td className="text-right">{effectivePrintingFee.toFixed(2)} د.إ</td>
               </tr>
               <tr>
                 <td>{lang === "ar" ? "ضريبة القيمة المضافة 5%" : "VAT 5%"}</td>
-                <td className="text-right">{(typeof tax !== "undefined" ? tax : +(printingFee * 0.05).toFixed(2)).toFixed(2)} د.إ</td>
+                <td className="text-right">{(typeof tax !== "undefined" ? tax : +(effectivePrintingFee * 0.05).toFixed(2)).toFixed(2)} د.إ</td>
               </tr>
               <tr>
                 <td className="flex items-center gap-1">
@@ -345,7 +361,7 @@ export default function ServicePayModal({
               </tr>
               <tr>
                 <td>{lang === "ar" ? "الإجمالي قبل الخصم" : "Total Before Discount"}</td>
-                <td className="text-right">{totalPrice.toFixed(2)} د.إ</td>
+                <td className="text-right">{effectiveTotalPrice.toFixed(2)} د.إ</td>
               </tr>
               <tr>
                 <td>{lang === "ar" ? "رسوم معالجة الدفع الإلكتروني" : "Processing Fee"}</td>
@@ -357,6 +373,7 @@ export default function ServicePayModal({
               </tr>
             </tbody>
           </table>
+
           <div className="w-full flex flex-row items-center justify-between mb-1">
             <label className="flex items-center gap-1 font-bold text-xs text-emerald-700 cursor-pointer">
               <input
@@ -374,6 +391,7 @@ export default function ServicePayModal({
               {lang === "ar" ? "رصيدك:" : "Your coins:"} {coinsBalance}
             </span>
           </div>
+
           <div className="w-full flex flex-row items-center justify-between mb-1">
             <label className={`flex items-center gap-1 font-bold text-emerald-800 text-xs cursor-pointer ${userWallet < finalPrice ? "opacity-60" : ""}`}>
               <input
@@ -400,6 +418,7 @@ export default function ServicePayModal({
               {lang === "ar" ? "بوابة الدفع" : "Gateway"}
             </label>
           </div>
+
           <div className="w-full mb-1 text-center">
             {willGetCashback ? (
               <div className="flex flex-row items-center justify-center gap-1 text-yellow-700 font-bold text-xs">
@@ -416,6 +435,7 @@ export default function ServicePayModal({
               </div>
             )}
           </div>
+
           <button
             onClick={onPayClick}
             disabled={isPaying}
@@ -437,12 +457,14 @@ export default function ServicePayModal({
               <span>{lang === "ar" ? `دفع الآن (${finalPriceWithFees.toFixed(2)} د.إ)` : `Pay Now (${finalPriceWithFees.toFixed(2)} AED)`}</span>
             )}
           </button>
+
           {payMsg && (
             <div className={`mt-2 text-center font-bold text-xs flex flex-row items-center justify-center gap-1 ${msgSuccess ? "text-emerald-700" : "text-red-600"}`}>
               {msgSuccess ? <FaCheckCircle className="text-emerald-500" size={16} /> : <FaExclamationCircle className="text-red-400" size={14} />}
               <span>{payMsg}</span>
             </div>
           )}
+
           <div className="w-full text-center mt-5 mb-1 flex flex-col items-center gap-1">
             <div className="text-xs text-emerald-700 font-semibold flex items-center justify-center">
               <FaCheckCircle className="inline mr-2 text-emerald-500" />

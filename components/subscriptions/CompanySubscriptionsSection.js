@@ -6,6 +6,27 @@ import { firestore, auth } from "@/lib/firebase.client";
 import { useRouter } from "next/navigation";
 import CompanyPlanCard from "./CompanyPlanCard";
 
+// ✅ لو Stripe API عندك بيتوقع amount بالـ fils/cents (AED * 100) خليها true
+const SEND_AMOUNT_IN_SMALLEST_UNIT = false;
+
+// ✅ لو عايز تفصل بين دفع الاشتراكات والخدمات (اختياري)
+const PAYMENT_STORAGE_KEY = "paymentData"; // أو: "paymentData_subscription"
+
+function toNumberSafe(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+function calcDays(subscriptionDays, monthsShown) {
+  const sd = toNumberSafe(subscriptionDays || 0);
+  if (Number.isFinite(sd) && sd > 0) return Math.max(0, Math.round(sd));
+
+  const m = toNumberSafe(monthsShown || 0);
+  if (Number.isFinite(m) && m > 0) return Math.max(0, Math.round(m * 30));
+
+  return 0;
+}
+
 export default function CompanySubscriptionsSection({
   lang = "ar",
   darkMode = false,
@@ -15,6 +36,7 @@ export default function CompanySubscriptionsSection({
 
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false); // ✅ منع دبل كليك
 
   useEffect(() => {
     let alive = true;
@@ -22,9 +44,7 @@ export default function CompanySubscriptionsSection({
     async function load() {
       setLoading(true);
       try {
-        const snap = await getDocs(
-          collection(firestore, "companySubscriptionPlans")
-        );
+        const snap = await getDocs(collection(firestore, "companySubscriptionPlans"));
         const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
         const filtered = arr
@@ -46,7 +66,6 @@ export default function CompanySubscriptionsSection({
     };
   }, []);
 
-  // ✅ ده اللي هيتنفّذ لما المستخدم يضغط "اشترك الآن"
   const handleSubscribe = useCallback(
     async ({
       planKey,
@@ -57,12 +76,10 @@ export default function CompanySubscriptionsSection({
       bonus,
       isOffer,
       isMost,
-
-      // ✅ optional values from card (لو ضفناهم)
       subscriptionName,
       subscriptionDays,
     }) => {
-      // لو الأب باعت onSubscribe سيبه هو يتحكم
+      // ✅ لو الأب متحكم
       if (typeof onSubscribe === "function") {
         return onSubscribe({
           planKey,
@@ -78,6 +95,9 @@ export default function CompanySubscriptionsSection({
         });
       }
 
+      if (submitting) return; // ✅ safety
+      setSubmitting(true);
+
       try {
         const user = auth.currentUser;
         if (!user) {
@@ -86,22 +106,28 @@ export default function CompanySubscriptionsSection({
           return;
         }
 
-        // ✅ مدة الاشتراك بالأيام (لو مش مبعوتة نحسبها من monthsShown)
-        const days =
-          Number(subscriptionDays || 0) > 0
-            ? Number(subscriptionDays)
-            : Number(monthsShown || 0) > 0
-            ? Number(monthsShown) * 30
-            : 0;
+        // ✅ سعر آمن
+        const basePrice = toNumberSafe(price);
+        if (!Number.isFinite(basePrice) || basePrice <= 0) {
+          alert(lang === "ar" ? "السعر غير صالح" : "Invalid price");
+          return;
+        }
+
+        // ✅ أيام آمنة
+        const days = calcDays(subscriptionDays, monthsShown);
 
         const subName =
-          subscriptionName ||
+          subscriptionName?.trim?.() ||
           (lang === "ar" ? `اشتراك ${planKey}` : `Subscription ${planKey}`);
 
-        // ✅ نفس ستايل دفع الخدمات: create payment intent
+        // ✅ amount حسب نظام السيرفر
+        const amountForServer = SEND_AMOUNT_IN_SMALLEST_UNIT
+          ? Math.round(basePrice * 100)
+          : basePrice;
+
         const payload = {
-          amount: Number(price), // AED (قيمة الاشتراك فقط)
-          serviceId: `subscription_${planKey}`, // ✅ underscore
+          amount: amountForServer,
+          serviceId: `subscription_${planKey}`,
           serviceName: subName,
 
           customerId: user.uid,
@@ -111,13 +137,10 @@ export default function CompanySubscriptionsSection({
           providers: [],
           requestType: "subscription",
 
-          // ✅ لا VAT ولا طباعة ولا كوينز في الاشتراك
           coinsUsed: 0,
           coinsGiven: 0,
           printingFee: 0,
           vat: 0,
-
-          // ✅ رسوم Stripe هتيجي من السيرفر (processingFee)
           processingFee: 0,
 
           assignedTo: "",
@@ -125,7 +148,6 @@ export default function CompanySubscriptionsSection({
           status: "pending",
           employeeData: {},
 
-          // ✅ بيانات الاشتراك
           planKey,
           pricingKey,
           monthsShown,
@@ -144,25 +166,32 @@ export default function CompanySubscriptionsSection({
           body: JSON.stringify(payload),
         });
 
-        const data = await r.json();
-        if (!r.ok || !data?.ok)
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || !data?.ok) {
           throw new Error(data?.error || "Failed to create payment intent");
+        }
 
-        // ✅ هنا التعديل المهم:
-        // نخزن paymentData ونروح لنفس بوابة دفع الخدمات: /payment/service
-        const processingFeeFromServer = Number(data?.processingFee ?? 0);
-        const totalBefore = Number(price);
-        const final = Number(data?.finalPrice ?? totalBefore + processingFeeFromServer);
+        // ✅ رسوم Stripe + final
+        const processingFeeFromServer = toNumberSafe(data?.processingFee ?? 0);
+        const finalFromServer = toNumberSafe(data?.finalPrice);
+
+        const processingFeeSafe = Number.isFinite(processingFeeFromServer)
+          ? processingFeeFromServer
+          : 0;
+
+        // هنا العرض في الواجهة بالدرهم دائمًا
+        const totalBefore = basePrice;
+        const final = Number.isFinite(finalFromServer)
+          ? finalFromServer
+          : totalBefore + processingFeeSafe;
 
         const paymentDataForUI = {
           lang,
           requestType: "subscription",
 
-          // required by payment page:
           clientSecret: data.clientSecret,
           orderNumber: data.orderNumber,
 
-          // display:
           serviceId: `subscription_${planKey}`,
           serviceName: subName,
           subscriptionName: subName,
@@ -170,28 +199,28 @@ export default function CompanySubscriptionsSection({
           pricingKey,
           subscriptionDays: days,
 
-          price: totalBefore, // قيمة الاشتراك
-          totalPrice: totalBefore, // قبل رسوم Stripe
-          finalPrice: final, // بعد رسوم Stripe
+          price: totalBefore,
+          totalPrice: totalBefore,
+          finalPrice: final,
 
           printingFee: 0,
           vat: 0,
           coinDiscount: 0,
-          processingFee: processingFeeFromServer,
+          processingFee: processingFeeSafe,
 
           userEmail: user.email,
         };
 
-        localStorage.setItem("paymentData", JSON.stringify(paymentDataForUI));
-
-        // ✅ نفس صفحة الخدمات بالظبط
+        localStorage.setItem(PAYMENT_STORAGE_KEY, JSON.stringify(paymentDataForUI));
         router.push("/payment/service");
       } catch (e) {
         console.error("subscribe failed:", e);
         alert(lang === "ar" ? "حصل خطأ أثناء بدء الدفع" : "Failed to start payment");
+      } finally {
+        setSubmitting(false);
       }
     },
-    [onSubscribe, lang, router]
+    [onSubscribe, lang, router, submitting]
   );
 
   const emptyText = useMemo(
@@ -220,7 +249,8 @@ export default function CompanySubscriptionsSection({
             plan={plan}
             lang={lang}
             darkMode={darkMode}
-            onSubscribe={handleSubscribe} // ✅ الربط الحقيقي
+            onSubscribe={handleSubscribe}
+            disabled={submitting} // ✅ لو الكارد بيدعمها
           />
         ))}
       </div>

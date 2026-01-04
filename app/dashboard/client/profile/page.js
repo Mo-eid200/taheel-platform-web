@@ -291,7 +291,8 @@ function ClientProfilePageInner({ userId }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [ownerResident, setOwnerResident] = useState(null);
-
+  const [freePrinting, setFreePrinting] = useState(false);
+  const [subLoading, setSubLoading] = useState(false);
   const [showCoinsMenu, setShowCoinsMenu] = useState(false);
   const [showWalletMenu, setShowWalletMenu] = useState(false);
   const [showMessagesMenu, setShowMessagesMenu] = useState(false);
@@ -323,6 +324,7 @@ function ClientProfilePageInner({ userId }) {
   // derived basics
   const clientType = (client?.type || client?.accountType || "").toLowerCase();
   const dir = lang === "ar" ? "rtl" : "ltr";
+  const isCompanyServicesSection = selectedSection === "companyServices";
 
   // =====================================
   // prevent browser back if logged in
@@ -1041,7 +1043,6 @@ function ClientProfilePageInner({ userId }) {
 )}
 
 
-
           {["residentServices", "companyServices", "nonresidentServices", "otherServices"].includes(selectedSection) && (
             <>
               <SectionTitle icon={sectionTitles[selectedSection].icon} color={sectionTitles[selectedSection].color}>
@@ -1107,7 +1108,7 @@ function ClientProfilePageInner({ userId }) {
                         description={displayDesc}
                         description_en={displayDesc}
                         price={srv.price}
-                        printingFee={srv.printingFee}
+                        printingFee={freePrinting && isCompanyServicesSection ? 0 : srv.printingFee}
                         tax={srv.tax}
                         clientPrice={srv.clientPrice}
                         duration={srv.duration}
