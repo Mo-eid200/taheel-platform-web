@@ -195,21 +195,20 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
         return;
       }
 
-      // 1) confirmPayment
-      (async () => {
-        try {
-          await fetch("/api/confirmPayment", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              paymentIntentId: paymentIntent.id,
-              requestId: orderNumber ?? null,
-            }),
-          });
-        } catch (err) {
-          console.warn("confirmPayment call failed:", err);
-        }
-      })();
+// 1) confirmPayment (IMPORTANT: await)
+try {
+  await fetch("/api/confirmPayment", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      paymentIntentId: paymentIntent.id,
+      requestId: orderNumber ?? null,
+    }),
+  });
+} catch (err) {
+  console.warn("confirmPayment call failed:", err);
+}
+
 
       // 2) send email
       (async () => {

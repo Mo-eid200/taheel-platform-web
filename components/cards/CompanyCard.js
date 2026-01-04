@@ -7,7 +7,17 @@ import CompanyCardModal from "./CompanyCardModal";
 
 // Firestore
 import { firestore } from "@/lib/firebase.client";
-import { doc, getDoc, updateDoc, collection, query, where, getDocs, limit } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  updateDoc,
+  collection,
+  query,
+  where,
+  getDocs,
+  limit,
+  Timestamp, // ✅ (إضافة)
+} from "firebase/firestore";
 
 export default function CompanyCardGold({ companyId: initialCompanyId, lang = "ar" }) {
   const [company, setCompany] = useState(null);
@@ -24,6 +34,54 @@ export default function CompanyCardGold({ companyId: initialCompanyId, lang = "a
 
   // المعرّف الحقيقي لمستند فايرستور (قد يختلف عن companyId في حسابات قديمة)
   const [resolvedDocId, setResolvedDocId] = useState(initialCompanyId || "");
+
+  // =========================
+  // ✅ (إضافة) Subscription state
+  // =========================
+  const [sub, setSub] = useState(null);
+  const [subLoading, setSubLoading] = useState(false);
+
+  // ✅ (إضافة) ألوان الباقات (نفس BRAND اللي عندك)
+  const SUB_BRAND = {
+    starter: { bar: "from-emerald-400 to-emerald-600", text: "text-emerald-50" },
+    growth: { bar: "from-sky-400 to-sky-600", text: "text-sky-50" },
+    scale: { bar: "from-purple-400 to-purple-600", text: "text-purple-50" },
+    enterprise: { bar: "from-yellow-400 to-orange-500", text: "text-black" },
+    none: { bar: "from-slate-600 to-slate-500", text: "text-white" },
+    warn: { bar: "from-amber-500 to-orange-600", text: "text-black" },
+    danger: { bar: "from-red-600 to-rose-600", text: "text-white" },
+  };
+
+  // ✅ (إضافة) Helpers
+  const toDateSafe = (v) => {
+    try {
+      if (!v) return null;
+      if (v instanceof Date) return v;
+      if (v instanceof Timestamp) return v.toDate();
+      if (typeof v === "object" && typeof v?.toDate === "function") return v.toDate();
+      if (typeof v === "number") return new Date(v);
+      if (typeof v === "string") {
+        const d = new Date(v);
+        return isNaN(d.getTime()) ? null : d;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const fmtDate = (d) => {
+    if (!d) return lang === "ar" ? "غير متوفر" : "N/A";
+    try {
+      return d.toLocaleDateString(lang === "ar" ? "ar-EG" : "en-US", {
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+      });
+    } catch {
+      return String(d);
+    }
+  };
 
   // جلب بيانات الشركة من فايرستور مع Fallback ذكي
   useEffect(() => {
@@ -96,6 +154,70 @@ export default function CompanyCardGold({ companyId: initialCompanyId, lang = "a
     };
   }, [initialCompanyId]);
 
+  // =========================
+  // ✅ (إضافة) Fetch subscription after resolving doc id
+  // =========================
+  useEffect(() => {
+    if (!resolvedDocId) return;
+    let cancelled = false;
+
+    async function fetchSub() {
+      setSubLoading(true);
+      try {
+        const ref = doc(firestore, "companySubscriptions", resolvedDocId);
+        const snap = await getDoc(ref);
+
+        if (cancelled) return;
+
+        if (!snap.exists()) {
+          setSub(null);
+          setSubLoading(false);
+          return;
+        }
+
+        const data = snap.data() || {};
+
+        // نتوقع fields مثل:
+        // planKey: "starter|growth|scale|enterprise"
+        // planName: "Starter" (اختياري)
+        // startAt / activatedAt: Timestamp
+        // endAt / expiresAt: Timestamp
+        // status: "active" (اختياري)
+        const planKey = String(data.planKey || data.plan || "none").toLowerCase();
+        const planName = data.planName || data.subscriptionName || planKey;
+
+        const startAt =
+          toDateSafe(data.startAt) ||
+          toDateSafe(data.activatedAt) ||
+          toDateSafe(data.createdAt) ||
+          null;
+
+        const endAt =
+          toDateSafe(data.endAt) ||
+          toDateSafe(data.expiresAt) ||
+          toDateSafe(data.expireAt) ||
+          null;
+
+        setSub({
+          planKey,
+          planName,
+          startAt,
+          endAt,
+          status: data.status || "active",
+        });
+      } catch {
+        if (!cancelled) setSub(null);
+      } finally {
+        if (!cancelled) setSubLoading(false);
+      }
+    }
+
+    fetchSub();
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedDocId]);
+
   // نصوص
   const t = {
     ar: {
@@ -121,6 +243,15 @@ export default function CompanyCardGold({ companyId: initialCompanyId, lang = "a
       logoUploaded: "تم رفع الشعار بنجاح",
       logoUploadError: "فشل رفع الشعار",
       notFound: "لم يتم العثور على بيانات هذه الشركة",
+
+      // ✅ (إضافة) subscription labels
+      noSub: "لا يوجد اشتراك",
+      subActive: "اشتراك مفعل",
+      subEnds: "ينتهي في",
+      subStarts: "تفعيل",
+      renewHint: "يرجى تجديد الباقة",
+      subExpired: "الاشتراك منتهي — يرجى التجديد",
+      loadingSub: "جاري التحقق من الاشتراك...",
     },
     en: {
       cardTitle: "Taheel Card",
@@ -145,6 +276,15 @@ export default function CompanyCardGold({ companyId: initialCompanyId, lang = "a
       logoUploaded: "Logo uploaded successfully",
       logoUploadError: "Logo upload failed",
       notFound: "No company data found",
+
+      // ✅ (إضافة)
+      noSub: "No subscription",
+      subActive: "Active subscription",
+      subEnds: "Ends",
+      subStarts: "Starts",
+      renewHint: "Please renew your plan",
+      subExpired: "Subscription expired — renew",
+      loadingSub: "Checking subscription...",
     },
   }[lang === "en" ? "en" : "ar"];
 
@@ -170,6 +310,28 @@ export default function CompanyCardGold({ companyId: initialCompanyId, lang = "a
     company?.license?.success ||
     company?.documents?.license?.success
   );
+
+  // =========================
+  // ✅ (إضافة) Subscription computed view
+  // =========================
+  const subEnd = sub?.endAt ? new Date(sub.endAt) : null;
+  const subStart = sub?.startAt ? new Date(sub.startAt) : null;
+
+  let subDaysLeft = null;
+  if (subEnd && !isNaN(subEnd.getTime())) {
+    const now = new Date();
+    subDaysLeft = Math.ceil((subEnd - now) / (1000 * 60 * 60 * 24));
+  }
+
+  const hasSub = !!sub && !!subEnd && !isNaN(subEnd.getTime());
+  const subExpired = hasSub && typeof subDaysLeft === "number" && subDaysLeft < 0;
+  const subWarn = hasSub && typeof subDaysLeft === "number" && subDaysLeft >= 0 && subDaysLeft <= 7;
+
+  const planKey = hasSub ? (String(sub.planKey || "none").toLowerCase()) : "none";
+  const planTheme = SUB_BRAND[planKey] || SUB_BRAND.none;
+
+  // لو قرب ينتهي أو انتهى: نغلب التحذير بصريًا
+  const barTheme = subExpired ? SUB_BRAND.danger : subWarn ? SUB_BRAND.warn : planTheme;
 
   // رفع/تحديث الشعار
   const handleLogoChange = async (e) => {
@@ -254,13 +416,74 @@ export default function CompanyCardGold({ companyId: initialCompanyId, lang = "a
         }}
       />
 
-      {/* شريط تنبيه */}
+      {/* شريط تنبيه (الرخصة) */}
       {typeof diffDays === "number" && diffDays <= 30 && (
         <div className="absolute top-0 left-0 right-0 flex items-center gap-2 bg-gradient-to-r from-yellow-700 to-yellow-400 text-white px-3 py-1 rounded-t-3xl text-xs font-bold z-20 animate-pulse">
           <FaBell className="inline mr-1" />
           {expired ? t.expired : diffDays === 0 ? t.expiresToday : t.expiresIn(diffDays)}
         </div>
       )}
+
+      {/* =========================
+          ✅ (إضافة) Subscription Bar
+         ========================= */}
+      <div
+        className={[
+          "absolute left-0 right-0 z-20",
+          // لو فيه شريط الرخصة فوق، ننزّل الاشتراك تحته شوية
+          (typeof diffDays === "number" && diffDays <= 30) ? "top-7" : "top-0",
+        ].join(" ")}
+      >
+        <div className={`px-3 py-2 bg-gradient-to-r ${barTheme.bar}`}>
+          <div className={`flex items-center justify-between gap-2 text-[12px] font-extrabold ${barTheme.text}`}>
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="inline-flex w-2.5 h-2.5 rounded-full bg-white/70" />
+              <span className="truncate">
+                {subLoading
+                  ? t.loadingSub
+                  : !hasSub
+                  ? t.noSub
+                  : subExpired
+                  ? (lang === "ar" ? `${sub?.planName || sub?.planKey || ""} — ${t.subExpired}` : `${sub?.planName || sub?.planKey || ""} — ${t.subExpired}`)
+                  : (sub?.planName || sub?.planKey || t.subActive)}
+              </span>
+            </div>
+
+            <div className="text-[11px] font-black opacity-95 whitespace-nowrap">
+              {hasSub ? (
+                <>
+                  {lang === "ar" ? "حتى" : "Till"} {fmtDate(subEnd)}
+                </>
+              ) : (
+                <span className="opacity-90">{lang === "ar" ? "—" : "—"}</span>
+              )}
+            </div>
+          </div>
+
+          {/* سطر التفاصيل + تحذير */}
+          <div className={`mt-1 text-[11px] font-semibold ${barTheme.text} opacity-95`}>
+            {hasSub ? (
+              <div className="flex items-center justify-between gap-2">
+                <span className="opacity-95">
+                  {t.subStarts}: {fmtDate(subStart)} • {t.subEnds}: {fmtDate(subEnd)}
+                </span>
+
+                {subWarn && !subExpired ? (
+                  <span className="px-2 py-0.5 rounded-full bg-black/15 border border-black/10 text-[10px] font-black">
+                    {t.renewHint}
+                  </span>
+                ) : null}
+              </div>
+            ) : (
+              <div className="opacity-95">
+                {lang === "ar"
+                  ? "اختر باقة للاشتراك لتفعيل الخدمات"
+                  : "Choose a plan to activate services"}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* اللوجو الثابت */}
       <div className="w-full flex justify-center items-center mt-5 mb-1 z-10 relative">
@@ -338,15 +561,15 @@ export default function CompanyCardGold({ companyId: initialCompanyId, lang = "a
             {editingId ? (
               <>
                 <input
-                    className="border border-yellow-300 rounded px-1 text-xs font-mono w-[120px]"
-                    value={newCompanyId}
-                    onChange={(e) => setNewCompanyId(e.target.value)}
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleCompanyIdSave();
-                      if (e.key === "Escape") setEditingId(false);
-                    }}
-                  />
+                  className="border border-yellow-300 rounded px-1 text-xs font-mono w-[120px]"
+                  value={newCompanyId}
+                  onChange={(e) => setNewCompanyId(e.target.value)}
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleCompanyIdSave();
+                    if (e.key === "Escape") setEditingId(false);
+                  }}
+                />
                 <button onClick={handleCompanyIdSave} className="text-yellow-700 text-xs font-bold px-1 rounded hover:bg-yellow-50">
                   {t.save}
                 </button>

@@ -1,303 +1,581 @@
-// /api/createPaymentIntent.js (أو route مشابه)
-import Stripe from "stripe";
-import { initializeApp, cert, getApps } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
+"use strict";
 
-// تهيئة Firebase Admin مرة واحدة
-let firestore;
-if (!getApps().length) {
-  const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
-  serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
-  initializeApp({ credential: cert(serviceAccount) });
-  firestore = getFirestore();
-} else {
-  firestore = getFirestore();
+import Stripe from "stripe";
+import admin from "firebase-admin";
+
+/**
+ * Confirm a Stripe PaymentIntent (idempotent) and sync with Firestore.
+ * Handles wallet recharge & service payments.
+ *
+ * ✅ Subscriptions:
+ * - Do NOT change requests structure/logic.
+ * - Only write subscription info into NEW collection: companySubscriptions
+ * - Keep requests flow intact (still creates/updates request doc normally).
+ */
+
+if (!admin.apps.length) {
+  try {
+    const sa = process.env.GOOGLE_SERVICE_ACCOUNT_KEY
+      ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY)
+      : null;
+    if (sa && sa.private_key) {
+      sa.private_key = sa.private_key.replace(/\\n/g, "\n");
+      admin.initializeApp({ credential: admin.credential.cert(sa) });
+    } else {
+      admin.initializeApp();
+    }
+  } catch (e) {
+    console.error("Failed to initialize firebase-admin:", e);
+    try {
+      admin.initializeApp();
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
+const db = admin.firestore();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2022-11-15",
 });
 
-// نولّد رقم طلب شبه "REQ-123-4567"
-function generateOrderNumber() {
-  const part1 = Math.floor(100 + Math.random() * 900);
-  const part2 = Math.floor(1000 + Math.random() * 9000);
-  return `REQ-${part1}-${part2}`;
+// helpers
+function safeNum(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+function nowISO() {
+  return new Date().toISOString();
 }
 
-/**
- * ✅ حساب رسوم Stripe (processingFee) على السيرفر
- * خليها قابلة للتعديل من env:
- * STRIPE_FEE_PERCENT مثلا: 0.029
- * STRIPE_FEE_FIXED_AED مثلا: 1.0
- */
-function calcStripeFeeAED(baseAmountAED, options = {}) {
-  const percent = Number(process.env.STRIPE_FEE_PERCENT ?? 0.029); // 2.9%
-  const fixed = Number(process.env.STRIPE_FEE_FIXED_AED ?? 1.0); // 1 AED
+// ✅ Subscription helpers
+function safeStr(v) {
+  if (v == null) return "";
+  return String(v);
+}
+function addMonths(date, months) {
+  const d = new Date(date);
+  const day = d.getDate();
+  d.setMonth(d.getMonth() + Number(months || 0));
+  if (d.getDate() < day) d.setDate(0);
+  return d;
+}
 
-  const isInternational = !!options.isInternational;
-  const isCurrencyConversion = !!options.isCurrencyConversion;
+// نفس اللى في الويب هوك: نقرأ الخدمة من servicesByClientType
+async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFallback = "") {
+  const clientTypesToTry = clientType ? [clientType] : ["company", "resident", "nonresident", "other"];
 
-  const intlFee = isInternational ? baseAmountAED * 0.01 : 0;
-  const currencyFee = isCurrencyConversion ? baseAmountAED * 0.01 : 0;
+  for (const ct of clientTypesToTry) {
+    try {
+      const docRef = db.collection("servicesByClientType").doc(String(ct));
+      const snap = await docRef.get();
+      if (!snap.exists) continue;
+      const all = snap.data() || {};
 
-  const fee = baseAmountAED * percent + fixed + intlFee + currencyFee;
-  return Math.round(fee * 100) / 100; // 2 decimals
+      // direct key match
+      if (serviceId && Object.prototype.hasOwnProperty.call(all, serviceId)) {
+        return all[serviceId];
+      }
+
+      // match by fields
+      for (const k of Object.keys(all)) {
+        const s = all[k];
+        if (!s) continue;
+        if (
+          (s.serviceId && String(s.serviceId) === String(serviceId)) ||
+          (serviceId && String(k) === String(serviceId)) ||
+          (serviceNameFallback && String(s.name) === String(serviceNameFallback))
+        ) {
+          return s;
+        }
+      }
+    } catch (e) {
+      console.warn("fetchServiceFromByClientType error for", ct, e?.message || e);
+    }
+  }
+
+  return null;
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "POST")
-    return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const {
-    amount, // رقم عادي بالدرهم (مثلاً 250.00) = قيمة الخدمة/الاشتراك فقط
-    serviceId,
-    serviceName,
-    customerId,
-    userEmail,
-    clientType, // "resident" | "nonresident" | "company" | "other"
-    attachments = {},
-    providers = [],
-    coinsUsed = 0,
-    coinsGiven = 0,
-    printingFee = 0,
-
-    // ⚠️ processingFee من الفرونت هنحترمه للخدمات العادية زي ما هو (منطق قديم)
-    // أما للاشتراك هنحسبه سيرفر ونتجاهل القادم
-    processingFee = 0,
-
-    assignedTo = "",
-    assignedToName = "",
-    status = "pending",
-    employeeData = {},
-    lang = "ar",
-
-    // ✅ Subscriptions (optional)
-    planKey = "",
-    pricingKey = "",
-    monthsShown = 0,
-    paidMonths = 0,
-    bonus = 0,
-
-    // ✅ مدة الاشتراك بالأيام (لو الفرونت بعتها)
-    subscriptionDays = 0,
-    subscriptionName = "",
-
-    // ✅ اختياري: لو عايز تحسب رسوم إضافية
-    isInternational = false,
-    isCurrencyConversion = false,
-
-    // ✅ لو عندك vat/coinDiscount موجودين في منطقك القديم (لو مش بتبعتهم، هيفضلوا 0)
-    vat = 0,
-    coinDiscount = 0,
-  } = req.body || {};
-
-  const baseAmount = Number(amount);
-
-  // validations الأساسية (كما هي)
-  if (!baseAmount || baseAmount <= 0 || !serviceName || !customerId || !userEmail) {
-    return res.status(400).json({ error: "Missing required fields." });
-  }
+  const { paymentIntentId, requestId: providedRequestId } = req.body || {};
+  if (!paymentIntentId) return res.status(400).json({ error: "Missing paymentIntentId" });
 
   try {
-    const requestId = generateOrderNumber();
+    // 1) هات الـ PaymentIntent من Stripe
+    const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
+    if (!pi) return res.status(400).json({ error: "PaymentIntent not found" });
 
-    // ✅ Detect subscription (موسع + صحيح)
+    if (String(pi.status).toLowerCase() !== "succeeded") {
+      return res.status(400).json({
+        error: "PaymentIntent not succeeded",
+        status: pi.status,
+      });
+    }
+
+    // 2) جهّز الداتا من الـ metadata
+    const md = pi.metadata || {};
+
+    let reqId = providedRequestId || md.requestId || md.orderNumber || null;
+
+    const requestType =
+      md.requestType ||
+      (md.serviceName && String(md.serviceName).toLowerCase().includes("wallet")
+        ? "wallet_recharge"
+        : "service");
+
+    const coinsGiven = safeNum(md.coinsGiven ?? md.cashbackCoins ?? md.coins ?? 0);
+    const coinsUsed = safeNum(md.coinsUsed ?? 0);
+
+    const printingFeeFromMeta = safeNum(md.printingFee ?? 0);
+    const processingFeeMeta = safeNum(
+      md.processingFee ?? md.processing_fee ?? md.processing_fee_value ?? 0
+    );
+
+    const serviceId = md.serviceId || "";
+    const serviceNameFromMeta = md.serviceName || "";
+    const clientTypeMeta = md.clientType || md.client_type || md.serviceClientType || "";
+
+    const assignedToMeta = md.assignedTo || md.assigned_to || "";
+    const assignedToNameMeta = md.assignedToName || md.assigned_to_name || "";
+
+    // ✅ Subscription metadata
+    const subPlanKey = safeStr(md.planKey || "");
+    const subPricingKey = safeStr(md.pricingKey || "");
+    const subMonthsShown = safeNum(md.monthsShown || 0);
+    const subPaidMonths = safeNum(md.paidMonths || 0);
+    const subBonus = safeNum(md.bonus || 0);
+
     const isSubscription =
-      String(serviceId || "").startsWith("sub_") ||
-      String(serviceId || "").startsWith("subscription_") ||
-      String(serviceId || "").startsWith("subscription-") ||
-      String(serviceName || "").toLowerCase().includes("subscription") ||
-      String(serviceName || "").includes("اشتراك") ||
-      String(planKey || "").trim().length > 0;
+      String(requestType).toLowerCase() === "subscription" || subPlanKey.trim().length > 0;
 
-    // ✅ منطق الشحن كما هو
-    const isWallet =
-      serviceId === "wallet-recharge" ||
-      serviceName === "شحن المحفظة" ||
-      String(serviceName || "").toLowerCase().includes("wallet");
+    // attachments ممكن تكون جايه كـ JSON string
+    let attachmentsMeta = null;
+    if (md.attachments) {
+      try {
+        attachmentsMeta = JSON.parse(md.attachments);
+      } catch {
+        attachmentsMeta = null;
+      }
+    }
 
-    // ✅ requestType كما هو لكن مع الاشتراك
-    const requestType = isWallet ? "wallet_recharge" : isSubscription ? "subscription" : "service";
+    // Stripe بيرجع الفلوس بالـ "أصغر وحدة" (فلس)، فـ /100 = AED
+    const amountSmallest = pi.amount_received ?? pi.amount ?? 0;
+    const amountAED = Number((amountSmallest / 100).toFixed(2));
 
-    /**
-     * ==========================
-     * ✅ الحفاظ على المنطق القديم للخدمات + الشحن
-     * ==========================
-     *
-     * - service / wallet_recharge: لا نغير طريقة الحساب (processingFee, vat, coins, printingFee...) كما يجي من الفرونت
-     * - subscription: نحولها لمنطق خاص:
-     *      العميل يدفع: baseAmount + StripeFee فقط
-     *      (printingFee/vat/coinDiscount/coinsUsed/coinsGiven = 0)
-     */
+    // 3) idempotency check: stripePaymentsProcessed
+    const processedRef = db.collection("stripePaymentsProcessed").doc(paymentIntentId);
+    const processedSnap = await processedRef.get();
+    if (processedSnap.exists) {
+      console.log(`confirmPayment: already processed ${paymentIntentId}`);
+      return res.status(200).json({
+        ok: true,
+        alreadyProcessed: true,
+        paymentIntentId,
+        orderNumber: processedSnap.data().requestId || null,
+      });
+    }
 
-    // القيم القديمة (كما تأتي) للخدمات/الشحن
-    const oldPrintingFee = Number(printingFee || 0);
-    const oldProcessingFee = Number(processingFee || 0);
-    const oldVat = Number(vat || 0);
-    const oldCoinDiscount = Number(coinDiscount || 0);
-    const oldCoinsUsed = Number(coinsUsed || 0);
-    const oldCoinsGiven = Number(coinsGiven || 0);
+    // 4) لو الطلب موجود أصلاً، جيبه
+    let requestRef = null;
+    let requestSnap = null;
 
-    // ✅ قيم الاشتراك (تتطبق فقط لو isSubscription)
-    const subStripeFee = calcStripeFeeAED(baseAmount, { isInternational, isCurrencyConversion });
+    if (reqId) {
+      requestRef = db.collection("requests").doc(String(reqId));
+      requestSnap = await requestRef.get();
+    } else {
+      const q = await db
+        .collection("requests")
+        .where("paymentIntentId", "==", paymentIntentId)
+        .limit(1)
+        .get();
+      if (!q.empty) {
+        requestSnap = q.docs[0];
+        requestRef = requestSnap.ref;
+        reqId = requestRef.id;
+      }
+    }
 
-    // ✅ اختار القيم النهائية بناءً على النوع بدون ما نبوّظ القديم
-    const safePrintingFee = isSubscription ? 0 : oldPrintingFee;
-    const safeVat = isSubscription ? 0 : oldVat;
-    const safeCoinDiscount = isSubscription ? 0 : oldCoinDiscount;
+    // 5) لازم md.customerId = نفس ID الدوكيومنت في users
+    const customerIdMeta = md.customerId || md.userId || null;
+    if (!customerIdMeta) {
+      await processedRef.set({
+        paymentIntentId,
+        processedAt: admin.firestore.FieldValue.serverTimestamp(),
+        note: "missing_customerId",
+        metadata: md,
+      });
+      return res.status(400).json({ error: "Missing customerId in metadata" });
+    }
 
-    // processingFee:
-    // - اشتراك: StripeFee محسوبة سيرفر
-    // - غير ذلك: processingFee القديم كما هو
-    const safeProcessingFee = isSubscription ? subStripeFee : oldProcessingFee;
+    let userRef = db.collection("users").doc(String(customerIdMeta));
+    let userSnap = await userRef.get();
 
-    // coins:
-    const safeCoinsUsed = isSubscription ? 0 : oldCoinsUsed;
-    const safeCoinsGiven = isSubscription ? 0 : oldCoinsGiven;
+    // fallback: لو لقيت request قديم و فيه customerId مختلف، جرّب تروح عليه
+    if (!userSnap.exists && requestSnap && requestSnap.exists) {
+      const rdata = requestSnap.data() || {};
+      if (rdata.customerId && rdata.customerId !== customerIdMeta) {
+        const altUserRef = db.collection("users").doc(String(rdata.customerId));
+        const altSnap = await altUserRef.get();
+        if (altSnap.exists) {
+          console.log("➡ using fallback user:", rdata.customerId, "instead of", customerIdMeta);
+          userRef = altUserRef;
+          userSnap = altSnap;
+        }
+      }
+    }
 
-    // ✅ إجمالي قبل الخصم
-    // - اشتراك: baseAmount (لا VAT/printing/coins)
-    // - قديم: (baseAmount + printing + vat) - coinDiscount  (لو منطقك كان مختلف، غيّره هنا فقط)
-    const totalBeforeDiscount = isSubscription
-      ? baseAmount
-      : Math.round((baseAmount + safePrintingFee + safeVat - safeCoinDiscount) * 100) / 100;
+    if (!userSnap.exists) {
+      await processedRef.set({
+        paymentIntentId,
+        processedAt: admin.firestore.FieldValue.serverTimestamp(),
+        note: "user_not_found",
+        metadata: md,
+      });
+      console.warn("confirmPayment: user not found", { paymentIntentId, md });
+      return res.status(400).json({ error: "User not found" });
+    }
 
-    // ✅ finalPrice = totalBeforeDiscount + processingFee (في الاشتراك processingFee = StripeFee)
-    const finalPrice = Math.round((totalBeforeDiscount + safeProcessingFee) * 100) / 100;
+    // 6) هات تعريف السيرفس علشان نسجله جوا الطلب (كما هو)
+    const serviceDoc = await fetchServiceFromByClientType(serviceId, clientTypeMeta, serviceNameFromMeta);
 
-    // ✅ المبلغ الذي سيخصم فعلياً في Stripe = finalPrice
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(Number(finalPrice) * 100), // fils
-      currency: "aed",
-      receipt_email: userEmail,
-      metadata: {
-        requestId,
-        customerId,
-        serviceId: serviceId || "",
-        serviceName,
-        clientType: clientType || "",
-        requestType,
+    // =========================
+    // 7) Firestore Transaction
+    // =========================
+    let finalRequestId = reqId || null;
 
-        // ✅ مبالغ واضحة (لا تكسر القديم)
-        baseAmount: String(baseAmount),
-        printingFee: String(safePrintingFee || 0),
-        vat: String(safeVat || 0),
-        coinDiscount: String(safeCoinDiscount || 0),
-        processingFee: String(safeProcessingFee || 0),
-        totalBeforeDiscount: String(totalBeforeDiscount || 0),
-        finalPrice: String(finalPrice || 0),
+    await db.runTransaction(async (tx) => {
+      const proc = await tx.get(processedRef);
+      if (proc.exists) throw new Error("ALREADY_PROCESSED");
 
-        coinsUsed: String(safeCoinsUsed || 0),
-        coinsGiven: String(safeCoinsGiven || 0),
+      const uDoc = await tx.get(userRef);
+      if (!uDoc.exists) throw new Error("User disappeared during transaction");
 
-        assignedTo: assignedTo || "",
-        assignedToName: assignedToName || "",
-        lang: String(lang || "ar"),
-        userEmail: String(userEmail || ""),
-        currency: "AED",
+      let reqIdToUse = reqId;
 
-        attachments: JSON.stringify(attachments || {}),
-        providers: JSON.stringify(providers || []),
-        employeeData: JSON.stringify(employeeData || {}),
+      // --------------------------------
+      // A) UPDATE EXISTING REQUEST (NO CHANGE)
+      // --------------------------------
+      if (requestSnap && requestSnap.exists) {
+        reqIdToUse = String(requestSnap.id);
+        finalRequestId = reqIdToUse;
 
-        // ✅ Subscriptions
-        planKey: String(planKey || ""),
-        pricingKey: String(pricingKey || ""),
-        monthsShown: String(monthsShown || 0),
-        paidMonths: String(paidMonths || 0),
-        bonus: String(bonus || 0),
-        subscriptionDays: String(subscriptionDays || 0),
-        subscriptionName: String(subscriptionName || ""),
-      },
-      description:
-        lang === "en"
-          ? `Payment for ${requestType} ${serviceName}`
-          : `دفع ${requestType === "subscription" ? "اشتراك" : "خدمة"} ${serviceName}`,
+        const rdata = requestSnap.data() || {};
+        const history = Array.isArray(rdata.statusHistory) ? rdata.statusHistory.slice() : [];
+
+        history.push({
+          status: "paid",
+          timestamp: nowISO(),
+          updatedBy: "server-confirmPayment",
+        });
+
+        const updates = {
+          lastUpdated: nowISO(),
+          status: "paid",
+          paidAmount: amountAED,
+          paymentIntentId,
+          statusHistory: history,
+          paidAt: nowISO(),
+          processingFee:
+            typeof rdata.processingFee !== "undefined" ? rdata.processingFee : processingFeeMeta || 0,
+        };
+
+        if (rdata.attachments) updates.attachments = rdata.attachments;
+        else if (attachmentsMeta) updates.attachments = attachmentsMeta;
+
+        if (rdata.clientSecret) updates.clientSecret = rdata.clientSecret;
+        else if (md.clientSecret) updates.clientSecret = md.clientSecret;
+
+        if (serviceDoc) {
+          const svc = {
+            name: serviceDoc.name || serviceNameFromMeta || "",
+            serviceId: serviceDoc.serviceId || serviceId || "",
+            providers: Array.isArray(serviceDoc.providers)
+              ? serviceDoc.providers
+              : serviceDoc.providers
+              ? [serviceDoc.providers]
+              : [],
+            category: serviceDoc.category || "",
+            subcategory: serviceDoc.subcategory || serviceDoc.subCategory || "",
+            clientPrice: safeNum(serviceDoc.clientPrice ?? serviceDoc.price ?? amountAED),
+            price: safeNum(serviceDoc.price ?? serviceDoc.clientPrice ?? amountAED),
+            printingFee: safeNum(serviceDoc.printingFee ?? printingFeeFromMeta ?? 0),
+            tax: safeNum(serviceDoc.tax ?? 0),
+            description: serviceDoc.description || "",
+            requiredDocuments: Array.isArray(serviceDoc.requiredDocuments) ? serviceDoc.requiredDocuments : [],
+            active: typeof serviceDoc.active === "boolean" ? serviceDoc.active : true,
+            duration: serviceDoc.duration || "",
+            profit: safeNum(serviceDoc.profit ?? 0),
+            repeatable: typeof serviceDoc.repeatable === "boolean" ? serviceDoc.repeatable : false,
+            requireUpload: typeof serviceDoc.requireUpload === "boolean" ? serviceDoc.requireUpload : false,
+          };
+
+          updates.service = svc;
+          updates.serviceName = svc.name;
+          updates.serviceId = svc.serviceId;
+          updates.providers = svc.providers;
+          updates.printingFee = rdata.printingFee ?? svc.printingFee ?? printingFeeFromMeta ?? 0;
+          updates.requiredDocuments = svc.requiredDocuments;
+        } else {
+          if (serviceNameFromMeta) updates.serviceName = serviceNameFromMeta;
+          if (serviceId) updates.serviceId = serviceId;
+        }
+
+        updates.assignedTo = rdata.assignedTo || assignedToMeta || "";
+        updates.assignedToName = rdata.assignedToName || assignedToNameMeta || "";
+
+        // (مسموح بوجود هذه الحقول داخل الطلب لو كانت موجودة قبل — لا نغير أي هيكلة)
+        if (isSubscription) {
+          updates.requestType = "subscription";
+          updates.planKey = subPlanKey;
+          updates.pricingKey = subPricingKey;
+          updates.monthsShown = subMonthsShown;
+          updates.paidMonths = subPaidMonths;
+          updates.bonus = subBonus;
+        }
+
+        tx.update(requestRef, updates);
+      } else {
+        // --------------------------------
+        // B) CREATE NEW REQUEST (NO CHANGE)
+        // --------------------------------
+        if (!reqIdToUse) {
+          reqIdToUse = `REQ-${Math.floor(100 + Math.random() * 900)}-${Math.floor(1000 + Math.random() * 9000)}`;
+        }
+        finalRequestId = reqIdToUse;
+
+        let serviceMap = null;
+        if (serviceDoc) {
+          serviceMap = {
+            name: serviceDoc.name || serviceNameFromMeta || "",
+            serviceId: serviceDoc.serviceId || serviceId || "",
+            providers: Array.isArray(serviceDoc.providers)
+              ? serviceDoc.providers
+              : serviceDoc.providers
+              ? [serviceDoc.providers]
+              : [],
+            category: serviceDoc.category || "",
+            subcategory: serviceDoc.subcategory || serviceDoc.subCategory || "",
+            clientPrice: safeNum(serviceDoc.clientPrice ?? serviceDoc.price ?? amountAED),
+            price: safeNum(serviceDoc.price ?? serviceDoc.clientPrice ?? amountAED),
+            printingFee: safeNum(serviceDoc.printingFee ?? printingFeeFromMeta ?? 0),
+            tax: safeNum(serviceDoc.tax ?? 0),
+            description: serviceDoc.description || "",
+            requiredDocuments: Array.isArray(serviceDoc.requiredDocuments) ? serviceDoc.requiredDocuments : [],
+            active: typeof serviceDoc.active === "boolean" ? serviceDoc.active : true,
+            duration: serviceDoc.duration || "",
+            profit: safeNum(serviceDoc.profit ?? 0),
+            repeatable: typeof serviceDoc.repeatable === "boolean" ? serviceDoc.repeatable : false,
+            requireUpload: typeof serviceDoc.requireUpload === "boolean" ? serviceDoc.requireUpload : false,
+          };
+        }
+
+        const reqObj = {
+          requestId: reqIdToUse,
+          paymentIntentId,
+          customerId: userRef.id,
+          serviceId: serviceMap?.serviceId || serviceId || "",
+          serviceName: serviceMap?.name || serviceNameFromMeta || "",
+          requestType,
+          paidAmount: amountAED,
+          printingFee: serviceMap?.printingFee ?? printingFeeFromMeta ?? 0,
+          coinsGiven,
+          coinsUsed,
+          createdAt: nowISO(),
+          lastUpdated: nowISO(),
+          status: "paid",
+          paidAt: nowISO(),
+          userEmail: uDoc.data().email || "",
+          statusHistory: [
+            {
+              status: "paid",
+              timestamp: nowISO(),
+              updatedBy: "server-confirmPayment",
+            },
+          ],
+          metadata: md || {},
+          attachments: attachmentsMeta || {},
+          clientSecret: md.clientSecret || null,
+          processingFee: processingFeeMeta || 0,
+          assignedTo: assignedToMeta || "",
+          assignedToName: assignedToNameMeta || "",
+          ...(serviceMap ? { service: serviceMap, requiredDocuments: serviceMap.requiredDocuments || [] } : {}),
+          ...(isSubscription
+            ? {
+                requestType: "subscription",
+                planKey: subPlanKey,
+                pricingKey: subPricingKey,
+                monthsShown: subMonthsShown,
+                paidMonths: subPaidMonths,
+                bonus: subBonus,
+              }
+            : {}),
+        };
+
+        tx.set(db.collection("requests").doc(reqIdToUse), reqObj);
+      }
+
+      // --------------------------------
+      // C) UPDATE WALLET / COINS (NO CHANGE)
+      // --------------------------------
+      if (requestType === "wallet_recharge") {
+        const prevWallet = Number(uDoc.data().walletBalance ?? uDoc.data().wallet ?? 0);
+        const newWallet = +(prevWallet + amountAED).toFixed(2);
+
+        tx.update(userRef, {
+          walletBalance: newWallet,
+          ...(coinsGiven > 0 ? { coins: admin.firestore.FieldValue.increment(coinsGiven) } : {}),
+          lastWalletUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      } else {
+        if (coinsGiven > 0) {
+          tx.update(userRef, {
+            coins: admin.firestore.FieldValue.increment(coinsGiven),
+          });
+        }
+      }
+
+      // ✅ ✅ ✅ ONLY CHANGE: WRITE SUBSCRIPTION INTO NEW COLLECTION (NO TOUCH users / no touch requests)
+      if (isSubscription) {
+        const start = new Date();
+        const end = addMonths(start, subMonthsShown > 0 ? subMonthsShown : 0);
+
+        // Collection جديد مستقل للاشتراكات
+        // docId = نفس customerId (الشركة) علشان يبقى lookup سهل
+        const subRef = db.collection("companySubscriptions").doc(userRef.id);
+
+        // snapshot current active subscription (merge)
+        tx.set(
+          subRef,
+          {
+            companyId: userRef.id,
+            customerId: userRef.id,
+            isActive: true,
+            status: "active",
+            planKey: subPlanKey,
+            pricingKey: subPricingKey,
+            monthsShown: subMonthsShown,
+            paidMonths: subPaidMonths,
+            bonus: subBonus,
+            requestId: finalRequestId,
+            paymentIntentId,
+            startedAt: start.toISOString(),
+            endsAt: end.toISOString(),
+            updatedAt: nowISO(),
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+
+        // history داخل نفس المستند (subcollection)
+        const histRef = subRef.collection("history").doc();
+        tx.set(histRef, {
+          companyId: userRef.id,
+          customerId: userRef.id,
+          requestId: finalRequestId,
+          paymentIntentId,
+          planKey: subPlanKey,
+          pricingKey: subPricingKey,
+          monthsShown: subMonthsShown,
+          paidMonths: subPaidMonths,
+          bonus: subBonus,
+          startedAt: start.toISOString(),
+          endsAt: end.toISOString(),
+          status: "active",
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      // --------------------------------
+      // D) TRANSACTION LOG (NO CHANGE)
+      // --------------------------------
+      const txRef = db.collection("transactions").doc();
+      tx.set(txRef, {
+        userId: userRef.id,
+        requestId: finalRequestId,
+        amount: amountAED,
+        currency: pi.currency || "aed",
+        type: "credit",
+        status: "succeeded",
+        paymentIntentId,
+        coinsAdded: coinsGiven,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // --------------------------------
+      // E) NOTIFICATION (NO CHANGE)
+      // --------------------------------
+      const notifRef = db.collection("notifications").doc();
+      tx.set(notifRef, {
+        targetId: userRef.id,
+        title:
+          md.lang === "en"
+            ? isSubscription
+              ? "Subscription Confirmed"
+              : "Payment Confirmed"
+            : isSubscription
+            ? "تم تفعيل الاشتراك"
+            : "تم تأكيد الدفع",
+        body:
+          md.lang === "en"
+            ? isSubscription
+              ? `Your subscription is now active. Plan: ${subPlanKey || "N/A"} • Order: ${finalRequestId}`
+              : `Your payment of ${amountAED.toFixed(2)} AED was received. Order: ${finalRequestId}`
+            : isSubscription
+            ? `تم تفعيل اشتراكك بنجاح. الخطة: ${subPlanKey || "—"} • رقم الطلب: ${finalRequestId}`
+            : `تم استلام دفعتك بقيمة ${amountAED.toFixed(2)} د.إ الآن. رقم الطلب: ${finalRequestId}`,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        isRead: false,
+        metadata: {
+          orderId: finalRequestId,
+          paymentIntentId,
+          ...(isSubscription
+            ? {
+                type: "subscription",
+                planKey: subPlanKey,
+                pricingKey: subPricingKey,
+                monthsShown: subMonthsShown,
+                paidMonths: subPaidMonths,
+                bonus: subBonus,
+              }
+            : {}),
+        },
+      });
+
+      // --------------------------------
+      // F) MARK AS PROCESSED (NO CHANGE)
+      // --------------------------------
+      tx.set(processedRef, {
+        paymentIntentId,
+        processedAt: admin.firestore.FieldValue.serverTimestamp(),
+        requestId: finalRequestId,
+        amount: amountAED,
+      });
     });
 
-    const nowIso = new Date().toISOString();
-
-    // ✅ لا نغيّر أسماء الحقول القديمة، فقط نضيف حقول واضحة + نحافظ على paidAmount
-    const requestDoc = {
-      requestId,
-      paymentIntentId: paymentIntent.id,
-      clientSecret: paymentIntent.client_secret,
-
-      customerId,
-      serviceId: serviceId || "",
-      serviceName,
-      requestType,
-
-      // ✅ القديم كان عندك paidAmount = amount
-      // دلوقتي نخلي paidAmount = finalPrice لأن ده اللي هيتخصم فعلاً (آمن لكل الأنواع)
-      paidAmount: Number(finalPrice) || 0,
-
-      // ✅ نحافظ على الحقول المعروفة (printingFee/processingFee/coins...) بالقيم الصحيحة
-      printingFee: Number(safePrintingFee) || 0,
-      processingFee: Number(safeProcessingFee) || 0,
-      vat: Number(safeVat) || 0,
-      coinDiscount: Number(safeCoinDiscount) || 0,
-
-      coinsUsed: Number(safeCoinsUsed) || 0,
-      coinsGiven: Number(safeCoinsGiven) || 0,
-
-      // ✅ إضافات غير كاسرة (مفيدة للـ UI/Reports)
-      baseAmount: Number(baseAmount) || 0,
-      totalBeforeDiscount: Number(totalBeforeDiscount) || 0,
-      finalPrice: Number(finalPrice) || 0,
-
-      createdAt: nowIso,
-      lastUpdated: nowIso,
-      status,
-      paidAt: null,
-
-      userEmail,
-      attachments,
-      providers,
-      assignedTo,
-      assignedToName,
-      employeeData,
-      lang,
-
-      // ✅ Subscriptions fields (اختياري)
-      planKey: planKey || "",
-      pricingKey: pricingKey || "",
-      monthsShown: Number(monthsShown) || 0,
-      paidMonths: Number(paidMonths) || 0,
-      bonus: Number(bonus) || 0,
-      subscriptionDays: Number(subscriptionDays) || 0,
-      subscriptionName: subscriptionName || "",
-
-      statusHistory: [
-        {
-          status,
-          timestamp: nowIso,
-          updatedBy: assignedToName || userEmail || "system",
-        },
-      ],
-    };
-
-    await firestore.collection("requests").doc(requestId).set(requestDoc);
-
-    // ✅ رجّع للفرونت قيم UI بدون كسر القديم (نفس أسماءك)
     return res.status(200).json({
       ok: true,
-      clientSecret: paymentIntent.client_secret,
-      orderNumber: requestId,
-      paymentIntentId: paymentIntent.id,
-
-      // ✅ UI fields
-      processingFee: Number(safeProcessingFee) || 0,
-      finalPrice: Number(finalPrice) || 0,
-      totalPrice: Number(totalBeforeDiscount) || 0,
-
-      // ✅ إضافي (مش لازم تستخدمه)
-      baseAmount: Number(baseAmount) || 0,
-      requestType,
+      orderNumber: finalRequestId,
+      ...(isSubscription
+        ? {
+            subscription: {
+              planKey: subPlanKey,
+              pricingKey: subPricingKey,
+              monthsShown: subMonthsShown,
+              paidMonths: subPaidMonths,
+              bonus: subBonus,
+            },
+          }
+        : {}),
     });
-  } catch (error) {
-    console.error("createPaymentIntent error:", error);
-    return res.status(500).json({ error: error.message || "Internal server error" });
+  } catch (err) {
+    if (err.message === "ALREADY_PROCESSED") {
+      return res.status(200).json({ ok: true, alreadyProcessed: true });
+    }
+
+    console.error("confirmPayment error:", err);
+    return res.status(500).json({ error: err.message || "internal_error" });
   }
 }
