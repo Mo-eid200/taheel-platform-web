@@ -60,12 +60,12 @@ export default function CompanySubscriptionsSection({
           return;
         }
 
-        // ✅ نفس ستايل دفع الخدمات: create payment intent ثم redirect لصفحة الدفع
+        // ✅ نفس ستايل دفع الخدمات: create payment intent
         const payload = {
           amount: Number(price), // AED
-          serviceId: `subscription-${planKey}`, // مثال: subscription-growth
+          serviceId: `subscription_${planKey}`, // ✅ خليها underscore عشان detect يبقى ثابت
           serviceName: lang === "ar" ? `اشتراك ${planKey}` : `Subscription ${planKey}`,
-          customerId: user.uid,
+          customerId: user.uid, // نفس doc id في users
           userEmail: user.email,
           clientType: "company",
           attachments: {},
@@ -102,10 +102,37 @@ export default function CompanySubscriptionsSection({
         const data = await r.json();
         if (!r.ok || !data?.ok) throw new Error(data?.error || "Failed to create payment intent");
 
-        // ✅ روح لصفحة الدفع (انت هتعملها /pay)
-        router.push(
-          `/pay?orderNumber=${encodeURIComponent(data.orderNumber)}&cs=${encodeURIComponent(data.clientSecret)}`
-        );
+        // ✅ جهّز paymentData لصفحة /payment/service (نفس منطق الخدمات)
+        const subscriptionDays = Math.round(Number(monthsShown || 0) * 30); // باليوم
+
+        const paymentData = {
+          clientSecret: data.clientSecret,
+          orderNumber: data.orderNumber,
+          userEmail: user.email,
+          lang,
+
+          requestType: "subscription",
+          planKey,
+          pricingKey,
+          subscriptionName: lang === "ar" ? `اشتراك ${planKey}` : `Subscription ${planKey}`,
+          subscriptionDays,
+
+          // مبالغ
+          price: Number(price),
+          totalPrice: Number(price),
+          finalPrice: Number(price),
+
+          // رسوم
+          processingFee: 0,
+          printingFee: 0,
+          vat: 0,
+          coinDiscount: 0,
+        };
+
+        localStorage.setItem("paymentData", JSON.stringify(paymentData));
+
+        // ✅ روح لنفس صفحة دفع الخدمات
+        router.push("/payment/service");
       } catch (e) {
         console.error("subscribe failed:", e);
         alert(lang === "ar" ? "حصل خطأ أثناء بدء الدفع" : "Failed to start payment");
