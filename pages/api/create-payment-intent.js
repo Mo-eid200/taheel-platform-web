@@ -123,16 +123,25 @@ export default async function handler(req, res) {
     const coinsUsed = safeNum(body.coinsUsed || 0);
     const coinsGiven = safeNum(body.coinsGiven || 0);
 
-    // Subscription metadata (kept in metadata only)
+    // ---------------- Subscription metadata ----------------
+    // ✅ Plan identity
     const planKey = safeStr(body.planKey || "");
+    const planName = safeStr(body.planName || body.subscriptionName || "") || planKey; // يظهر في كارت الشركة
     const pricingKey = safeStr(body.pricingKey || "");
+
+    // ✅ DAYS (monthly 30 days + gift 7 days = 37)
+    const subscriptionDays = safeNum(body.subscriptionDays || body.subDays || 0); // مثال: 30
+    const giftDays = safeNum(body.giftDays || body.bonusDays || 0);              // مثال: 7
+    const totalSubDays = Math.max(0, subscriptionDays + giftDays);
+
+    // (optional old fields for compatibility)
     const monthsShown = safeNum(body.monthsShown || 0);
     const paidMonths = safeNum(body.paidMonths || 0);
     const bonus = safeNum(body.bonus || 0);
 
     if (!customerId) return res.status(400).json({ ok: false, error: "Missing customerId" });
 
-    // Load user (customerId لازم يبقى COM-...)
+    // Load user (customerId لازم يبقى موجود)
     const userRef = db.collection("users").doc(customerId);
     const userSnap = await userRef.get();
     if (!userSnap.exists) return res.status(400).json({ ok: false, error: "User not found" });
@@ -208,8 +217,15 @@ export default async function handler(req, res) {
         coinsUsed: String(coinsUsed),
         coinsGiven: String(coinsGiven),
 
+        // ✅ subscription fields (DAYS)
         planKey,
+        planName,
         pricingKey,
+        subscriptionDays: String(subscriptionDays),
+        giftDays: String(giftDays),
+        totalSubscriptionDays: String(totalSubDays),
+
+        // optional old fields (leave them if you want)
         monthsShown: String(monthsShown),
         paidMonths: String(paidMonths),
         bonus: String(bonus),
@@ -275,6 +291,18 @@ export default async function handler(req, res) {
         printingFeeAED,
         processingFeeAED,
       },
+
+      // useful for UI
+      subscription: requestType === "subscription"
+        ? {
+            planKey,
+            planName,
+            pricingKey,
+            subscriptionDays,
+            giftDays,
+            totalSubscriptionDays: totalSubDays,
+          }
+        : null,
     });
   } catch (e) {
     console.error("createPaymentIntent error:", e);

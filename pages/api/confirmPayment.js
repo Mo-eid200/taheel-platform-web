@@ -49,18 +49,16 @@ function safeStr(v) {
 function nowISO() {
   return new Date().toISOString();
 }
-function addMonths(date, months) {
-  const d = new Date(date);
-  const day = d.getDate();
-  d.setMonth(d.getMonth() + Number(months || 0));
-  if (d.getDate() < day) d.setDate(0);
-  return d;
-}
 function toDateSafe(v) {
   if (!v) return null;
   if (typeof v?.toDate === "function") return v.toDate(); // Firestore Timestamp
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+function addDays(date, days) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + Number(days || 0));
+  return d;
 }
 
 // نفس اللى في الويب هوك: نقرأ الخدمة من servicesByClientType
@@ -136,11 +134,17 @@ export default async function handler(req, res) {
     // ✅ Subscription metadata (used ONLY for companySubscriptions)
     const subPlanKey = safeStr(md.planKey || "");
     const subPricingKey = safeStr(md.pricingKey || "");
-    const subMonthsShown = safeNum(md.monthsShown || 0);
     const subPaidMonths = safeNum(md.paidMonths || 0);
     const subBonus = safeNum(md.bonus || 0);
 
-    const isSubscription = String(requestType).toLowerCase() === "subscription" || subPlanKey.trim().length > 0;
+    // ✅ DAYS-BASED subscription duration
+    const subDays = safeNum(md.subscriptionDays || 0);
+    const daysToApply = subDays > 0 ? subDays : 30;
+
+    // ✅ plan name to show on card ribbon
+    const subPlanName = safeStr(md.planName || md.subscriptionName || md.planTitle || "") || subPlanKey;
+
+    const isSubscription = subPlanKey.trim().length > 0;
     const isCompany = String(clientTypeMeta).toLowerCase() === "company";
 
     // attachments JSON
@@ -394,7 +398,7 @@ export default async function handler(req, res) {
         }
       }
 
-      // ✅ D) SUBSCRIPTION (ONLY companySubscriptions)
+      // ✅ D) SUBSCRIPTION (ONLY companySubscriptions) — DAYS BASED ✅
       if (isSubscription && isCompany) {
         const subRef = db.collection("companySubscriptions").doc(userRef.id);
         const subSnap = await tx.get(subRef);
@@ -402,42 +406,69 @@ export default async function handler(req, res) {
         const now = new Date();
         let startDate = now;
 
+        // لو عنده اشتراك شغال ولسه ماخلصش → نجدد بعده
         if (subSnap.exists) {
           const old = subSnap.data() || {};
-          const oldEnd = toDateSafe(old.endAt || old.endsAt);
-          const oldStatus = String(old.status || "").toLowerCase();
+          const oldEnd =
+            toDateSafe(old.endAt) ||
+            toDateSafe(old.expiresAt) ||
+            toDateSafe(old.endAtISO) ||
+            null;
 
-          // لو شغال ولسه ماخلصش → نجدد بعده
+          const oldStatus = String(old.status || "").toLowerCase();
           if (oldEnd && oldEnd.getTime() > now.getTime() && (oldStatus === "active" || oldStatus === "trial")) {
             startDate = oldEnd;
           }
         }
 
-        const endDate = addMonths(startDate, subMonthsShown > 0 ? subMonthsShown : 0);
+        // حماية: لو حد بعت 0 بالغلط → نخليه 30 يوم افتراضي
+        const daysToApply = subDays > 0 ? subDays : 30;
+        const endDate = addDays(startDate, daysToApply);
+
+        const startTs = admin.firestore.Timestamp.fromDate(startDate);
+        const endTs = admin.firestore.Timestamp.fromDate(endDate);
+
+        // بيانات هوية الشركة للعرض (optional لكن مفيد)
+        const udata = uDoc.data() || {};
+        const companyPublicId = safeStr(udata.companyId || udata.customerId || udata.userId || userRef.id);
+        const companyEmail = safeStr(udata.email || md.userEmail || "");
+
+        const planName =
+          subPlanName ||
+          safeStr(serviceNameFromMeta) ||
+          (md.lang === "en" ? "Subscription" : "اشتراك");
 
         tx.set(
           subRef,
           {
-            companyId: userRef.id,
-            customerId: userRef.id,
+            companyDocId: userRef.id,   // doc id
+            companyId: companyPublicId, // رقم الشركة الظاهر للعميل
+            email: companyEmail,
 
             isActive: true,
             status: "active",
 
             planKey: subPlanKey,
+            planName,
             pricingKey: subPricingKey,
-            monthsShown: subMonthsShown,
+
+            subscriptionDays: daysToApply,
             paidMonths: subPaidMonths,
             bonus: subBonus,
 
-            startAt: startDate.toISOString(),
-            endAt: endDate.toISOString(),
+            // ✅ timestamps (أفضل للقراءة والترتيب)
+            startAt: startTs,
+            endAt: endTs,
+
+            // optional ISO backup
+            startAtISO: startDate.toISOString(),
+            endAtISO: endDate.toISOString(),
 
             lastRequestId: finalRequestId,
             lastPaymentIntentId: paymentIntentId,
 
-            updatedAt: nowISO(),
-            createdAt: subSnap.exists ? subSnap.data()?.createdAt || admin.firestore.FieldValue.serverTimestamp() : admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            ...(subSnap.exists ? {} : { createdAt: admin.firestore.FieldValue.serverTimestamp() }),
           },
           { merge: true }
         );
@@ -445,16 +476,24 @@ export default async function handler(req, res) {
         // history داخل subcollection (أنضف)
         const histRef = subRef.collection("history").doc();
         tx.set(histRef, {
-          companyId: userRef.id,
+          companyDocId: userRef.id,
+          companyId: companyPublicId,
+          email: companyEmail,
+
           requestId: finalRequestId,
           paymentIntentId,
+
           planKey: subPlanKey,
+          planName,
           pricingKey: subPricingKey,
-          monthsShown: subMonthsShown,
+
+          subscriptionDays: daysToApply,
           paidMonths: subPaidMonths,
           bonus: subBonus,
-          startAt: startDate.toISOString(),
-          endAt: endDate.toISOString(),
+
+          startAt: startTs,
+          endAt: endTs,
+
           status: "active",
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
@@ -474,7 +513,7 @@ export default async function handler(req, res) {
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      // F) NOTIFICATION
+      // F) NOTIFICATION (هتسيبه زي ما هو)
       const notifRef = db.collection("notifications").doc();
       tx.set(notifRef, {
         targetId: userRef.id,
@@ -500,7 +539,15 @@ export default async function handler(req, res) {
           orderId: finalRequestId,
           paymentIntentId,
           ...(isSubscription
-            ? { type: "subscription", planKey: subPlanKey, pricingKey: subPricingKey, monthsShown: subMonthsShown, paidMonths: subPaidMonths, bonus: subBonus }
+            ? {
+                type: "subscription",
+                planKey: subPlanKey,
+                planName: subPlanName,
+                pricingKey: subPricingKey,
+                subscriptionDays: subDays,
+                paidMonths: subPaidMonths,
+                bonus: subBonus,
+              }
             : {}),
         },
       });
@@ -518,7 +565,16 @@ export default async function handler(req, res) {
       ok: true,
       orderNumber: finalRequestId,
       ...(isSubscription
-        ? { subscription: { planKey: subPlanKey, pricingKey: subPricingKey, monthsShown: subMonthsShown, paidMonths: subPaidMonths, bonus: subBonus } }
+        ? {
+            subscription: {
+              planKey: subPlanKey,
+              planName: subPlanName,
+              pricingKey: subPricingKey,
+              subscriptionDays: subDays,
+              paidMonths: subPaidMonths,
+              bonus: subBonus,
+            },
+          }
         : {}),
     });
   } catch (err) {
