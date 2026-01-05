@@ -6,7 +6,11 @@ import admin from "firebase-admin";
 /**
  * Confirm a Stripe PaymentIntent (idempotent) and sync with Firestore.
  * Handles wallet recharge & service payments.
- * ✅ Subscription: saves ONLY into companySubscriptions (new collection) without changing requests schema
+ *
+ * ✅ Subscriptions:
+ * - Do NOT change requests structure/logic.
+ * - Only write subscription info into NEW collection: companySubscriptions
+ * - Keep requests flow intact (still creates/updates request doc normally).
  */
 
 if (!admin.apps.length) {
@@ -31,25 +35,20 @@ if (!admin.apps.length) {
 }
 
 const db = admin.firestore();
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: "2022-11-15",
-});
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2022-11-15" });
 
 // helpers
 function safeNum(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 }
-function nowISO() {
-  return new Date().toISOString();
-}
-
-// ✅ ADD (Subscriptions helpers)
 function safeStr(v) {
   if (v == null) return "";
   return String(v);
 }
-// إضافة شهور لتاريخ (بدقة شهرية)
+function nowISO() {
+  return new Date().toISOString();
+}
 function addMonths(date, months) {
   const d = new Date(date);
   const day = d.getDate();
@@ -57,10 +56,9 @@ function addMonths(date, months) {
   if (d.getDate() < day) d.setDate(0);
   return d;
 }
-// Firestore Timestamp / string / date -> Date
 function toDateSafe(v) {
   if (!v) return null;
-  if (typeof v?.toDate === "function") return v.toDate(); // Timestamp
+  if (typeof v?.toDate === "function") return v.toDate(); // Firestore Timestamp
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? null : d;
 }
@@ -76,12 +74,10 @@ async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFa
       if (!snap.exists) continue;
       const all = snap.data() || {};
 
-      // direct key match
       if (serviceId && Object.prototype.hasOwnProperty.call(all, serviceId)) {
         return all[serviceId];
       }
 
-      // match by fields
       for (const k of Object.keys(all)) {
         const s = all[k];
         if (!s) continue;
@@ -108,21 +104,16 @@ export default async function handler(req, res) {
   if (!paymentIntentId) return res.status(400).json({ error: "Missing paymentIntentId" });
 
   try {
-    // 1) هات الـ PaymentIntent من Stripe
+    // 1) Retrieve PaymentIntent
     const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
-    if (!pi) {
-      return res.status(400).json({ error: "PaymentIntent not found" });
-    }
+    if (!pi) return res.status(400).json({ error: "PaymentIntent not found" });
+
     if (String(pi.status).toLowerCase() !== "succeeded") {
-      return res.status(400).json({
-        error: "PaymentIntent not succeeded",
-        status: pi.status,
-      });
+      return res.status(400).json({ error: "PaymentIntent not succeeded", status: pi.status });
     }
 
-    // 2) جهّز الداتا من الـ metadata
+    // 2) Metadata
     const md = pi.metadata || {};
-
     let reqId = providedRequestId || md.requestId || md.orderNumber || null;
 
     const requestType =
@@ -135,26 +126,24 @@ export default async function handler(req, res) {
     const printingFeeFromMeta = safeNum(md.printingFee ?? 0);
     const processingFeeMeta = safeNum(md.processingFee ?? md.processing_fee ?? md.processing_fee_value ?? 0);
 
-    const serviceId = md.serviceId || "";
-    const serviceNameFromMeta = md.serviceName || "";
-    const clientTypeMeta = md.clientType || md.client_type || md.serviceClientType || "";
+    const serviceId = safeStr(md.serviceId || "");
+    const serviceNameFromMeta = safeStr(md.serviceName || "");
+    const clientTypeMeta = safeStr(md.clientType || md.client_type || md.serviceClientType || "");
 
-    const assignedToMeta = md.assignedTo || md.assigned_to || "";
-    const assignedToNameMeta = md.assignedToName || md.assigned_to_name || "";
+    const assignedToMeta = safeStr(md.assignedTo || md.assigned_to || "");
+    const assignedToNameMeta = safeStr(md.assignedToName || md.assigned_to_name || "");
 
-    // ✅ Subscription metadata (we'll use it ONLY for companySubscriptions)
+    // ✅ Subscription metadata (used ONLY for companySubscriptions)
     const subPlanKey = safeStr(md.planKey || "");
     const subPricingKey = safeStr(md.pricingKey || "");
     const subMonthsShown = safeNum(md.monthsShown || 0);
     const subPaidMonths = safeNum(md.paidMonths || 0);
     const subBonus = safeNum(md.bonus || 0);
 
-    const isSubscription =
-      String(requestType).toLowerCase() === "subscription" || subPlanKey.trim().length > 0;
-
+    const isSubscription = String(requestType).toLowerCase() === "subscription" || subPlanKey.trim().length > 0;
     const isCompany = String(clientTypeMeta).toLowerCase() === "company";
 
-    // attachments ممكن تكون جايه كـ JSON string
+    // attachments JSON
     let attachmentsMeta = null;
     if (md.attachments) {
       try {
@@ -164,15 +153,14 @@ export default async function handler(req, res) {
       }
     }
 
-    // Stripe بيرجع الفلوس بالـ "أصغر وحدة" (فلس)، فـ /100 = AED
+    // Amount
     const amountSmallest = pi.amount_received ?? pi.amount ?? 0;
     const amountAED = Number((amountSmallest / 100).toFixed(2));
 
-    // 3) idempotency check: stripePaymentsProcessed
+    // 3) Idempotency doc
     const processedRef = db.collection("stripePaymentsProcessed").doc(paymentIntentId);
     const processedSnap = await processedRef.get();
     if (processedSnap.exists) {
-      console.log(`confirmPayment: already processed ${paymentIntentId}`);
       return res.status(200).json({
         ok: true,
         alreadyProcessed: true,
@@ -181,7 +169,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // 4) لو الطلب موجود أصلاً، جيبه
+    // 4) Get request (if exists)
     let requestRef = null;
     let requestSnap = null;
 
@@ -197,8 +185,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // 5) هات اليوزر بنفس النظام الجديد:
-    // لازم الموبايل / الويب يكون حاطط md.customerId = نفس ID الدوكيومنت في users
+    // 5) customerId required
     const customerIdMeta = md.customerId || md.userId || null;
     if (!customerIdMeta) {
       await processedRef.set({
@@ -210,18 +197,16 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Missing customerId in metadata" });
     }
 
-    // users/<customerIdMeta>
     let userRef = db.collection("users").doc(String(customerIdMeta));
     let userSnap = await userRef.get();
 
-    // fallback: لو لقيت request قديم و فيه customerId مختلف، جرّب تروح عليه
+    // fallback from request.customerId
     if (!userSnap.exists && requestSnap && requestSnap.exists) {
       const rdata = requestSnap.data() || {};
       if (rdata.customerId && rdata.customerId !== customerIdMeta) {
         const altUserRef = db.collection("users").doc(String(rdata.customerId));
         const altSnap = await altUserRef.get();
         if (altSnap.exists) {
-          console.log("➡ using fallback user:", rdata.customerId, "instead of", customerIdMeta);
           userRef = altUserRef;
           userSnap = altSnap;
         }
@@ -235,32 +220,27 @@ export default async function handler(req, res) {
         note: "user_not_found",
         metadata: md,
       });
-      console.warn("confirmPayment: user not found", { paymentIntentId, md });
       return res.status(400).json({ error: "User not found" });
     }
 
-    // 6) هات تعريف السيرفس علشان نسجله جوا الطلب
+    // 6) Fetch service definition (for embedding in request)
     const serviceDoc = await fetchServiceFromByClientType(serviceId, clientTypeMeta, serviceNameFromMeta);
 
     // =========================
-    // 7) Firestore Transaction
+    // 7) Transaction
     // =========================
     let finalRequestId = reqId || null;
 
     await db.runTransaction(async (tx) => {
-      // double-check idempotency جوا الـ txn
       const proc = await tx.get(processedRef);
       if (proc.exists) throw new Error("ALREADY_PROCESSED");
 
       const uDoc = await tx.get(userRef);
       if (!uDoc.exists) throw new Error("User disappeared during transaction");
 
-      // ده هنستخدمه جوه السطور
       let reqIdToUse = reqId;
 
-      // --------------------------------
       // A) UPDATE EXISTING REQUEST
-      // --------------------------------
       if (requestSnap && requestSnap.exists) {
         reqIdToUse = String(requestSnap.id);
         finalRequestId = reqIdToUse;
@@ -268,11 +248,7 @@ export default async function handler(req, res) {
         const rdata = requestSnap.data() || {};
         const history = Array.isArray(rdata.statusHistory) ? rdata.statusHistory.slice() : [];
 
-        history.push({
-          status: "paid",
-          timestamp: nowISO(),
-          updatedBy: "server-confirmPayment",
-        });
+        history.push({ status: "paid", timestamp: nowISO(), updatedBy: "server-confirmPayment" });
 
         const updates = {
           lastUpdated: nowISO(),
@@ -281,25 +257,18 @@ export default async function handler(req, res) {
           paymentIntentId,
           statusHistory: history,
           paidAt: nowISO(),
-          processingFee:
-            typeof rdata.processingFee !== "undefined" ? rdata.processingFee : processingFeeMeta || 0,
+          processingFee: typeof rdata.processingFee !== "undefined" ? rdata.processingFee : processingFeeMeta || 0,
         };
 
         // attachments
-        if (rdata.attachments) {
-          updates.attachments = rdata.attachments;
-        } else if (attachmentsMeta) {
-          updates.attachments = attachmentsMeta;
-        }
+        if (rdata.attachments) updates.attachments = rdata.attachments;
+        else if (attachmentsMeta) updates.attachments = attachmentsMeta;
 
         // clientSecret
-        if (rdata.clientSecret) {
-          updates.clientSecret = rdata.clientSecret;
-        } else if (md.clientSecret) {
-          updates.clientSecret = md.clientSecret;
-        }
+        if (rdata.clientSecret) updates.clientSecret = rdata.clientSecret;
+        else if (md.clientSecret) updates.clientSecret = md.clientSecret;
 
-        // Inject service map
+        // service map (normal embedding as you do)
         if (serviceDoc) {
           const svc = {
             name: serviceDoc.name || serviceNameFromMeta || "",
@@ -335,16 +304,13 @@ export default async function handler(req, res) {
           if (serviceId) updates.serviceId = serviceId;
         }
 
-        // موظف المراجعة
         updates.assignedTo = rdata.assignedTo || assignedToMeta || "";
         updates.assignedToName = rdata.assignedToName || assignedToNameMeta || "";
 
-        // ✅ IMPORTANT: لا نضيف أي حقول اشتراك داخل requests (حفاظًا على schema)
+        // ✅ IMPORTANT: DO NOT write any subscription fields into requests
         tx.update(requestRef, updates);
       } else {
-        // --------------------------------
         // B) CREATE NEW REQUEST
-        // --------------------------------
         if (!reqIdToUse) {
           reqIdToUse = `REQ-${Math.floor(100 + Math.random() * 900)}-${Math.floor(1000 + Math.random() * 9000)}`;
         }
@@ -380,29 +346,30 @@ export default async function handler(req, res) {
           requestId: reqIdToUse,
           paymentIntentId,
           customerId: userRef.id,
+
           serviceId: serviceMap?.serviceId || serviceId || "",
           serviceName: serviceMap?.name || serviceNameFromMeta || "",
-          requestType, // نفس منطقك القديم
+          requestType, // نفس منطقك
+
           paidAmount: amountAED,
           printingFee: serviceMap?.printingFee ?? printingFeeFromMeta ?? 0,
+          processingFee: processingFeeMeta || 0,
+
           coinsGiven,
           coinsUsed,
+
           createdAt: nowISO(),
           lastUpdated: nowISO(),
           status: "paid",
           paidAt: nowISO(),
           userEmail: uDoc.data().email || "",
-          statusHistory: [
-            {
-              status: "paid",
-              timestamp: nowISO(),
-              updatedBy: "server-confirmPayment",
-            },
-          ],
+
+          statusHistory: [{ status: "paid", timestamp: nowISO(), updatedBy: "server-confirmPayment" }],
+
           metadata: md || {},
           attachments: attachmentsMeta || {},
           clientSecret: md.clientSecret || null,
-          processingFee: processingFeeMeta || 0,
+
           assignedTo: assignedToMeta || "",
           assignedToName: assignedToNameMeta || "",
           ...(serviceMap ? { service: serviceMap, requiredDocuments: serviceMap.requiredDocuments || [] } : {}),
@@ -411,9 +378,7 @@ export default async function handler(req, res) {
         tx.set(db.collection("requests").doc(reqIdToUse), reqObj);
       }
 
-      // --------------------------------
       // C) UPDATE WALLET / COINS
-      // --------------------------------
       if (requestType === "wallet_recharge") {
         const prevWallet = Number(uDoc.data().walletBalance ?? uDoc.data().wallet ?? 0);
         const newWallet = +(prevWallet + amountAED).toFixed(2);
@@ -425,17 +390,13 @@ export default async function handler(req, res) {
         });
       } else {
         if (coinsGiven > 0) {
-          tx.update(userRef, {
-            coins: admin.firestore.FieldValue.increment(coinsGiven),
-          });
+          tx.update(userRef, { coins: admin.firestore.FieldValue.increment(coinsGiven) });
         }
       }
 
-      // --------------------------------
-      // ✅ NEW: COMPANY SUBSCRIPTIONS ONLY (separate collection)
-      // --------------------------------
+      // ✅ D) SUBSCRIPTION (ONLY companySubscriptions)
       if (isSubscription && isCompany) {
-        const subRef = db.collection("companySubscriptions").doc(String(userRef.id));
+        const subRef = db.collection("companySubscriptions").doc(userRef.id);
         const subSnap = await tx.get(subRef);
 
         const now = new Date();
@@ -454,33 +415,37 @@ export default async function handler(req, res) {
 
         const endDate = addMonths(startDate, subMonthsShown > 0 ? subMonthsShown : 0);
 
-        const subState = {
-          userId: userRef.id,
-          status: "active",
-          isActive: true,
+        tx.set(
+          subRef,
+          {
+            companyId: userRef.id,
+            customerId: userRef.id,
 
-          planKey: subPlanKey,
-          pricingKey: subPricingKey,
-          monthsShown: subMonthsShown,
-          paidMonths: subPaidMonths,
-          bonus: subBonus,
+            isActive: true,
+            status: "active",
 
-          startAt: startDate.toISOString(),
-          endAt: endDate.toISOString(),
+            planKey: subPlanKey,
+            pricingKey: subPricingKey,
+            monthsShown: subMonthsShown,
+            paidMonths: subPaidMonths,
+            bonus: subBonus,
 
-          lastRequestId: finalRequestId,
-          lastPaymentIntentId: paymentIntentId,
+            startAt: startDate.toISOString(),
+            endAt: endDate.toISOString(),
 
-          updatedAt: nowISO(),
-          createdAt: subSnap.exists ? (subSnap.data()?.createdAt || nowISO()) : nowISO(),
-        };
+            lastRequestId: finalRequestId,
+            lastPaymentIntentId: paymentIntentId,
 
-        tx.set(subRef, subState, { merge: true });
+            updatedAt: nowISO(),
+            createdAt: subSnap.exists ? subSnap.data()?.createdAt || admin.firestore.FieldValue.serverTimestamp() : admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
 
-        // history log
-        const histRef = db.collection("companySubscriptionsHistory").doc();
+        // history داخل subcollection (أنضف)
+        const histRef = subRef.collection("history").doc();
         tx.set(histRef, {
-          userId: userRef.id,
+          companyId: userRef.id,
           requestId: finalRequestId,
           paymentIntentId,
           planKey: subPlanKey,
@@ -495,9 +460,7 @@ export default async function handler(req, res) {
         });
       }
 
-      // --------------------------------
-      // D) TRANSACTION LOG
-      // --------------------------------
+      // E) TRANSACTION LOG
       const txRef = db.collection("transactions").doc();
       tx.set(txRef, {
         userId: userRef.id,
@@ -511,9 +474,7 @@ export default async function handler(req, res) {
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      // --------------------------------
-      // E) NOTIFICATION
-      // --------------------------------
+      // F) NOTIFICATION
       const notifRef = db.collection("notifications").doc();
       tx.set(notifRef, {
         targetId: userRef.id,
@@ -539,21 +500,12 @@ export default async function handler(req, res) {
           orderId: finalRequestId,
           paymentIntentId,
           ...(isSubscription
-            ? {
-                type: "subscription",
-                planKey: subPlanKey,
-                pricingKey: subPricingKey,
-                monthsShown: subMonthsShown,
-                paidMonths: subPaidMonths,
-                bonus: subBonus,
-              }
+            ? { type: "subscription", planKey: subPlanKey, pricingKey: subPricingKey, monthsShown: subMonthsShown, paidMonths: subPaidMonths, bonus: subBonus }
             : {}),
         },
       });
 
-      // --------------------------------
-      // F) MARK AS PROCESSED
-      // --------------------------------
+      // G) MARK AS PROCESSED
       tx.set(processedRef, {
         paymentIntentId,
         processedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -562,28 +514,18 @@ export default async function handler(req, res) {
       });
     });
 
-    // كله تمام
     return res.status(200).json({
       ok: true,
       orderNumber: finalRequestId,
       ...(isSubscription
-        ? {
-            subscription: {
-              planKey: subPlanKey,
-              pricingKey: subPricingKey,
-              monthsShown: subMonthsShown,
-              paidMonths: subPaidMonths,
-              bonus: subBonus,
-            },
-          }
+        ? { subscription: { planKey: subPlanKey, pricingKey: subPricingKey, monthsShown: subMonthsShown, paidMonths: subPaidMonths, bonus: subBonus } }
         : {}),
     });
   } catch (err) {
-    if (err.message === "ALREADY_PROCESSED") {
+    if (err?.message === "ALREADY_PROCESSED") {
       return res.status(200).json({ ok: true, alreadyProcessed: true });
     }
-
     console.error("confirmPayment error:", err);
-    return res.status(500).json({ error: err.message || "internal_error" });
+    return res.status(500).json({ error: err?.message || "internal_error" });
   }
 }
