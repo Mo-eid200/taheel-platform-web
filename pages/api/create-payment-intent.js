@@ -4,11 +4,11 @@ import Stripe from "stripe";
 import admin from "firebase-admin";
 
 /**
- * Create Stripe PaymentIntent (server-side fee calc) and (optionally) create a request doc.
+ * Create Stripe PaymentIntent (server-side fee calc) and create/merge request doc.
  *
  * ✅ Rules:
- * - DO NOT touch requests schema/logic (we only create the normal request fields you already use)
- * - Subscription info stays in metadata ONLY; confirm endpoint will write it into companySubscriptions
+ * - DO NOT touch requests schema/logic
+ * - Subscription info stays in metadata ONLY; confirm endpoint will write into companySubscriptions
  */
 
 if (!admin.apps.length) {
@@ -89,9 +89,8 @@ async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFa
 
 /**
  * ✅ Processing fee calc (editable via env)
- * Options:
  * - STRIPE_FEE_FIXED_AED = "1.00"
- * - STRIPE_FEE_PERCENT  = "0.029"  (2.9%)
+ * - STRIPE_FEE_PERCENT  = "0.029"
  */
 function calcProcessingFeeAED(amountAED) {
   const fixed = safeNum(process.env.STRIPE_FEE_FIXED_AED || 0);
@@ -101,7 +100,7 @@ function calcProcessingFeeAED(amountAED) {
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Method not allowed" });
 
   try {
     const body = req.body || {};
@@ -116,7 +115,7 @@ export default async function handler(req, res) {
     const serviceId = safeStr(body.serviceId || "");
     const serviceName = safeStr(body.serviceName || "");
 
-    // Optional assignment (if you use it)
+    // Optional assignment
     const assignedTo = safeStr(body.assignedTo || "");
     const assignedToName = safeStr(body.assignedToName || "");
 
@@ -131,19 +130,19 @@ export default async function handler(req, res) {
     const paidMonths = safeNum(body.paidMonths || 0);
     const bonus = safeNum(body.bonus || 0);
 
-    if (!customerId) return res.status(400).json({ error: "Missing customerId" });
+    if (!customerId) return res.status(400).json({ ok: false, error: "Missing customerId" });
 
-    // Load user
+    // Load user (customerId لازم يبقى COM-...)
     const userRef = db.collection("users").doc(customerId);
     const userSnap = await userRef.get();
-    if (!userSnap.exists) return res.status(400).json({ error: "User not found" });
+    if (!userSnap.exists) return res.status(400).json({ ok: false, error: "User not found" });
 
-    // Decide base amount:
-    // - If frontend sends amountAED explicitly -> we use it
-    // - Else if service -> we fetch from servicesByClientType and use service.clientPrice/price
-    let baseAmountAED = safeNum(body.amountAED || 0);
+    // ✅ IMPORTANT:
+    // Frontend sends "amount" (not amountAED) for subscriptions/services flow
+    let baseAmountAED = safeNum(body.amountAED || body.amount || 0);
     let printingFeeAED = safeNum(body.printingFee || 0);
 
+    // لو مش مبعوت amount (خدمات فقط)، نجيب من servicesByClientType
     let serviceDoc = null;
     if (!baseAmountAED && requestType !== "wallet_recharge") {
       serviceDoc = await fetchServiceFromByClientType(serviceId, clientType, serviceName);
@@ -153,13 +152,13 @@ export default async function handler(req, res) {
       }
     }
 
-    // Wallet recharge must provide amountAED
+    // Wallet recharge must provide amount
     if (requestType === "wallet_recharge" && baseAmountAED <= 0) {
-      return res.status(400).json({ error: "Missing/invalid amountAED for wallet recharge" });
+      return res.status(400).json({ ok: false, error: "Missing/invalid amount for wallet recharge" });
     }
 
     if (baseAmountAED <= 0) {
-      return res.status(400).json({ error: "Invalid amountAED (0)" });
+      return res.status(400).json({ ok: false, error: "Invalid amount (0)" });
     }
 
     // ✅ Calculate processing fee on server
@@ -169,10 +168,10 @@ export default async function handler(req, res) {
     const totalAED = Number((baseAmountAED + printingFeeAED + processingFeeAED).toFixed(2));
     const amountSmallest = Math.round(totalAED * 100);
 
-    // Request id (doc id)
-    const requestId = safeStr(body.requestId || generateOrderNumber());
+    // Request id (doc id) => orderNumber
+    const orderNumber = safeStr(body.requestId || generateOrderNumber());
 
-    // Attachments metadata (stringify)
+    // Attachments metadata
     let attachments = body.attachments || null;
     let attachmentsJson = "";
     if (attachments) {
@@ -188,14 +187,11 @@ export default async function handler(req, res) {
       amount: amountSmallest,
       currency: "aed",
       automatic_payment_methods: { enabled: true },
-
       metadata: {
-        // identity
         customerId,
         lang,
 
-        // request
-        requestId,
+        requestId: orderNumber,
         requestType,
         clientType,
         serviceId,
@@ -204,36 +200,31 @@ export default async function handler(req, res) {
         assignedTo,
         assignedToName,
 
-        // amounts
         baseAmountAED: String(baseAmountAED.toFixed(2)),
         printingFee: String(printingFeeAED.toFixed(2)),
         processingFee: String(processingFeeAED.toFixed(2)),
         totalAED: String(totalAED.toFixed(2)),
 
-        // coins
         coinsUsed: String(coinsUsed),
         coinsGiven: String(coinsGiven),
 
-        // subscription metadata (ONLY metadata)
         planKey,
         pricingKey,
         monthsShown: String(monthsShown),
         paidMonths: String(paidMonths),
         bonus: String(bonus),
 
-        // attachments
         ...(attachmentsJson ? { attachments: attachmentsJson } : {}),
       },
     });
 
-    // OPTIONAL: create/merge the normal request doc now (same logic style you already use)
-    // (This is safe and does not change schema; confirm will just update status to paid)
+    // Create/merge request doc (normal schema)
     await db
       .collection("requests")
-      .doc(requestId)
+      .doc(orderNumber)
       .set(
         {
-          requestId,
+          requestId: orderNumber,
           paymentIntentId: pi.id,
           clientSecret: pi.client_secret || null,
 
@@ -265,12 +256,20 @@ export default async function handler(req, res) {
         { merge: true }
       );
 
+    // ✅ RETURN KEYS THE FRONTEND EXPECTS
     return res.status(200).json({
       ok: true,
-      requestId,
-      paymentIntentId: pi.id,
       clientSecret: pi.client_secret,
-      amountAED: totalAED,
+      paymentIntentId: pi.id,
+
+      // frontend expects this name:
+      orderNumber,
+
+      // frontend expects these:
+      processingFee: processingFeeAED,
+      finalPrice: totalAED,
+
+      // optional details (safe)
       breakdown: {
         baseAmountAED,
         printingFeeAED,
@@ -279,6 +278,6 @@ export default async function handler(req, res) {
     });
   } catch (e) {
     console.error("createPaymentIntent error:", e);
-    return res.status(500).json({ error: e?.message || "internal_error" });
+    return res.status(500).json({ ok: false, error: e?.message || "internal_error" });
   }
 }

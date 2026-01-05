@@ -1,9 +1,9 @@
 "use client";
 
 import React, { useEffect, useMemo, useState, useCallback } from "react";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 import { firestore, auth } from "@/lib/firebase.client";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import CompanyPlanCard from "./CompanyPlanCard";
 
 // ✅ لو Stripe API عندك بيتوقع amount بالـ fils/cents (AED * 100) خليها true
@@ -27,17 +27,71 @@ function calcDays(subscriptionDays, monthsShown) {
   return 0;
 }
 
+/**
+ * ✅ Resolve clientDocId (COM-xxx) from:
+ * 1) URL param: ?userId=COM-...
+ * 2) Firestore mapping: usersByUid/<uid> -> { userId | docId | clientId }
+ */
+async function resolveClientDocId({ searchParams, uid }) {
+  const fromUrl = (searchParams?.get("userId") || "").trim();
+  if (fromUrl) return fromUrl;
+
+  if (!uid) return "";
+
+  try {
+    const mapRef = doc(firestore, "usersByUid", String(uid));
+    const snap = await getDoc(mapRef);
+    if (!snap.exists()) return "";
+
+    const m = snap.data() || {};
+    const mapped = String(m.userId || m.docId || m.clientId || "").trim();
+    return mapped || "";
+  } catch (e) {
+    console.error("resolveClientDocId failed:", e);
+    return "";
+  }
+}
+
 export default function CompanySubscriptionsSection({
   lang = "ar",
   darkMode = false,
   onSubscribe, // optional external callback
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false); // ✅ منع دبل كليك
+  const [clientDocId, setClientDocId] = useState(""); // ✅ COM-...
 
+  // ✅ Resolve clientDocId once (URL first, then usersByUid mapping)
+  useEffect(() => {
+    let alive = true;
+
+    async function run() {
+      try {
+        const user = auth.currentUser;
+
+        const id = await resolveClientDocId({
+          searchParams,
+          uid: user?.uid || "",
+        });
+
+        if (alive) setClientDocId(id || "");
+      } catch (e) {
+        console.error("clientDocId resolve error:", e);
+        if (alive) setClientDocId("");
+      }
+    }
+
+    run();
+    return () => {
+      alive = false;
+    };
+  }, [searchParams]);
+
+  // ✅ Load plans
   useEffect(() => {
     let alive = true;
 
@@ -95,7 +149,7 @@ export default function CompanySubscriptionsSection({
         });
       }
 
-      if (submitting) return; // ✅ safety
+      if (submitting) return;
       setSubmitting(true);
 
       try {
@@ -103,6 +157,26 @@ export default function CompanySubscriptionsSection({
         if (!user) {
           alert(lang === "ar" ? "لازم تسجل دخول الأول" : "Please login first");
           router.push("/login");
+          return;
+        }
+
+        // ✅ لازم يكون عندنا COM-... (مش UID)
+        let finalClientDocId = (clientDocId || "").trim();
+
+        // fallback لحظة الاشتراك (لو اليوزر اتأخر في التحميل)
+        if (!finalClientDocId) {
+          finalClientDocId = await resolveClientDocId({
+            searchParams,
+            uid: user.uid,
+          });
+        }
+
+        if (!finalClientDocId) {
+          alert(
+            lang === "ar"
+              ? "تعذر تحديد رقم العميل (COM-...). افتح الداشبورد بالرابط الصحيح أو تأكد من usersByUid."
+              : "Unable to resolve client id (COM-...). Ensure URL has ?userId=COM-... or usersByUid mapping exists."
+          );
           return;
         }
 
@@ -130,7 +204,9 @@ export default function CompanySubscriptionsSection({
           serviceId: `subscription_${planKey}`,
           serviceName: subName,
 
-          customerId: user.uid,
+          // ✅ أهم سطر: لازم docId بتاع users (COM-...)
+          customerId: finalClientDocId,
+
           userEmail: user.email,
           clientType: "company",
           attachments: {},
@@ -220,7 +296,7 @@ export default function CompanySubscriptionsSection({
         setSubmitting(false);
       }
     },
-    [onSubscribe, lang, router, submitting]
+    [onSubscribe, lang, router, submitting, clientDocId, searchParams]
   );
 
   const emptyText = useMemo(
@@ -250,7 +326,7 @@ export default function CompanySubscriptionsSection({
             lang={lang}
             darkMode={darkMode}
             onSubscribe={handleSubscribe}
-            disabled={submitting} // ✅ لو الكارد بيدعمها
+            disabled={submitting}
           />
         ))}
       </div>
