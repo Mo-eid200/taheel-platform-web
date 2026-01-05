@@ -45,8 +45,6 @@ function safeNum(v) {
 function nowISO() {
   return new Date().toISOString();
 }
-
-// لازم ناخد raw body من req (Stripe محتاج ده للـ signature)
 async function getRawBody(req) {
   const chunks = [];
   for await (const chunk of req) {
@@ -196,36 +194,25 @@ export default async function handler(req, res) {
     const amountSmallest = pi.amount_received ?? pi.amount ?? 0;
     const amountAED = Number((amountSmallest / 100).toFixed(2));
 
-    // =============================
-    //   3) idempotency check
-    // =============================
     const processedRef = db.collection("stripePaymentsProcessed").doc(paymentIntentId);
-    const processedSnap = await processedRef.get();
-    if (processedSnap.exists) {
-      console.log("⚠️ already processed this PI:", paymentIntentId);
-      return res.json({ received: true });
-    }
 
     // =============================
-    //   4) Locate request (order)
+    //   Find requestRef (outside tx only for locating)
     // =============================
     let requestRef = null;
-    let requestSnap = null;
-
     if (reqId) {
       requestRef = db.collection("requests").doc(String(reqId));
-      requestSnap = await requestRef.get();
     } else {
+      // fallback: find by paymentIntentId
       const q = await db.collection("requests").where("paymentIntentId", "==", paymentIntentId).limit(1).get();
       if (!q.empty) {
-        requestSnap = q.docs[0];
-        requestRef = requestSnap.ref;
-        reqId = requestRef.id;
+        requestRef = q.docs[0].ref;
+        reqId = q.docs[0].id;
       }
     }
 
     // =============================
-    //   5) Locate user
+    //   Locate user (must exist)
     // =============================
     const customerIdMeta = md.customerId || md.userId || null;
     if (!customerIdMeta) {
@@ -239,22 +226,8 @@ export default async function handler(req, res) {
       return res.json({ received: true });
     }
 
-    let userRef = db.collection("users").doc(String(customerIdMeta));
-    let userSnap = await userRef.get();
-
-    if (!userSnap.exists && requestSnap && requestSnap.exists) {
-      const rdata = requestSnap.data() || {};
-      if (rdata.customerId && rdata.customerId !== customerIdMeta) {
-        const altUserRef = db.collection("users").doc(String(rdata.customerId));
-        const altSnap = await altUserRef.get();
-        if (altSnap.exists) {
-          console.log("➡ using fallback user:", rdata.customerId, "instead of", customerIdMeta);
-          userRef = altUserRef;
-          userSnap = altSnap;
-        }
-      }
-    }
-
+    const userRef = db.collection("users").doc(String(customerIdMeta));
+    const userSnap = await userRef.get();
     if (!userSnap.exists) {
       console.warn("❗ user not found for PI:", paymentIntentId, "customerId:", customerIdMeta);
       await processedRef.set({
@@ -266,39 +239,64 @@ export default async function handler(req, res) {
       return res.json({ received: true });
     }
 
-    // =============================
-    //   6) Load service definition
-    // =============================
+    // service doc (read outside tx ok)
     const serviceDoc = await fetchServiceFromByClientType(serviceId, clientTypeMeta, serviceNameFromMeta);
 
-    // =============================
-    //   prepare push-notification vars
-    // =============================
+    // push vars
+    const langIsEn = md.lang === "en";
     let finalRequestIdAfterTx = null;
     let notifyTitleAfterTx = "";
     let notifyBodyAfterTx = "";
     let notifyDataAfterTx = {};
-    const langIsEn = md.lang === "en";
-
-    const userRefGlobal = userRef;
 
     // =============================
-    //   7) Firestore Transaction
+    //   Firestore Transaction (READS THEN WRITES)
     // =============================
     await db.runTransaction(async (tx) => {
+      // ---------- PRE FLAGS ----------
+      const planKey = String(md.planKey || "").trim();
+      const pricingKey = String(md.pricingKey || "").trim();
+      const planName =
+        String(md.planName || md.subscriptionName || "").trim() ||
+        planKey ||
+        (langIsEn ? "Subscription" : "اشتراك");
+
+      const clientTypeNorm = String(clientTypeMeta || "").trim().toLowerCase();
+      const requestTypeNorm = String(requestType || "").trim().toLowerCase();
+
+      const isSubscription = requestTypeNorm === "subscription" || planKey.length > 0;
+      const isCompany = clientTypeNorm === "company";
+
+      const totalSubscriptionDays = safeNum(md.totalSubscriptionDays || md.totalSubDays || 0);
+      const subscriptionDays = safeNum(md.subscriptionDays || 0);
+      const giftDays = safeNum(md.giftDays || 0);
+      const daysToApply =
+        totalSubscriptionDays > 0
+          ? totalSubscriptionDays
+          : Math.max(0, subscriptionDays + giftDays) || 30;
+
+      const companyDocId = String(customerIdMeta);
+      const subRef = db.collection("companySubscriptions").doc(companyDocId);
+
+      // ---------- ALL READS FIRST ----------
       const procCheck = await tx.get(processedRef);
       if (procCheck.exists) throw new Error("ALREADY_PROCESSED");
 
       const uDoc = await tx.get(userRef);
       if (!uDoc.exists) throw new Error("User disappeared during transaction");
 
+      const rDoc = requestRef ? await tx.get(requestRef) : null;
+
+      const subSnap = isSubscription && isCompany ? await tx.get(subRef) : null;
+
+      // ---------- NOW WRITES ----------
       let finalRequestId = reqId || null;
 
-      // ------- A) UPDATE OR CREATE REQUEST -------
-      if (requestSnap && requestSnap.exists) {
-        finalRequestId = String(requestSnap.id);
+      // A) request
+      if (rDoc && rDoc.exists) {
+        finalRequestId = String(rDoc.id);
+        const rdata = rDoc.data() || {};
 
-        const rdata = requestSnap.data() || {};
         const history = Array.isArray(rdata.statusHistory) ? [...rdata.statusHistory] : [];
         history.push({ status: "paid", timestamp: nowISO(), updatedBy: "stripe-webhook" });
 
@@ -310,6 +308,9 @@ export default async function handler(req, res) {
           statusHistory: history,
           paidAt: nowISO(),
           processingFee: typeof rdata.processingFee !== "undefined" ? rdata.processingFee : processingFeeMeta || 0,
+
+          assignedTo: rdata.assignedTo || assignedToMeta || "",
+          assignedToName: rdata.assignedToName || assignedToNameMeta || "",
         };
 
         if (rdata.attachments) updates.attachments = rdata.attachments;
@@ -348,13 +349,7 @@ export default async function handler(req, res) {
           updates.providers = svc.providers;
           updates.printingFee = rdata.printingFee ?? svc.printingFee ?? printingFeeFromMeta ?? 0;
           updates.requiredDocuments = svc.requiredDocuments;
-        } else {
-          if (serviceNameFromMeta) updates.serviceName = serviceNameFromMeta;
-          if (serviceId) updates.serviceId = serviceId;
         }
-
-        updates.assignedTo = rdata.assignedTo || assignedToMeta || "";
-        updates.assignedToName = rdata.assignedToName || assignedToNameMeta || "";
 
         tx.update(requestRef, updates);
       } else {
@@ -362,44 +357,20 @@ export default async function handler(req, res) {
           finalRequestId = `REQ-${Math.floor(100 + Math.random() * 900)}-${Math.floor(1000 + Math.random() * 9000)}`;
         }
 
-        let serviceMap = null;
-        if (serviceDoc) {
-          serviceMap = {
-            name: serviceDoc.name || serviceNameFromMeta || "",
-            serviceId: serviceDoc.serviceId || serviceId || "",
-            providers: Array.isArray(serviceDoc.providers)
-              ? serviceDoc.providers
-              : serviceDoc.providers
-              ? [serviceDoc.providers]
-              : [],
-            category: serviceDoc.category || "",
-            subcategory: serviceDoc.subcategory || serviceDoc.subCategory || "",
-            clientPrice: safeNum(serviceDoc.clientPrice ?? serviceDoc.price ?? amountAED),
-            price: safeNum(serviceDoc.price ?? serviceDoc.clientPrice ?? amountAED),
-            printingFee: safeNum(serviceDoc.printingFee ?? printingFeeFromMeta ?? 0),
-            tax: safeNum(serviceDoc.tax ?? 0),
-            description: serviceDoc.description || "",
-            requiredDocuments: Array.isArray(serviceDoc.requiredDocuments) ? serviceDoc.requiredDocuments : [],
-            active: typeof serviceDoc.active === "boolean" ? serviceDoc.active : true,
-            duration: serviceDoc.duration || "",
-            profit: safeNum(serviceDoc.profit ?? 0),
-            repeatable: typeof serviceDoc.repeatable === "boolean" ? serviceDoc.repeatable : false,
-            requireUpload: typeof serviceDoc.requireUpload === "boolean" ? serviceDoc.requireUpload : false,
-          };
-        }
+        const newReqRef = db.collection("requests").doc(finalRequestId);
 
         const reqObj = {
           requestId: finalRequestId,
           paymentIntentId,
           customerId: userRef.id,
 
-          serviceId: serviceMap?.serviceId || serviceId || "",
-          serviceName: serviceMap?.name || serviceNameFromMeta || "",
+          serviceId: serviceId || "",
+          serviceName: serviceNameFromMeta || "",
           requestType,
 
           paidAmount: amountAED,
-          printingFee: serviceMap?.printingFee ?? printingFeeFromMeta ?? 0,
-          processingFee: processingFeeMeta || 0,
+          printingFee: printingFeeFromMeta ?? 0,
+          processingFee: processingFeeMeta ?? 0,
 
           coinsGiven,
           coinsUsed,
@@ -418,14 +389,13 @@ export default async function handler(req, res) {
 
           assignedTo: assignedToMeta || "",
           assignedToName: assignedToNameMeta || "",
-          ...(serviceMap ? { service: serviceMap, requiredDocuments: serviceMap.requiredDocuments || [] } : {}),
         };
 
-        tx.set(db.collection("requests").doc(finalRequestId), reqObj);
-        requestRef = db.collection("requests").doc(finalRequestId);
+        tx.set(newReqRef, reqObj);
+        requestRef = newReqRef;
       }
 
-      // ------- B) WALLET / COINS UPDATE -------
+      // B) wallet/coins
       if (requestType === "wallet_recharge") {
         const prevWallet = Number(uDoc.data().walletBalance ?? uDoc.data().wallet ?? 0);
         const newWallet = +(prevWallet + amountAED).toFixed(2);
@@ -441,7 +411,7 @@ export default async function handler(req, res) {
         }
       }
 
-      // ------- C) TRANSACTION RECORD -------
+      // C) transactions log
       const txRef = db.collection("transactions").doc();
       tx.set(txRef, {
         userId: userRef.id,
@@ -455,7 +425,7 @@ export default async function handler(req, res) {
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      // ------- D) NOTIFICATION DOC -------
+      // D) notification doc
       const notifRef = db.collection("notifications").doc();
       const notifTitle = langIsEn ? "Payment Confirmed" : "تم تأكيد الدفع";
       const notifBody = langIsEn
@@ -471,34 +441,12 @@ export default async function handler(req, res) {
         metadata: { orderId: finalRequestId, paymentIntentId },
       });
 
-      // ------- D2) SUBSCRIPTION (companySubscriptions) -------
-      const planKey = String(md.planKey || "").trim();
-      const pricingKey = String(md.pricingKey || "").trim();
-      const planName =
-        String(md.planName || md.subscriptionName || "").trim() ||
-        planKey ||
-        (langIsEn ? "Subscription" : "اشتراك");
-
-      const clientTypeNorm = String(clientTypeMeta || "").trim().toLowerCase();
-      const requestTypeNorm = String(requestType || "").trim().toLowerCase();
-      const isSubscription = requestTypeNorm === "subscription" || planKey.length > 0;
-      const isCompany = clientTypeNorm === "company";
-
-      const totalSubscriptionDays = safeNum(md.totalSubscriptionDays || md.totalSubDays || 0);
-      const subscriptionDays = safeNum(md.subscriptionDays || 0);
-      const giftDays = safeNum(md.giftDays || 0);
-      const daysToApply =
-        totalSubscriptionDays > 0 ? totalSubscriptionDays : Math.max(0, subscriptionDays + giftDays) || 30;
-
+      // D2) subscription
       if (isSubscription && isCompany) {
-        const companyDocId = String(customerIdMeta);
-        const subRef = db.collection("companySubscriptions").doc(companyDocId);
-        const subSnap = await tx.get(subRef);
-
         const now = new Date();
         let startDate = now;
 
-        if (subSnap.exists) {
+        if (subSnap && subSnap.exists) {
           const old = subSnap.data() || {};
           const oldEndRaw = old.endAt || old.expiresAt || old.endAtISO || null;
 
@@ -550,12 +498,11 @@ export default async function handler(req, res) {
             lastPaymentIntentId: paymentIntentId,
 
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            ...(subSnap.exists ? {} : { createdAt: admin.firestore.FieldValue.serverTimestamp() }),
+            ...(subSnap && subSnap.exists ? {} : { createdAt: admin.firestore.FieldValue.serverTimestamp() }),
           },
           { merge: true }
         );
 
-        // history doc = paymentIntentId (idempotent)
         tx.set(subRef.collection("history").doc(paymentIntentId), {
           companyDocId,
           companyId: companyPublicId,
@@ -577,33 +524,27 @@ export default async function handler(req, res) {
         });
       }
 
-      // build push strings for after transaction
-      finalRequestIdAfterTx = finalRequestId;
-      notifyTitleAfterTx = notifTitle;
-      notifyBodyAfterTx = notifBody;
-      notifyDataAfterTx = {
-        type: "payment_success",
-        orderId: finalRequestId,
-        paymentIntentId,
-      };
-
-      // ------- E) MARK AS PROCESSED -------
+      // E) processed (مرة واحدة فقط)
       tx.set(processedRef, {
         paymentIntentId,
         processedAt: admin.firestore.FieldValue.serverTimestamp(),
         requestId: finalRequestId,
         amount: amountAED,
       });
+
+      // push vars for after-tx
+      finalRequestIdAfterTx = finalRequestId;
+      notifyTitleAfterTx = notifTitle;
+      notifyBodyAfterTx = notifBody;
+      notifyDataAfterTx = { type: "payment_success", orderId: finalRequestId, paymentIntentId };
     });
 
     // =============================
     //   Send PUSH after transaction
     // =============================
     try {
-      if (userRefGlobal && finalRequestIdAfterTx) {
-        await sendExpoPushToUser(userRefGlobal, notifyTitleAfterTx, notifyBodyAfterTx, notifyDataAfterTx);
-      } else {
-        console.warn("Skipping push, missing userRefGlobal/finalRequestIdAfterTx");
+      if (finalRequestIdAfterTx) {
+        await sendExpoPushToUser(userRef, notifyTitleAfterTx, notifyBodyAfterTx, notifyDataAfterTx);
       }
     } catch (pushErr) {
       console.error("push send failed:", pushErr);
