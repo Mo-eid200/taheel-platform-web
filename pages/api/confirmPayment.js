@@ -18,6 +18,7 @@ if (!admin.apps.length) {
     const sa = process.env.GOOGLE_SERVICE_ACCOUNT_KEY
       ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY)
       : null;
+
     if (sa && sa.private_key) {
       sa.private_key = sa.private_key.replace(/\\n/g, "\n");
       admin.initializeApp({ credential: admin.credential.cert(sa) });
@@ -45,6 +46,9 @@ function safeNum(v) {
 function safeStr(v) {
   if (v == null) return "";
   return String(v);
+}
+function normLower(v) {
+  return safeStr(v).trim().toLowerCase();
 }
 function nowISO() {
   return new Date().toISOString();
@@ -106,7 +110,7 @@ export default async function handler(req, res) {
     const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
     if (!pi) return res.status(400).json({ error: "PaymentIntent not found" });
 
-    if (String(pi.status).toLowerCase() !== "succeeded") {
+    if (normLower(pi.status) !== "succeeded") {
       return res.status(400).json({ error: "PaymentIntent not succeeded", status: pi.status });
     }
 
@@ -114,9 +118,10 @@ export default async function handler(req, res) {
     const md = pi.metadata || {};
     let reqId = providedRequestId || md.requestId || md.orderNumber || null;
 
-    const requestType =
+    const requestType = normLower(
       md.requestType ||
-      (md.serviceName && String(md.serviceName).toLowerCase().includes("wallet") ? "wallet_recharge" : "service");
+        (md.serviceName && normLower(md.serviceName).includes("wallet") ? "wallet_recharge" : "service")
+    );
 
     const coinsGiven = safeNum(md.coinsGiven ?? md.cashbackCoins ?? md.coins ?? 0);
     const coinsUsed = safeNum(md.coinsUsed ?? 0);
@@ -126,26 +131,27 @@ export default async function handler(req, res) {
 
     const serviceId = safeStr(md.serviceId || "");
     const serviceNameFromMeta = safeStr(md.serviceName || "");
-    const clientTypeMeta = safeStr(md.clientType || md.client_type || md.serviceClientType || "");
+    const clientTypeMeta = normLower(md.clientType || md.client_type || md.serviceClientType || "");
 
     const assignedToMeta = safeStr(md.assignedTo || md.assigned_to || "");
     const assignedToNameMeta = safeStr(md.assignedToName || md.assigned_to_name || "");
 
-    // ✅ Subscription metadata (used ONLY for companySubscriptions)
-    const subPlanKey = safeStr(md.planKey || "");
-    const subPricingKey = safeStr(md.pricingKey || "");
+    // ✅ Subscription metadata
+    const subPlanKey = safeStr(md.planKey || "").trim();
+    const subPricingKey = safeStr(md.pricingKey || "").trim();
     const subPaidMonths = safeNum(md.paidMonths || 0);
     const subBonus = safeNum(md.bonus || 0);
 
-    // ✅ DAYS-BASED subscription duration
+    // ✅ IMPORTANT: prefer totalSubscriptionDays
+    const totalSubscriptionDays = safeNum(md.totalSubscriptionDays || md.totalSubDays || 0);
     const subDays = safeNum(md.subscriptionDays || 0);
-    const daysToApply = subDays > 0 ? subDays : 30;
+    const daysToApply = totalSubscriptionDays > 0 ? totalSubscriptionDays : subDays > 0 ? subDays : 30;
 
-    // ✅ plan name to show on card ribbon
-    const subPlanName = safeStr(md.planName || md.subscriptionName || md.planTitle || "") || subPlanKey;
+    const subPlanName =
+      safeStr(md.planName || md.subscriptionName || md.planTitle || "").trim() || subPlanKey;
 
-    const isSubscription = subPlanKey.trim().length > 0;
-    const isCompany = String(clientTypeMeta).toLowerCase() === "company";
+    const isSubscription = subPlanKey.length > 0 || requestType === "subscription";
+    const isCompany = clientTypeMeta === "company";
 
     // attachments JSON
     let attachmentsMeta = null;
@@ -190,7 +196,7 @@ export default async function handler(req, res) {
     }
 
     // 5) customerId required
-    const customerIdMeta = md.customerId || md.userId || null;
+    const customerIdMeta = safeStr(md.customerId || md.userId || "").trim();
     if (!customerIdMeta) {
       await processedRef.set({
         paymentIntentId,
@@ -201,22 +207,11 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Missing customerId in metadata" });
     }
 
-    let userRef = db.collection("users").doc(String(customerIdMeta));
-    let userSnap = await userRef.get();
+    // ✅ IMPORTANT: company doc id in your system is the same as customerId (COM-xxx)
+    const companyDocId = customerIdMeta;
 
-    // fallback from request.customerId
-    if (!userSnap.exists && requestSnap && requestSnap.exists) {
-      const rdata = requestSnap.data() || {};
-      if (rdata.customerId && rdata.customerId !== customerIdMeta) {
-        const altUserRef = db.collection("users").doc(String(rdata.customerId));
-        const altSnap = await altUserRef.get();
-        if (altSnap.exists) {
-          userRef = altUserRef;
-          userSnap = altSnap;
-        }
-      }
-    }
-
+    const userRef = db.collection("users").doc(companyDocId);
+    const userSnap = await userRef.get();
     if (!userSnap.exists) {
       await processedRef.set({
         paymentIntentId,
@@ -251,7 +246,6 @@ export default async function handler(req, res) {
 
         const rdata = requestSnap.data() || {};
         const history = Array.isArray(rdata.statusHistory) ? rdata.statusHistory.slice() : [];
-
         history.push({ status: "paid", timestamp: nowISO(), updatedBy: "server-confirmPayment" });
 
         const updates = {
@@ -264,15 +258,12 @@ export default async function handler(req, res) {
           processingFee: typeof rdata.processingFee !== "undefined" ? rdata.processingFee : processingFeeMeta || 0,
         };
 
-        // attachments
         if (rdata.attachments) updates.attachments = rdata.attachments;
         else if (attachmentsMeta) updates.attachments = attachmentsMeta;
 
-        // clientSecret
         if (rdata.clientSecret) updates.clientSecret = rdata.clientSecret;
         else if (md.clientSecret) updates.clientSecret = md.clientSecret;
 
-        // service map (normal embedding as you do)
         if (serviceDoc) {
           const svc = {
             name: serviceDoc.name || serviceNameFromMeta || "",
@@ -353,7 +344,7 @@ export default async function handler(req, res) {
 
           serviceId: serviceMap?.serviceId || serviceId || "",
           serviceName: serviceMap?.name || serviceNameFromMeta || "",
-          requestType, // نفس منطقك
+          requestType,
 
           paidAmount: amountAED,
           printingFee: serviceMap?.printingFee ?? printingFeeFromMeta ?? 0,
@@ -398,51 +389,40 @@ export default async function handler(req, res) {
         }
       }
 
-      // ✅ D) SUBSCRIPTION (ONLY companySubscriptions) — DAYS BASED ✅
+      // ✅ D) SUBSCRIPTION — create companySubscriptions/{COM-...} ALWAYS ✅
       if (isSubscription && isCompany) {
-        const subRef = db.collection("companySubscriptions").doc(userRef.id);
+        const subRef = db.collection("companySubscriptions").doc(companyDocId);
         const subSnap = await tx.get(subRef);
 
         const now = new Date();
         let startDate = now;
 
-        // لو عنده اشتراك شغال ولسه ماخلصش → نجدد بعده
         if (subSnap.exists) {
           const old = subSnap.data() || {};
-          const oldEnd =
-            toDateSafe(old.endAt) ||
-            toDateSafe(old.expiresAt) ||
-            toDateSafe(old.endAtISO) ||
-            null;
+          const oldEnd = toDateSafe(old.endAt) || toDateSafe(old.expiresAt) || toDateSafe(old.endAtISO) || null;
+          const oldStatus = normLower(old.status || "");
 
-          const oldStatus = String(old.status || "").toLowerCase();
           if (oldEnd && oldEnd.getTime() > now.getTime() && (oldStatus === "active" || oldStatus === "trial")) {
             startDate = oldEnd;
           }
         }
 
-        // حماية: لو حد بعت 0 بالغلط → نخليه 30 يوم افتراضي
-        const daysToApply = subDays > 0 ? subDays : 30;
         const endDate = addDays(startDate, daysToApply);
 
         const startTs = admin.firestore.Timestamp.fromDate(startDate);
         const endTs = admin.firestore.Timestamp.fromDate(endDate);
 
-        // بيانات هوية الشركة للعرض (optional لكن مفيد)
         const udata = uDoc.data() || {};
-        const companyPublicId = safeStr(udata.companyId || udata.customerId || udata.userId || userRef.id);
+        const companyPublicId = safeStr(udata.companyId || udata.customerId || udata.userId || companyDocId);
         const companyEmail = safeStr(udata.email || md.userEmail || "");
 
-        const planName =
-          subPlanName ||
-          safeStr(serviceNameFromMeta) ||
-          (md.lang === "en" ? "Subscription" : "اشتراك");
+        const planName = subPlanName || safeStr(serviceNameFromMeta) || (md.lang === "en" ? "Subscription" : "اشتراك");
 
         tx.set(
           subRef,
           {
-            companyDocId: userRef.id,   // doc id
-            companyId: companyPublicId, // رقم الشركة الظاهر للعميل
+            companyDocId,
+            companyId: companyPublicId,
             email: companyEmail,
 
             isActive: true,
@@ -456,11 +436,9 @@ export default async function handler(req, res) {
             paidMonths: subPaidMonths,
             bonus: subBonus,
 
-            // ✅ timestamps (أفضل للقراءة والترتيب)
             startAt: startTs,
             endAt: endTs,
 
-            // optional ISO backup
             startAtISO: startDate.toISOString(),
             endAtISO: endDate.toISOString(),
 
@@ -473,10 +451,10 @@ export default async function handler(req, res) {
           { merge: true }
         );
 
-        // history داخل subcollection (أنضف)
+        // history subcollection
         const histRef = subRef.collection("history").doc();
         tx.set(histRef, {
-          companyDocId: userRef.id,
+          companyDocId,
           companyId: companyPublicId,
           email: companyEmail,
 
@@ -513,7 +491,7 @@ export default async function handler(req, res) {
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      // F) NOTIFICATION (هتسيبه زي ما هو)
+      // F) NOTIFICATION
       const notifRef = db.collection("notifications").doc();
       tx.set(notifRef, {
         targetId: userRef.id,
@@ -544,9 +522,7 @@ export default async function handler(req, res) {
                 planKey: subPlanKey,
                 planName: subPlanName,
                 pricingKey: subPricingKey,
-                subscriptionDays: subDays,
-                paidMonths: subPaidMonths,
-                bonus: subBonus,
+                subscriptionDays: daysToApply,
               }
             : {}),
         },
@@ -567,12 +543,10 @@ export default async function handler(req, res) {
       ...(isSubscription
         ? {
             subscription: {
-              planKey: subPlanKey,
-              planName: subPlanName,
-              pricingKey: subPricingKey,
-              subscriptionDays: subDays,
-              paidMonths: subPaidMonths,
-              bonus: subBonus,
+              planKey: safeStr(md.planKey || ""),
+              planName: safeStr(md.planName || md.subscriptionName || ""),
+              pricingKey: safeStr(md.pricingKey || ""),
+              subscriptionDays: safeNum(md.totalSubscriptionDays || md.subscriptionDays || 0) || 30,
             },
           }
         : {}),
