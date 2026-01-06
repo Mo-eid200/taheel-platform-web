@@ -108,6 +108,20 @@ export default function CompanyCardGold({ companyId: initialCompanyId, lang = "a
       : `${days} days`;
   };
 
+  // =========================
+  // ✅ ONLY CHANGE: Plan name label (strip "باقة"/"Package")
+  // =========================
+  const cleanPlanName = (name) => {
+    const s = String(name || "").trim();
+    return s.replace(/^(باقة|باقه|package)\s*[:\-–—]?\s*/i, "").trim();
+  };
+
+  const planLabel = useMemo(() => {
+    if (subLoading) return "...";
+    if (!sub) return "";
+    return cleanPlanName(sub.planName || sub.planKey || "");
+  }, [subLoading, sub]);
+
   // جلب بيانات الشركة من فايرستور مع Fallback ذكي
   useEffect(() => {
     if (!initialCompanyId) return;
@@ -476,7 +490,7 @@ export default function CompanyCardGold({ companyId: initialCompanyId, lang = "a
               ? t.noSub
               : subExpired
               ? t.subExpired
-              : (sub?.planName || sub?.planKey || "")
+              : cleanPlanName(sub?.planName || sub?.planKey || "")
           }
         >
           {/* subtle shimmer */}
@@ -490,7 +504,7 @@ export default function CompanyCardGold({ companyId: initialCompanyId, lang = "a
             }}
           />
           <span className="relative">
-            {subLoading ? (lang === "ar" ? "..." : "...") : !hasSub ? t.noSub : (sub?.planName || sub?.planKey || "")}
+            {subLoading ? "..." : !hasSub ? t.noSub : cleanPlanName(sub?.planName || sub?.planKey || "")}
           </span>
         </div>
       </div>
