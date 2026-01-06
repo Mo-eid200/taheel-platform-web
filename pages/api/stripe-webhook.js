@@ -127,6 +127,13 @@ async function sendExpoPushToUser(userRef, title, body, data = {}) {
   }
 }
 
+const PLAN_NAMES = {
+  enterprise: "Enterprise",
+  growth: "Growth",
+  scale: "Scale",
+  starter: "Starter",
+};
+
 // -------- MAIN HANDLER --------
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
@@ -257,9 +264,7 @@ export default async function handler(req, res) {
       const planKey = String(md.planKey || "").trim();
       const pricingKey = String(md.pricingKey || "").trim();
       const planName =
-        String(md.planName || md.subscriptionName || "").trim() ||
-        planKey ||
-        (langIsEn ? "Subscription" : "اشتراك");
+            PLAN_NAMES[String(planKey).toLowerCase()] || planKey || "Subscription";
 
       const clientTypeNorm = String(clientTypeMeta || "").trim().toLowerCase();
       const requestTypeNorm = String(requestType || "").trim().toLowerCase();
