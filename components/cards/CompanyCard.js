@@ -111,16 +111,22 @@ export default function CompanyCardGold({ companyId: initialCompanyId, lang = "a
   // =========================
   // ✅ ONLY CHANGE: Plan name label (strip "باقة"/"Package")
   // =========================
-  const cleanPlanName = (name) => {
-    const s = String(name || "").trim();
-    return s.replace(/^(باقة|باقه|package)\s*[:\-–—]?\s*/i, "").trim();
-  };
+// =========================
+// ✅ ONLY CHANGE: Ribbon label uses planKey (fallback if planName is generic)
+// =========================
+const cleanPlanName = (name) => {
+  const s = String(name || "").trim();
+  return s.replace(/^(باقة|باقه|package)\s*[:\-–—]?\s*/i, "").trim();
+};
 
-  const planLabel = useMemo(() => {
-    if (subLoading) return "...";
-    if (!sub) return "";
-    return cleanPlanName(sub.planName || sub.planKey || "");
-  }, [subLoading, sub]);
+const planLabel = useMemo(() => {
+  if (subLoading) return "...";
+  if (!sub) return "";
+  const pn = cleanPlanName(sub.planName || "");
+  // لو planName طلعت فاضية أو كانت عامة زي "باقة" → اعرض planKey
+  return pn && pn.length >= 2 ? pn : String(sub.planKey || "").toUpperCase();
+}, [subLoading, sub]);
+
 
   // جلب بيانات الشركة من فايرستور مع Fallback ذكي
   useEffect(() => {
@@ -490,7 +496,7 @@ export default function CompanyCardGold({ companyId: initialCompanyId, lang = "a
               ? t.noSub
               : subExpired
               ? t.subExpired
-              : cleanPlanName(sub?.planName || sub?.planKey || "")
+              : planLabel
           }
         >
           {/* subtle shimmer */}
@@ -504,7 +510,7 @@ export default function CompanyCardGold({ companyId: initialCompanyId, lang = "a
             }}
           />
           <span className="relative">
-            {subLoading ? "..." : !hasSub ? t.noSub : cleanPlanName(sub?.planName || sub?.planKey || "")}
+            {subLoading ? "..." : !hasSub ? t.noSub : planLabel}
           </span>
         </div>
       </div>
