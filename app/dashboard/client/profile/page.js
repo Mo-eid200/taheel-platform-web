@@ -369,8 +369,22 @@ function ClientProfilePageInner({ userId }) {
 
     async function resolveId(param) {
       if (!param) {
-        setResolvedUserId(null);
-        setResolving(false);
+        // لو مفيش userId في الـ query، جرّب auth uid كحل أخير
+        try {
+          if (auth?.currentUser?.uid) {
+            const usersCol = collection(firestore, "users");
+            const qs = await getDocs(query(usersCol, where("uid", "==", auth.currentUser.uid), limit(1)));
+            if (!cancelled) {
+              setResolvedUserId(qs.empty ? null : qs.docs[0].id);
+              setResolving(false);
+            }
+            return;
+          }
+        } catch {}
+        if (!cancelled) {
+          setResolvedUserId(null);
+          setResolving(false);
+        }
         return;
       }
 
@@ -420,7 +434,7 @@ function ClientProfilePageInner({ userId }) {
     };
   }, [userId]);
 
-    // =====================================
+  // =====================================
   // ✅ Live subscription → freePrinting
   // =====================================
   useEffect(() => {
@@ -428,7 +442,7 @@ function ClientProfilePageInner({ userId }) {
 
     setSubLoading(true);
 
-    const subRef = doc(firestore, "companySubscriptions", client?.companyId || resolvedUserId);
+    const subRef = doc(firestore, "companySubscriptions", resolvedUserId);
 
     const unsub = onSnapshot(
       subRef,
@@ -472,7 +486,6 @@ function ClientProfilePageInner({ userId }) {
     return () => unsub();
   }, [resolvedUserId]);
 
-
   // =====================================
   // Live user snapshot + companies
   // =====================================
@@ -482,44 +495,50 @@ function ClientProfilePageInner({ userId }) {
     const userRef = doc(firestore, "users", resolvedUserId);
 
     const unsubscribe = onSnapshot(userRef, async (snap) => {
-      if (snap.exists()) {
-        const user = snap.data();
-        user.customerId = snap.id;
-        setClient(user);
-
-        // owner if company
-        if (user?.type === "company" || user?.accountType === "company") {
-          setOwnerResident({
-            firstName: user.ownerFirstName,
-            middleName: user.ownerMiddleName,
-            lastName: user.ownerLastName,
-            birthDate: user.ownerBirthDate,
-            gender: user.ownerGender,
-            nationality: user.ownerNationality,
-            phone: user.phone,
-          });
-        } else {
-          setOwnerResident(null);
-        }
-
-        // related companies if resident
-        if ((user?.type || user?.accountType || "").toLowerCase() === "resident" && user.customerId) {
-          const related = await fetchRelatedCompanies(user.customerId, user);
-          const seen = new Set();
-          const unique = [];
-          for (const c of related) {
-            const id = c.customerId || c.id;
-            if (id && !seen.has(id)) {
-              seen.add(id);
-              unique.push(c);
-            }
-          }
-          setCompanies(unique);
-        } else {
-          setCompanies([]);
-        }
-      } else {
+      if (!snap.exists()) {
         setClient(null);
+        setCompanies([]);
+        setOwnerResident(null);
+        return;
+      }
+
+      const userData = { id: snap.id, ...snap.data() };
+
+      // ✅ مهم جداً: تحديث client (كان ناقص وبيكسر الصفحة)
+      setClient(userData);
+
+      const typeLower = (userData?.type || userData?.accountType || "").toLowerCase();
+
+      // owner if company
+      if (typeLower === "company") {
+        setOwnerResident({
+          firstName: userData.ownerFirstName,
+          middleName: userData.ownerMiddleName,
+          lastName: userData.ownerLastName,
+          birthDate: userData.ownerBirthDate,
+          gender: userData.ownerGender,
+          nationality: userData.ownerNationality,
+          phone: userData.phone,
+        });
+      } else {
+        setOwnerResident(null);
+      }
+
+      // related companies if resident
+      if (typeLower === "resident" && userData.customerId) {
+        const related = await fetchRelatedCompanies(userData.customerId, userData);
+        const seen = new Set();
+        const unique = [];
+        for (const c of related) {
+          const id = c.customerId || c.id;
+          if (id && !seen.has(id)) {
+            seen.add(id);
+            unique.push(c);
+          }
+        }
+        setCompanies(unique);
+      } else {
+        setCompanies([]);
       }
     });
 
@@ -551,11 +570,7 @@ function ClientProfilePageInner({ userId }) {
 
       // orders
       const ordersSnap = await getDocs(
-        query(
-          collection(firestore, "requests"),
-          where("customerId", "==", resolvedUserId),
-          orderBy("createdAt", "desc")
-        )
+        query(collection(firestore, "requests"), where("customerId", "==", resolvedUserId), orderBy("createdAt", "desc"))
       );
       setOrders(ordersSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
 
@@ -1081,27 +1096,22 @@ function ClientProfilePageInner({ userId }) {
           )}
 
           {selectedSection === "subscriptions" && clientType === "company" && (
-  <>
-    <SectionTitle icon="company" color="blue">
-      {lang === "ar" ? "الاشتراكات" : "Subscriptions"}
-    </SectionTitle>
+            <>
+              <SectionTitle icon="company" color="blue">
+                {lang === "ar" ? "الاشتراكات" : "Subscriptions"}
+              </SectionTitle>
 
-    <div className="w-full">
-<CompanySubscriptionsSection
-  lang={lang}
-  darkMode={darkMode}
-/>
-    </div>
-  </>
-)}
-
+              <div className="w-full">
+                <CompanySubscriptionsSection lang={lang} darkMode={darkMode} />
+              </div>
+            </>
+          )}
 
           {["residentServices", "companyServices", "nonresidentServices", "otherServices"].includes(selectedSection) && (
             <>
               <SectionTitle icon={sectionTitles[selectedSection].icon} color={sectionTitles[selectedSection].color}>
                 {lang === "ar" ? sectionTitles[selectedSection].ar : sectionTitles[selectedSection].en}
               </SectionTitle>
-
 
               {/* Search box */}
               <div className="w-full flex items-center gap-2 mb-5">
@@ -1143,14 +1153,11 @@ function ClientProfilePageInner({ userId }) {
                     const sid = srv?.serviceId || srv?.id || srv?.name;
                     const tr = translationsMap[sid] || {};
 
-                    const displayName =
-                      lang === "ar" ? srv.name || "" : tr?.name || srv.name_en || srv.name || "";
+                    const displayName = lang === "ar" ? srv.name || "" : tr?.name || srv.name_en || srv.name || "";
                     const displayDesc =
                       lang === "ar" ? srv.description || "" : tr?.description || srv.description_en || srv.description || "";
                     const displayLong =
-                      lang === "ar"
-                        ? srv.longDescription || ""
-                        : tr?.longDescription || srv.longDescription_en || srv.longDescription || "";
+                      lang === "ar" ? srv.longDescription || "" : tr?.longDescription || srv.longDescription_en || srv.longDescription || "";
 
                     return (
                       <ServiceProfileCard

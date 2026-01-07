@@ -270,7 +270,12 @@ export default async function handler(req, res) {
       const requestTypeNorm = String(requestType || "").trim().toLowerCase();
 
       const isSubscription = requestTypeNorm === "subscription" || planKey.length > 0;
-      const isCompany = clientTypeNorm === "company";
+      const isCompany =
+      clientTypeNorm === "company" ||
+      clientTypeNorm.includes("company") ||
+      String(customerIdMeta || "").startsWith("COM-") ||
+      String(uDoc.data()?.accountType || "").toLowerCase() === "company";
+
 
       const totalSubscriptionDays = safeNum(md.totalSubscriptionDays || md.totalSubDays || 0);
       const subscriptionDays = safeNum(md.subscriptionDays || 0);
