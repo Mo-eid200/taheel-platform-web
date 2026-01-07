@@ -143,6 +143,10 @@ export default function ServiceProfileCard({
   longDescription_en,
   provider,
   freePrinting = false,
+
+  // ✅ NEW: لازم تيجي من الكمبوننت الأب (من اشتراك العميل)
+  // true = اشتراك فعّال، false = انتهى / مش مشترك
+  subscriptionActive = false,
 }) {
   useEffect(() => {
     if (!customerId) {
@@ -152,8 +156,9 @@ export default function ServiceProfileCard({
 
   const style = CATEGORY_STYLES[category] || CATEGORY_STYLES.resident;
 
-  // ✅ الاشتراك = شركة + freePrinting true
-  const isSubscription = category === "company" && Boolean(freePrinting);
+  // ✅ الخدمة "باقة" (Company + freePrinting) — لكن الإخفاء يكون فقط إذا الاشتراك فعّال
+  const isSubscriptionPlan = category === "company" && Boolean(freePrinting);
+  const isSubscriptionActive = isSubscriptionPlan && Boolean(subscriptionActive);
 
   const [wallet, setWallet] = useState(userWallet);
   const [coinsBalance, setCoinsBalance] = useState(userCoins);
@@ -271,38 +276,41 @@ export default function ServiceProfileCard({
   ]);
 
   // =========================
-  // ✅ Pricing (EXACT user requirement)
-  // - Subscription: big number == DB service price ONLY (price)
-  // - Non-subscription: normal (clientPrice or price+printing+vat)
+  // ✅ Pricing (FINAL AGREED)
+  // - If subscription ACTIVE: show Service Price ONLY + hide printing & VAT ("-")
+  // - Else: normal (clientPrice or service+printing+vat)
   // =========================
   const baseServiceCount = repeatable ? quantity : 1;
   const basePaperCount = allowPaperCount ? paperCount : 1;
 
-  const dbServiceUnitPrice = Number(price) || 0;
-  const servicePriceTotal = +(dbServiceUnitPrice * baseServiceCount).toFixed(2);
+  const serviceUnit = Number(price) || 0;
+  const servicePriceTotal = +(serviceUnit * baseServiceCount).toFixed(2);
 
   const printingPerUnit = Number(printingFee) || 0;
   const printingTotal = +(printingPerUnit * basePaperCount).toFixed(2);
 
-  const taxPerUnit =
-    typeof tax !== "undefined" ? (Number(tax) || 0) : +((printingPerUnit * 0.05).toFixed(2));
-  const taxTotal = +((taxPerUnit * basePaperCount)).toFixed(2);
+  const vatPerUnit =
+    typeof tax !== "undefined"
+      ? (Number(tax) || 0)
+      : +((printingPerUnit * 0.05).toFixed(2));
 
-  // ✅ Display on card table
-  const printingDisplay = isSubscription ? 0 : printingTotal;
-  const taxDisplay = isSubscription ? 0 : taxTotal;
+  const vatTotal = +((vatPerUnit * basePaperCount)).toFixed(2);
 
-  // ✅ BIG number on card top
-  const totalDisplay = isSubscription
+  // ✅ display rows
+  const printingDisplay = isSubscriptionActive ? 0 : printingTotal;
+  const vatDisplay = isSubscriptionActive ? 0 : vatTotal;
+
+  // ✅ BIG number
+  const totalDisplay = isSubscriptionActive
     ? servicePriceTotal
     : typeof clientPrice !== "undefined"
       ? +(Number(clientPrice) * baseServiceCount).toFixed(2)
-      : +(servicePriceTotal + printingTotal + taxTotal).toFixed(2);
+      : +(servicePriceTotal + printingTotal + vatTotal).toFixed(2);
 
-  // ✅ Payment sent to modal (same logic)
-  const payTotal = isSubscription ? servicePriceTotal : totalDisplay;
-  const payPrintingFee = isSubscription ? 0 : printingPerUnit;
-  const payTax = isSubscription ? 0 : taxPerUnit;
+  // ✅ Payment
+  const payTotal = isSubscriptionActive ? servicePriceTotal : totalDisplay;
+  const payPrintingFee = isSubscriptionActive ? 0 : printingPerUnit;
+  const payTax = isSubscriptionActive ? 0 : vatPerUnit;
 
   // canPay
   const allDocsUploaded = !requireUpload || docKeys.every((k) => uploadedDocs[k]);
@@ -340,9 +348,9 @@ export default function ServiceProfileCard({
         : (longDescription || longDescription_en || description || description_en || "");
 
     const tService = servicePriceTotal;
-    const tPrinting = isSubscription ? 0 : printingTotal;
-    const tVat = isSubscription ? 0 : taxTotal;
-    const tTotal = isSubscription ? tService : +(tService + tPrinting + tVat).toFixed(2);
+    const tPrinting = isSubscriptionActive ? 0 : printingTotal;
+    const tVat = isSubscriptionActive ? 0 : vatTotal;
+    const tTotal = isSubscriptionActive ? tService : +(tService + tPrinting + tVat).toFixed(2);
 
     return (
       <div
@@ -376,13 +384,13 @@ export default function ServiceProfileCard({
               <tr>
                 <td>{lang === "ar" ? "رسوم الطباعة" : "Printing Fee"}</td>
                 <td className="text-right">
-                  {isSubscription ? "-" : tPrinting.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
+                  {isSubscriptionActive ? "-" : tPrinting.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
                 </td>
               </tr>
               <tr>
                 <td>{lang === "ar" ? "ضريبة القيمة المضافة" : "VAT"}</td>
                 <td className="text-right">
-                  {isSubscription ? "-" : tVat.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
+                  {isSubscriptionActive ? "-" : tVat.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
                 </td>
               </tr>
               <tr>
@@ -494,14 +502,14 @@ export default function ServiceProfileCard({
               <tr>
                 <td>{lang === "ar" ? "رسوم الطباعة" : "Printing Fee"}</td>
                 <td className="text-right">
-                  {isSubscription ? "-" : printingDisplay.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
+                  {isSubscriptionActive ? "-" : printingDisplay.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
                 </td>
               </tr>
 
               <tr>
                 <td>{lang === "ar" ? "ضريبة القيمة المضافة 5%" : "VAT 5% on Printing"}</td>
                 <td className="text-right">
-                  {isSubscription ? "-" : taxDisplay.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
+                  {isSubscriptionActive ? "-" : vatDisplay.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
                 </td>
               </tr>
             </tbody>
@@ -607,7 +615,7 @@ export default function ServiceProfileCard({
         totalPrice={+payTotal.toFixed(2)}
         printingFee={payPrintingFee}
         tax={payTax}
-        freePrinting={isSubscription}
+        freePrinting={isSubscriptionActive}   // ✅ المهم: فعّال فقط
         clientType={category}
         coinsBalance={coinsBalance}
         cashbackCoins={coins}
