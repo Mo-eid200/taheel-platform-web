@@ -437,54 +437,51 @@ function ClientProfilePageInner({ userId }) {
   // =====================================
   // ✅ Live subscription → freePrinting
   // =====================================
-  useEffect(() => {
-    if (!resolvedUserId) return;
+useEffect(() => {
+  if (!client?.customerId) return;
 
-    setSubLoading(true);
+  setSubLoading(true);
 
-    const subRef = doc(firestore, "companySubscriptions", resolvedUserId);
+  const subRef = doc(firestore, "companySubscriptions", client.customerId);
 
-    const unsub = onSnapshot(
-      subRef,
-      (snap) => {
-        try {
-          if (!snap.exists()) {
-            setFreePrinting(false);
-            setSubLoading(false);
-            return;
-          }
-
-          const d = snap.data() || {};
-          const status = String(d.status || "").toLowerCase();
-          const isActiveFlag = d.isActive === true;
-
-          // endAt priority: Timestamp -> ISO -> Date
-          const endAt =
-            (d.endAt?.toDate && d.endAt.toDate()) ||
-            (d.expiresAt?.toDate && d.expiresAt.toDate()) ||
-            (d.endAtISO ? new Date(d.endAtISO) : null);
-
-          const now = new Date();
-
-          const active =
-            (status === "active" || isActiveFlag) &&
-            endAt instanceof Date &&
-            !isNaN(endAt.getTime()) &&
-            endAt.getTime() > now.getTime();
-
-          setFreePrinting(Boolean(active));
-        } finally {
-          setSubLoading(false);
+  const unsub = onSnapshot(
+    subRef,
+    (snap) => {
+      try {
+        if (!snap.exists()) {
+          setFreePrinting(false);
+          return;
         }
-      },
-      () => {
-        setFreePrinting(false);
+
+        const d = snap.data() || {};
+        const status = String(d.status || "").toLowerCase();
+        const isActiveFlag = d.isActive === true;
+
+        const endAt =
+          (d.endAt?.toDate && d.endAt.toDate()) ||
+          (d.endAtISO ? new Date(d.endAtISO) : null);
+
+        const now = new Date();
+        const active =
+          (status === "active" || isActiveFlag) &&
+          endAt instanceof Date &&
+          !isNaN(endAt.getTime()) &&
+          endAt.getTime() > now.getTime();
+
+        setFreePrinting(Boolean(active));
+      } finally {
         setSubLoading(false);
       }
-    );
+    },
+    () => {
+      setFreePrinting(false);
+      setSubLoading(false);
+    }
+  );
 
-    return () => unsub();
-  }, [resolvedUserId]);
+  return () => unsub();
+}, [client?.customerId]);
+
 
   // =====================================
   // Live user snapshot + companies
