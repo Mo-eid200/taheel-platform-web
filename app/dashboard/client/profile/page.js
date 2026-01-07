@@ -420,6 +420,59 @@ function ClientProfilePageInner({ userId }) {
     };
   }, [userId]);
 
+    // =====================================
+  // ✅ Live subscription → freePrinting
+  // =====================================
+  useEffect(() => {
+    if (!resolvedUserId) return;
+
+    setSubLoading(true);
+
+    const subRef = doc(firestore, "companySubscriptions", client?.companyId || resolvedUserId);
+
+    const unsub = onSnapshot(
+      subRef,
+      (snap) => {
+        try {
+          if (!snap.exists()) {
+            setFreePrinting(false);
+            setSubLoading(false);
+            return;
+          }
+
+          const d = snap.data() || {};
+          const status = String(d.status || "").toLowerCase();
+          const isActiveFlag = d.isActive === true;
+
+          // endAt priority: Timestamp -> ISO -> Date
+          const endAt =
+            (d.endAt?.toDate && d.endAt.toDate()) ||
+            (d.expiresAt?.toDate && d.expiresAt.toDate()) ||
+            (d.endAtISO ? new Date(d.endAtISO) : null);
+
+          const now = new Date();
+
+          const active =
+            (status === "active" || isActiveFlag) &&
+            endAt instanceof Date &&
+            !isNaN(endAt.getTime()) &&
+            endAt.getTime() > now.getTime();
+
+          setFreePrinting(Boolean(active));
+        } finally {
+          setSubLoading(false);
+        }
+      },
+      () => {
+        setFreePrinting(false);
+        setSubLoading(false);
+      }
+    );
+
+    return () => unsub();
+  }, [resolvedUserId]);
+
+
   // =====================================
   // Live user snapshot + companies
   // =====================================
