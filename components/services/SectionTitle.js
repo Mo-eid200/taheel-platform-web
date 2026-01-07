@@ -18,18 +18,12 @@ export default function ServiceSection({
   onPaid,
   addNotification,
   category,
-  selectedSection,
-  freePrinting, // ✅ لو بتبعتها من فوق (settings)
 }) {
   const filteredServices = useMemo(
     () => (services || []).filter(filterService),
     [services, filterService]
   );
 
-  // =========================
-  // ✅ Subscription state
-  // companySubscriptions/{companyDocId}  (COM-xxxx)
-  // =========================
   const [subInfo, setSubInfo] = useState({
     loading: false,
     active: false,
@@ -41,37 +35,31 @@ export default function ServiceSection({
   });
 
   const isCompany = category === "company";
-  const isCompanyServicesSection = selectedSection === "companyServices";
 
-  // ✅ مهم جدًا: doc id بتاع الاشتراك لازم يكون COM-... فقط
-  const companyDocId = String(
-    client?.companyDocId || client?.companyId || ""
-  ).trim();
+  // ✅ أهم تعديل: استخدم ID واحد مؤكد (userId الأول)
+  const companyDocId =
+    client?.userId ||
+    client?.uid ||
+    client?.id ||
+    client?.companyDocId ||
+    client?.customerId ||
+    client?.companyId ||
+    "";
 
   useEffect(() => {
     let mounted = true;
 
     async function loadSubscription() {
-      // الاشتراك يهمنا فقط: (حساب شركة) + (قسم خدمات الشركات) + (COM موجود)
-      if (!isCompany || !isCompanyServicesSection || !companyDocId) {
-        if (mounted) {
-          setSubInfo({
-            loading: false,
-            active: false,
-            status: "none",
-            planKey: "",
-            planName: "",
-            startAt: null,
-            endAt: null,
-          });
-        }
+      // ✅ الاشتراك يهمنا فقط لو حساب شركة + عندنا docId
+      if (!isCompany || !companyDocId) {
+        if (mounted) setSubInfo((p) => ({ ...p, loading: false, active: false, status: "none" }));
         return;
       }
 
       try {
         if (mounted) setSubInfo((p) => ({ ...p, loading: true }));
 
-        const ref = doc(firestore, "companySubscriptions", companyDocId);
+        const ref = doc(firestore, "companySubscriptions", String(companyDocId));
         const snap = await getDoc(ref);
 
         if (!snap.exists()) {
@@ -94,21 +82,20 @@ export default function ServiceSection({
         const isActiveFlag = Boolean(d.isActive);
 
         const startMs =
-          d.startAt?.toMillis ? d.startAt.toMillis()
-          : d.startAt?.seconds ? d.startAt.seconds * 1000
-          : d.startAtISO ? Date.parse(d.startAtISO)
-          : 0;
+          d.startAt?.toMillis ? d.startAt.toMillis() :
+          d.startAt?.seconds ? d.startAt.seconds * 1000 :
+          d.startAtISO ? Date.parse(d.startAtISO) :
+          0;
 
         const endMs =
-          d.endAt?.toMillis ? d.endAt.toMillis()
-          : d.endAt?.seconds ? d.endAt.seconds * 1000
-          : d.endAtISO ? Date.parse(d.endAtISO)
-          : 0;
+          d.endAt?.toMillis ? d.endAt.toMillis() :
+          d.endAt?.seconds ? d.endAt.seconds * 1000 :
+          d.endAtISO ? Date.parse(d.endAtISO) :
+          0;
 
         const now = Date.now();
         const withinWindow = (!startMs || now >= startMs) && (!endMs || now < endMs);
 
-        // ✅ ده معنى "اشتراك فعّال"
         const active = isActiveFlag && status === "active" && withinWindow;
 
         if (mounted) {
@@ -122,7 +109,7 @@ export default function ServiceSection({
             endAt: d.endAt || null,
           });
         }
-      } catch {
+      } catch (e) {
         if (mounted) {
           setSubInfo({
             loading: false,
@@ -141,13 +128,10 @@ export default function ServiceSection({
     return () => {
       mounted = false;
     };
-  }, [isCompany, isCompanyServicesSection, companyDocId]);
+  }, [isCompany, companyDocId]);
 
-  // ✅ دي اللي هتخلي الكارت "يكتب بس سعر الخدمة"
-  const subscriptionActive = isCompany && isCompanyServicesSection && Boolean(subInfo.active);
-
-  // ✅ Free Printing يشتغل فقط في (شركات + قسم خدمات الشركات)
-  const effectiveFreePrinting = Boolean(freePrinting) && isCompany && isCompanyServicesSection;
+  // ✅ خلاص: لو شركة واشتراك active يبقى true
+  const subscriptionActive = isCompany && Boolean(subInfo.active);
 
   if (!filteredServices.length) {
     return (
@@ -193,12 +177,9 @@ export default function ServiceSection({
             serviceId={srv.serviceId}
             repeatable={srv.repeatable}
             allowPaperCount={srv.allowPaperCount}
-            pricePerPage={srv.pricePerPage}
             provider={srv.provider}
-
-            // ✅ السطرين الحاسمين
+            // ✅ ده اللي بيشغل المنطق في الكارت
             subscriptionActive={subscriptionActive}
-            freePrinting={effectiveFreePrinting}
           />
         ))}
       </div>
