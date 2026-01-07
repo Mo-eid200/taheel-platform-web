@@ -24,9 +24,6 @@ export default function ServiceSection({
     [services, filterService]
   );
 
-  // =========================
-  // ✅ Subscription state (companySubscriptions/{companyDocId})
-  // =========================
   const [subInfo, setSubInfo] = useState({
     loading: false,
     active: false,
@@ -35,40 +32,58 @@ export default function ServiceSection({
     planName: "",
     startAt: null,
     endAt: null,
+    usedDocId: "",
   });
 
   const isCompany = category === "company";
 
-  // ✅ IMPORTANT: companySubscriptions docId عندك = companyDocId = "COM-400-0106"
-  // فالأولوية هنا للـ companyDocId/customerId/companyId (مش userId)
-  const companyDocId =
-    client?.companyDocId ||
-    client?.customerId ||
-    client?.companyId ||
-    client?.id ||
-    client?.uid ||
-    client?.userId ||
-    "";
+  // ✅ جرّب كل الـ IDs المحتملة (بالترتيب)
+  const candidateIds = useMemo(() => {
+    const c = client || {};
+    const arr = [
+      c.companyDocId,
+      c.customerId,
+      c.userId,
+      c.uid,
+      c.id,
+      c.companyId,
+      c.userUid,
+      c.firebaseUid,
+    ]
+      .map((x) => (typeof x === "string" ? x.trim() : ""))
+      .filter(Boolean);
+
+    // إزالة التكرار
+    return Array.from(new Set(arr));
+  }, [client]);
 
   useEffect(() => {
     let mounted = true;
 
     async function loadSubscription() {
-      // الاشتراك يهمنا فقط لحساب شركة + عندنا docId
-      if (!isCompany || !companyDocId) {
-        if (mounted) {
-          setSubInfo((p) => ({ ...p, loading: false, active: false, status: "none" }));
-        }
+      if (!isCompany || candidateIds.length === 0) {
+        if (mounted) setSubInfo((p) => ({ ...p, loading: false, active: false, status: "none" }));
         return;
       }
 
       try {
         if (mounted) setSubInfo((p) => ({ ...p, loading: true }));
 
-        const ref = doc(firestore, "companySubscriptions", String(companyDocId));
-        const snap = await getDoc(ref);
+        let found = null;
+        let foundId = "";
 
-        if (!snap.exists()) {
+        // ✅ حاول getDoc لكل ID لحد ما تلاقي الدوك
+        for (const id of candidateIds) {
+          const ref = doc(firestore, "companySubscriptions", String(id));
+          const snap = await getDoc(ref);
+          if (snap.exists()) {
+            found = snap.data() || {};
+            foundId = id;
+            break;
+          }
+        }
+
+        if (!found) {
           if (mounted) {
             setSubInfo({
               loading: false,
@@ -78,36 +93,42 @@ export default function ServiceSection({
               planName: "",
               startAt: null,
               endAt: null,
+              usedDocId: "",
             });
           }
           return;
         }
 
-        const d = snap.data() || {};
-        const status = String(d.status || "").toLowerCase();
-        const isActiveFlag = Boolean(d.isActive);
+        const status = String(found.status || "").toLowerCase();
+        const isActiveFlag = Boolean(found.isActive);
 
-        // ✅ اعتمد على endAt فقط (تجاهل startAt عشان كان بيتسجل غلط عندك)
+        const startMs =
+          found.startAt?.toMillis ? found.startAt.toMillis() :
+          found.startAt?.seconds ? found.startAt.seconds * 1000 :
+          found.startAtISO ? Date.parse(found.startAtISO) :
+          0;
+
         const endMs =
-          d.endAt?.toMillis ? d.endAt.toMillis() :
-          d.endAt?.seconds ? d.endAt.seconds * 1000 :
-          d.endAtISO ? Date.parse(d.endAtISO) :
+          found.endAt?.toMillis ? found.endAt.toMillis() :
+          found.endAt?.seconds ? found.endAt.seconds * 1000 :
+          found.endAtISO ? Date.parse(found.endAtISO) :
           0;
 
         const now = Date.now();
-        const notExpired = !endMs || now < endMs;
+        const withinWindow = (!startMs || now >= startMs) && (!endMs || now < endMs);
 
-        const active = isActiveFlag && status === "active" && notExpired;
+        const active = isActiveFlag && status === "active" && withinWindow;
 
         if (mounted) {
           setSubInfo({
             loading: false,
             active,
-            status: d.status || "none",
-            planKey: d.planKey || "",
-            planName: d.planName || "",
-            startAt: d.startAt || null,
-            endAt: d.endAt || null,
+            status: found.status || "none",
+            planKey: found.planKey || "",
+            planName: found.planName || "",
+            startAt: found.startAt || null,
+            endAt: found.endAt || null,
+            usedDocId: foundId,
           });
         }
       } catch (e) {
@@ -120,6 +141,7 @@ export default function ServiceSection({
             planName: "",
             startAt: null,
             endAt: null,
+            usedDocId: "",
           });
         }
       }
@@ -129,9 +151,8 @@ export default function ServiceSection({
     return () => {
       mounted = false;
     };
-  }, [isCompany, companyDocId]);
+  }, [isCompany, candidateIds]);
 
-  // ✅ ده اللي بيروح للكارت
   const subscriptionActive = isCompany && Boolean(subInfo.active);
 
   if (!filteredServices.length) {
@@ -179,8 +200,7 @@ export default function ServiceSection({
             repeatable={srv.repeatable}
             allowPaperCount={srv.allowPaperCount}
             provider={srv.provider}
-            // ✅ أهم سطر
-            subscriptionActive={subscriptionActive}
+            subscriptionActive={subscriptionActive} // ✅
           />
         ))}
       </div>
