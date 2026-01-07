@@ -1,7 +1,15 @@
 "use client";
+
 import Image from "next/image";
 import { useState, useEffect, useMemo, useRef } from "react";
-import { FaFileAlt, FaBuilding, FaUserTie, FaUser, FaTag, FaCoins } from "react-icons/fa";
+import {
+  FaFileAlt,
+  FaBuilding,
+  FaUserTie,
+  FaUser,
+  FaTag,
+  FaCoins,
+} from "react-icons/fa";
 import ServiceUploadModal from "./ServiceUploadModal";
 import ServicePayModal from "./ServicePayModal";
 import { translateText } from "@/lib/translateText";
@@ -14,7 +22,8 @@ const CATEGORY_STYLES = {
     gradient: "from-blue-100/80 via-blue-50/60 to-white/90",
     ring: "ring-blue-200/80",
     text: "text-blue-800",
-    badge: "bg-gradient-to-r from-blue-300 via-blue-100 to-blue-50 shadow-blue-200/40",
+    badge:
+      "bg-gradient-to-r from-blue-300 via-blue-100 to-blue-50 shadow-blue-200/40",
     icon: () => <FaBuilding className="text-blue-500" size={15} />,
   },
   resident: {
@@ -23,7 +32,8 @@ const CATEGORY_STYLES = {
     gradient: "from-green-100/80 via-green-50/60 to-white/90",
     ring: "ring-green-200/80",
     text: "text-green-800",
-    badge: "bg-gradient-to-r from-green-300 via-green-100 to-green-50 shadow-green-200/40",
+    badge:
+      "bg-gradient-to-r from-green-300 via-green-100 to-green-50 shadow-green-200/40",
     icon: () => <FaUser className="text-green-500" size={15} />,
   },
   nonresident: {
@@ -32,7 +42,8 @@ const CATEGORY_STYLES = {
     gradient: "from-yellow-100/80 via-yellow-50/60 to-white/90",
     ring: "ring-yellow-200/80",
     text: "text-yellow-800",
-    badge: "bg-gradient-to-r from-yellow-300 via-yellow-100 to-yellow-50 shadow-yellow-200/40",
+    badge:
+      "bg-gradient-to-r from-yellow-300 via-yellow-100 to-yellow-50 shadow-yellow-200/40",
     icon: () => <FaUserTie className="text-yellow-500" size={15} />,
   },
   other: {
@@ -41,7 +52,8 @@ const CATEGORY_STYLES = {
     gradient: "from-gray-100/80 via-gray-50/60 to-white/90",
     ring: "ring-gray-200/80",
     text: "text-gray-800",
-    badge: "bg-gradient-to-r from-gray-300 via-gray-100 to-gray-50 shadow-gray-200/40",
+    badge:
+      "bg-gradient-to-r from-gray-300 via-gray-100 to-gray-50 shadow-gray-200/40",
     icon: () => <FaTag className="text-gray-500" size={15} />,
   },
 };
@@ -145,15 +157,19 @@ export default function ServiceProfileCard({
 }) {
   useEffect(() => {
     if (!customerId) {
-      console.error("❌ customerId is missing in ServiceProfileCard! يجب تمريره من الكمبوننت الأب.");
+      console.error(
+        "❌ customerId is missing in ServiceProfileCard! يجب تمريره من الكمبوننت الأب."
+      );
     }
   }, [customerId]);
 
   const style = CATEGORY_STYLES[category] || CATEGORY_STYLES.resident;
 
-  // ✅ الاشتراك: شركات فقط => طباعة = 0
-  const effectivePrintingFee =
-    category === "company" && freePrinting ? 0 : (Number(printingFee) || 0);
+  // ✅ تعريف حالة الاشتراك (شركات + freePrinting)
+  const isSubscription = category === "company" && !!freePrinting;
+
+  // ✅ الطباعة الفعلية (0 في الاشتراك)
+  const effectivePrintingFee = isSubscription ? 0 : Number(printingFee) || 0;
 
   const [wallet, setWallet] = useState(userWallet);
   const [coinsBalance, setCoinsBalance] = useState(userCoins);
@@ -177,7 +193,8 @@ export default function ServiceProfileCard({
   // requiredDocuments => array
   const docsArray = useMemo(() => {
     if (Array.isArray(requiredDocuments)) return requiredDocuments;
-    if (requiredDocuments && typeof requiredDocuments === "object") return Object.values(requiredDocuments);
+    if (requiredDocuments && typeof requiredDocuments === "object")
+      return Object.values(requiredDocuments);
     return [];
   }, [requiredDocuments]);
 
@@ -214,7 +231,9 @@ export default function ServiceProfileCard({
       }
     }
     buildDocsForUI();
-    return () => { cancel = true; };
+    return () => {
+      cancel = true;
+    };
   }, [docsArray, lang, serviceId, name]);
 
   // ترجمة اسم/وصف الخدمة
@@ -255,7 +274,9 @@ export default function ServiceProfileCard({
       }
     }
     run();
-    return () => { ignore = true; };
+    return () => {
+      ignore = true;
+    };
   }, [
     lang,
     name,
@@ -268,29 +289,42 @@ export default function ServiceProfileCard({
   ]);
 
   // =========================
-  // ✅ Pricing (مظبوط مع الاشتراك)
+  // ✅ Pricing
   // =========================
   const baseServiceCount = repeatable ? quantity : 1;
   const basePaperCount = allowPaperCount ? paperCount : 1;
 
+  // سعر الخدمة الحقيقي (اللي لازم يظهر فوق في الاشتراك)
   const servicePriceTotal = (Number(price) || 0) * baseServiceCount;
 
-  const printingTotal = (effectivePrintingFee > 0 ? effectivePrintingFee : 0) * basePaperCount;
-
-  // ✅ VAT على الطباعة فقط، ولو الطباعة = 0 => VAT = 0
+  // الطباعة + VAT (تُعرض صفر/ - في الاشتراك)
+  const printingTotal = (Number(printingFee) || 0) * basePaperCount;
   const taxPerUnit =
-    effectivePrintingFee > 0
-      ? (typeof tax !== "undefined"
-          ? (Number(tax) || 0)
-          : +(effectivePrintingFee * 0.05).toFixed(2))
-      : 0;
-
+    typeof tax !== "undefined"
+      ? Number(tax) || 0
+      : +((Number(printingFee) || 0) * 0.05).toFixed(2);
   const taxTotal = +(taxPerUnit * basePaperCount).toFixed(2);
 
-  const totalServicePrice =
-    typeof clientPrice !== "undefined"
-      ? Number(clientPrice) * baseServiceCount
+  // ✅ قيم العرض داخل الجدول (في الاشتراك = 0 أو "-")
+  const printingDisplay = isSubscription ? 0 : printingTotal;
+  const taxDisplay = isSubscription ? 0 : taxTotal;
+
+  // ✅ الإجمالي الكبير فوق:
+  // - في الاشتراك = سعر الخدمة فقط
+  // - غير ذلك = (clientPrice إن وجد) أو (سعر الخدمة + طباعة + VAT)
+  const totalDisplay =
+    isSubscription
+      ? +servicePriceTotal.toFixed(2)
+      : typeof clientPrice !== "undefined"
+      ? +(Number(clientPrice) * baseServiceCount).toFixed(2)
       : +(servicePriceTotal + printingTotal + taxTotal).toFixed(2);
+
+  // ✅ قيم الدفع التي تُرسل للمودال:
+  // - في الاشتراك: ندفع سعر الخدمة فقط + رسوم بوابة الدفع (داخل المودال)
+  // - غير ذلك: ندفع الإجمالي الطبيعي
+  const payTotal = isSubscription ? servicePriceTotal : totalDisplay;
+  const payPrintingFee = isSubscription ? 0 : effectivePrintingFee;
+  const payTax = isSubscription ? 0 : tax;
 
   // canPay
   const allDocsUploaded = !requireUpload || docKeys.every((k) => uploadedDocs[k]);
@@ -314,7 +348,7 @@ export default function ServiceProfileCard({
 
   function getServiceNameFontSize() {
     const nameStr =
-      lang === "en" ? (name_en || translatedName || name || "") : (name || name_en || "");
+      lang === "en" ? name_en || translatedName || name || "" : name || name_en || "";
     if (nameStr.length > 38) return "text-[16px]";
     if (nameStr.length > 28) return "text-[18px]";
     if (nameStr.length > 18) return "text-[20px]";
@@ -322,16 +356,25 @@ export default function ServiceProfileCard({
   }
 
   function renderTooltip() {
-    const titleTxt = lang === "en" ? (name_en || translatedName || name || "") : (name || name_en || "");
+    const titleTxt =
+      lang === "en" ? name_en || translatedName || name || "" : name || name_en || "";
     const descTxt =
       lang === "en"
-        ? (longDescription_en || translatedLongDescription || description_en || translatedDescription || description || "")
-        : (longDescription || longDescription_en || description || description_en || "");
+        ? longDescription_en ||
+          translatedLongDescription ||
+          description_en ||
+          translatedDescription ||
+          description ||
+          ""
+        : longDescription || longDescription_en || description || description_en || "";
 
-    const tooltipServicePrice = (Number(price) || 0) * baseServiceCount;
-    const tooltipPrinting = printingTotal; // ✅
-    const tooltipVat = taxTotal; // ✅
-    const tooltipTotal = +(tooltipServicePrice + tooltipPrinting + tooltipVat).toFixed(2);
+    // Tooltip values
+    const tService = servicePriceTotal;
+    const tPrinting = printingDisplay;
+    const tVat = taxDisplay;
+    const tTotal = isSubscription
+      ? +tService.toFixed(2)
+      : +(tService + printingTotal + taxTotal).toFixed(2);
 
     return (
       <div
@@ -360,20 +403,24 @@ export default function ServiceProfileCard({
             <tbody>
               <tr>
                 <td>{lang === "ar" ? "سعر الخدمة" : "Service Price"}</td>
-                <td className="text-right">{tooltipServicePrice.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}</td>
+                <td className="text-right">{tService.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}</td>
               </tr>
               <tr>
                 <td>{lang === "ar" ? "رسوم الطباعة" : "Printing Fee"}</td>
-                <td className="text-right">{tooltipPrinting.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}</td>
+                <td className="text-right">
+                  {isSubscription ? "-" : tPrinting.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
+                </td>
               </tr>
               <tr>
                 <td>{lang === "ar" ? "ضريبة القيمة المضافة" : "VAT"}</td>
-                <td className="text-right">{tooltipVat.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}</td>
+                <td className="text-right">
+                  {isSubscription ? "-" : tVat.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
+                </td>
               </tr>
               <tr>
                 <td>{lang === "ar" ? "الإجمالي" : "Total"}</td>
                 <td className="font-extrabold text-emerald-900 text-right">
-                  {tooltipTotal.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
+                  {tTotal.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
                 </td>
               </tr>
             </tbody>
@@ -453,7 +500,7 @@ export default function ServiceProfileCard({
         <div className="w-full flex flex-col items-center bg-white/80 rounded-xl border border-emerald-100 shadow p-2 mt-1 mb-2">
           <div className="flex items-center gap-2 mb-1">
             <span className="font-extrabold text-emerald-700 text-2xl drop-shadow text-center">
-              {totalServicePrice.toFixed(2)}
+              {totalDisplay.toFixed(2)}
             </span>
             <span className="text-base text-gray-500 font-bold">
               {lang === "ar" ? "درهم" : "AED"}
@@ -475,16 +522,18 @@ export default function ServiceProfileCard({
                   {servicePriceTotal.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
                 </td>
               </tr>
+
               <tr>
                 <td>{lang === "ar" ? "رسوم الطباعة" : "Printing Fee"}</td>
                 <td className="text-right">
-                  {printingTotal.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
+                  {isSubscription ? "-" : printingDisplay.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
                 </td>
               </tr>
+
               <tr>
                 <td>{lang === "ar" ? "ضريبة القيمة المضافة 5%" : "VAT 5% on Printing"}</td>
                 <td className="text-right">
-                  {taxTotal.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
+                  {isSubscription ? "-" : taxDisplay.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
                 </td>
               </tr>
             </tbody>
@@ -587,10 +636,15 @@ export default function ServiceProfileCard({
         onClose={() => setShowPayModal(false)}
         serviceName={name}
         serviceId={serviceId}
-        totalPrice={totalServicePrice}
-        printingFee={effectivePrintingFee}
+
+        // ✅ يدفع سعر الخدمة فقط في الاشتراك
+        totalPrice={+payTotal.toFixed(2)}
+
+        // ✅ صفر في الاشتراك
+        printingFee={payPrintingFee}
+        tax={payTax}
+
         freePrinting={freePrinting}
-        tax={tax}
         clientType={category}
         coinsBalance={coinsBalance}
         cashbackCoins={coins}
@@ -607,4 +661,4 @@ export default function ServiceProfileCard({
       <div className="absolute -bottom-6 right-0 left-0 w-full h-8 bg-gradient-to-t from-emerald-100/60 via-white/20 to-transparent blur-2xl opacity-80 z-0 pointer-events-none"></div>
     </div>
   );
-}    
+}
