@@ -151,6 +151,9 @@ export default function ServiceProfileCard({
   // ✅ الاشتراك يُطبّق فقط على خدمات الشركات
   const isSubscriptionActive = category === "company" && Boolean(subscriptionActive);
 
+  // ✅ وقت الاشتراك: نخفي الطباعة + الضريبة 100%
+  const showExtraFees = !isSubscriptionActive;
+
   const [wallet, setWallet] = useState(userWallet);
   const [coinsBalance, setCoinsBalance] = useState(userCoins);
   const [showPayModal, setShowPayModal] = useState(false);
@@ -282,15 +285,14 @@ export default function ServiceProfileCard({
 
   const vatTotal = +((vatPerUnit * basePaperCount)).toFixed(2);
 
-  const printingDisplay = isSubscriptionActive ? 0 : printingTotal;
-  const vatDisplay = isSubscriptionActive ? 0 : vatTotal;
-
+  // ✅ العرض
   const totalDisplay = isSubscriptionActive
     ? servicePriceTotal
     : typeof clientPrice !== "undefined"
       ? +(Number(clientPrice) * baseServiceCount).toFixed(2)
       : +(servicePriceTotal + printingTotal + vatTotal).toFixed(2);
 
+  // ✅ الدفع
   const payTotal = isSubscriptionActive ? servicePriceTotal : totalDisplay;
   const payPrintingFee = isSubscriptionActive ? 0 : printingPerUnit;
   const payTax = isSubscriptionActive ? 0 : vatPerUnit;
@@ -329,9 +331,11 @@ export default function ServiceProfileCard({
         : (longDescription || longDescription_en || description || description_en || "");
 
     const tService = servicePriceTotal;
-    const tPrinting = isSubscriptionActive ? 0 : printingTotal;
-    const tVat = isSubscriptionActive ? 0 : vatTotal;
-    const tTotal = isSubscriptionActive ? tService : +(tService + tPrinting + tVat).toFixed(2);
+
+    // ✅ وقت الاشتراك: التولتيب يعرض سعر الخدمة فقط
+    const tPrinting = showExtraFees ? printingTotal : 0;
+    const tVat = showExtraFees ? vatTotal : 0;
+    const tTotal = showExtraFees ? +(tService + tPrinting + tVat).toFixed(2) : tService;
 
     return (
       <div
@@ -362,18 +366,21 @@ export default function ServiceProfileCard({
                 <td>{lang === "ar" ? "سعر الخدمة" : "Service Price"}</td>
                 <td className="text-right">{tService.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}</td>
               </tr>
-              <tr>
-                <td>{lang === "ar" ? "رسوم الطباعة" : "Printing Fee"}</td>
-                <td className="text-right">
-                  {isSubscriptionActive ? "-" : tPrinting.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
-                </td>
-              </tr>
-              <tr>
-                <td>{lang === "ar" ? "ضريبة القيمة المضافة" : "VAT"}</td>
-                <td className="text-right">
-                  {isSubscriptionActive ? "-" : tVat.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
-                </td>
-              </tr>
+
+              {/* ✅ اخفاء كامل وقت الاشتراك */}
+              {showExtraFees && (
+                <>
+                  <tr>
+                    <td>{lang === "ar" ? "رسوم الطباعة" : "Printing Fee"}</td>
+                    <td className="text-right">{tPrinting.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}</td>
+                  </tr>
+                  <tr>
+                    <td>{lang === "ar" ? "ضريبة القيمة المضافة" : "VAT"}</td>
+                    <td className="text-right">{tVat.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}</td>
+                  </tr>
+                </>
+              )}
+
               <tr>
                 <td>{lang === "ar" ? "الإجمالي" : "Total"}</td>
                 <td className="font-extrabold text-emerald-900 text-right">
@@ -475,19 +482,24 @@ export default function ServiceProfileCard({
                 </td>
               </tr>
 
-              <tr>
-                <td>{lang === "ar" ? "رسوم الطباعة" : "Printing Fee"}</td>
-                <td className="text-right">
-                  {isSubscriptionActive ? "-" : printingDisplay.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
-                </td>
-              </tr>
+              {/* ✅ اخفاء كامل وقت الاشتراك */}
+              {showExtraFees && (
+                <>
+                  <tr>
+                    <td>{lang === "ar" ? "رسوم الطباعة" : "Printing Fee"}</td>
+                    <td className="text-right">
+                      {printingTotal.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
+                    </td>
+                  </tr>
 
-              <tr>
-                <td>{lang === "ar" ? "ضريبة القيمة المضافة 5%" : "VAT 5% on Printing"}</td>
-                <td className="text-right">
-                  {isSubscriptionActive ? "-" : vatDisplay.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
-                </td>
-              </tr>
+                  <tr>
+                    <td>{lang === "ar" ? "ضريبة القيمة المضافة 5%" : "VAT 5% on Printing"}</td>
+                    <td className="text-right">
+                      {vatTotal.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
+                    </td>
+                  </tr>
+                </>
+              )}
             </tbody>
           </table>
         </div>

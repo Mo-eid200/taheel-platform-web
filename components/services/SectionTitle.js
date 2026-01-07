@@ -24,6 +24,9 @@ export default function ServiceSection({
     [services, filterService]
   );
 
+  // =========================
+  // ✅ Subscription state (companySubscriptions/{companyDocId})
+  // =========================
   const [subInfo, setSubInfo] = useState({
     loading: false,
     active: false,
@@ -36,23 +39,26 @@ export default function ServiceSection({
 
   const isCompany = category === "company";
 
-  // ✅ أهم تعديل: استخدم ID واحد مؤكد (userId الأول)
+  // ✅ IMPORTANT: companySubscriptions docId عندك = companyDocId = "COM-400-0106"
+  // فالأولوية هنا للـ companyDocId/customerId/companyId (مش userId)
   const companyDocId =
-    client?.userId ||
-    client?.uid ||
-    client?.id ||
     client?.companyDocId ||
     client?.customerId ||
     client?.companyId ||
+    client?.id ||
+    client?.uid ||
+    client?.userId ||
     "";
 
   useEffect(() => {
     let mounted = true;
 
     async function loadSubscription() {
-      // ✅ الاشتراك يهمنا فقط لو حساب شركة + عندنا docId
+      // الاشتراك يهمنا فقط لحساب شركة + عندنا docId
       if (!isCompany || !companyDocId) {
-        if (mounted) setSubInfo((p) => ({ ...p, loading: false, active: false, status: "none" }));
+        if (mounted) {
+          setSubInfo((p) => ({ ...p, loading: false, active: false, status: "none" }));
+        }
         return;
       }
 
@@ -81,12 +87,7 @@ export default function ServiceSection({
         const status = String(d.status || "").toLowerCase();
         const isActiveFlag = Boolean(d.isActive);
 
-        const startMs =
-          d.startAt?.toMillis ? d.startAt.toMillis() :
-          d.startAt?.seconds ? d.startAt.seconds * 1000 :
-          d.startAtISO ? Date.parse(d.startAtISO) :
-          0;
-
+        // ✅ اعتمد على endAt فقط (تجاهل startAt عشان كان بيتسجل غلط عندك)
         const endMs =
           d.endAt?.toMillis ? d.endAt.toMillis() :
           d.endAt?.seconds ? d.endAt.seconds * 1000 :
@@ -94,9 +95,9 @@ export default function ServiceSection({
           0;
 
         const now = Date.now();
-        const withinWindow = (!startMs || now >= startMs) && (!endMs || now < endMs);
+        const notExpired = !endMs || now < endMs;
 
-        const active = isActiveFlag && status === "active" && withinWindow;
+        const active = isActiveFlag && status === "active" && notExpired;
 
         if (mounted) {
           setSubInfo({
@@ -130,7 +131,7 @@ export default function ServiceSection({
     };
   }, [isCompany, companyDocId]);
 
-  // ✅ خلاص: لو شركة واشتراك active يبقى true
+  // ✅ ده اللي بيروح للكارت
   const subscriptionActive = isCompany && Boolean(subInfo.active);
 
   if (!filteredServices.length) {
@@ -178,7 +179,7 @@ export default function ServiceSection({
             repeatable={srv.repeatable}
             allowPaperCount={srv.allowPaperCount}
             provider={srv.provider}
-            // ✅ ده اللي بيشغل المنطق في الكارت
+            // ✅ أهم سطر
             subscriptionActive={subscriptionActive}
           />
         ))}
