@@ -35,7 +35,7 @@ export default function ServiceSection({
     usedDocId: "",
   });
 
-  const isCompany = category === "company";
+  const isCompany = String(category || "").toLowerCase().includes("company");
 
   // ✅ جرّب كل الـ IDs المحتملة (بالترتيب)
   const candidateIds = useMemo(() => {

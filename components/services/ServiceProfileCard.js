@@ -149,7 +149,9 @@ export default function ServiceProfileCard({
   const style = CATEGORY_STYLES[category] || CATEGORY_STYLES.resident;
 
   // ✅ الاشتراك يُطبّق فقط على خدمات الشركات
-  const isSubscriptionActive = category === "company" && Boolean(subscriptionActive);
+  const isCompanyCategory = String(category || "").toLowerCase().includes("company");
+  const isSubscriptionActive = isCompanyCategory && Boolean(subscriptionActive);
+
 
   // ✅ وقت الاشتراك: نخفي الطباعة + الضريبة 100%
   const showExtraFees = !isSubscriptionActive;
