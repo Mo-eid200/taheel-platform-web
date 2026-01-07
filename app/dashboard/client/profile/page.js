@@ -1164,6 +1164,7 @@ useEffect(() => {
                         name_en={displayName}
                         description={displayDesc}
                         description_en={displayDesc}
+                        subscriptionActive={Boolean(freePrinting && isCompanyServicesSection)}
                         price={srv.price}
                         printingFee={freePrinting && isCompanyServicesSection ? 0 : srv.printingFee}
                         tax={srv.tax}

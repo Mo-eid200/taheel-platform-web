@@ -451,12 +451,13 @@ export default async function handler(req, res) {
         metadata: { orderId: finalRequestId, paymentIntentId },
       });
 
-// D2) subscription (✅ activate now + extend endAt)
+// D2) subscription (✅ activate now + extend endAt + computed fields)
 if (isSubscription && isCompany) {
   const now = new Date();
 
+  // --- decide start/baseEnd ---
   let startDate = now;
-  let baseEnd = now; // هنزود عليها الأيام
+  let baseEnd = now;
 
   if (subSnap && subSnap.exists) {
     const old = subSnap.data() || {};
@@ -471,17 +472,15 @@ if (isSubscription && isCompany) {
 
     const oldStatus = String(old.status || "").toLowerCase();
 
-    // لو الاشتراك القديم شغال: نخلي البداية كما هي (أو now) ونزود على النهاية القديمة
+    // لو شغال ولسه ماانتهيش: نمد على النهاية القديمة ونثبت بداية الاشتراك القديمة إن وُجدت
     if (oldEnd && oldEnd.getTime() > now.getTime() && (oldStatus === "active" || oldStatus === "trial")) {
-      // خلي startAt ثابت (الأقدم) لو موجود
       const oldStartRaw = old.startAt || old.startAtISO || null;
       if (oldStartRaw && typeof oldStartRaw?.toDate === "function") startDate = oldStartRaw.toDate();
       else if (oldStartRaw) {
         const d = new Date(oldStartRaw);
         startDate = isNaN(d.getTime()) ? now : d;
       }
-
-      baseEnd = oldEnd; // هنمد هنا
+      baseEnd = oldEnd;
     } else {
       // مفيش اشتراك شغال: يبدأ الآن
       startDate = now;
@@ -489,25 +488,28 @@ if (isSubscription && isCompany) {
     }
   }
 
+  // --- compute endDate ---
   const endDate = new Date(baseEnd);
   endDate.setDate(endDate.getDate() + daysToApply);
 
   const startTs = admin.firestore.Timestamp.fromDate(startDate);
   const endTs = admin.firestore.Timestamp.fromDate(endDate);
 
+  // --- compute "active now" flags ---
+  const isExpiredNow = endDate.getTime() <= now.getTime();
+  const statusNow = isExpiredNow ? "expired" : "active";
+
   const udata = uDoc.data() || {};
   const companyPublicId = String(udata.companyId || udata.customerId || udata.userId || companyDocId);
   const companyEmail = String(udata.email || md.userEmail || "");
 
+  // --- write subscription doc ---
   tx.set(
     subRef,
     {
       companyDocId,
       companyId: companyPublicId,
       email: companyEmail,
-
-      status: "active",
-      isActive: true,
 
       planKey,
       planName,
@@ -520,6 +522,17 @@ if (isSubscription && isCompany) {
       startAtISO: startDate.toISOString(),
       endAtISO: endDate.toISOString(),
 
+      // ✅ الحالة الأساسية
+      status: statusNow,              // active / expired
+      isActive: !isExpiredNow,        // boolean سريع للفرونت
+
+      // ✅ computed section للوضوح
+      computed: {
+        isExpired: isExpiredNow,
+        isActiveNow: !isExpiredNow,
+        nowISO: now.toISOString(),
+      },
+
       lastRequestId: finalRequestId,
       lastPaymentIntentId: paymentIntentId,
 
@@ -529,6 +542,7 @@ if (isSubscription && isCompany) {
     { merge: true }
   );
 
+  // --- history record ---
   tx.set(subRef.collection("history").doc(paymentIntentId), {
     companyDocId,
     companyId: companyPublicId,
@@ -549,6 +563,7 @@ if (isSubscription && isCompany) {
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 }
+
 
       // E) processed (مرة واحدة فقط)
       tx.set(processedRef, {

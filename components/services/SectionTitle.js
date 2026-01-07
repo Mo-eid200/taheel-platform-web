@@ -117,7 +117,8 @@ export default function ServiceSection({
         const now = Date.now();
         const withinWindow = (!startMs || now >= startMs) && (!endMs || now < endMs);
 
-        const active = isActiveFlag && status === "active" && withinWindow;
+        const active = (isActiveFlag || status === "active") && withinWindow;
+
 
         if (mounted) {
           setSubInfo({
