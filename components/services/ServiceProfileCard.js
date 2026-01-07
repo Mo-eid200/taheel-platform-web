@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemouseMemo, useRef } from "react";
 import { FaFileAlt, FaBuilding, FaUserTie, FaUser, FaTag, FaCoins } from "react-icons/fa";
 import ServiceUploadModal from "./ServiceUploadModal";
 import ServicePayModal from "./ServicePayModal";
@@ -144,8 +144,7 @@ export default function ServiceProfileCard({
   provider,
   freePrinting = false,
 
-  // ✅ NEW: لازم تيجي من الكمبوننت الأب (من اشتراك العميل)
-  // true = اشتراك فعّال، false = انتهى / مش مشترك
+  // ✅ NEW: جاية من الأب حسب اشتراك العميل في companySubscriptions
   subscriptionActive = false,
 }) {
   useEffect(() => {
@@ -156,9 +155,9 @@ export default function ServiceProfileCard({
 
   const style = CATEGORY_STYLES[category] || CATEGORY_STYLES.resident;
 
-  // ✅ الخدمة "باقة" (Company + freePrinting) — لكن الإخفاء يكون فقط إذا الاشتراك فعّال
-  const isSubscriptionPlan = category === "company" && Boolean(freePrinting);
-  const isSubscriptionActive = isSubscriptionPlan && Boolean(subscriptionActive);
+  // ✅ الاتفاق النهائي:
+  // الاشتراك يطبّق على كل خدمات الشركات (مش لازم خدمة الباقة نفسها)
+  const isSubscriptionActive = category === "company" && Boolean(subscriptionActive);
 
   const [wallet, setWallet] = useState(userWallet);
   const [coinsBalance, setCoinsBalance] = useState(userCoins);
@@ -615,7 +614,7 @@ export default function ServiceProfileCard({
         totalPrice={+payTotal.toFixed(2)}
         printingFee={payPrintingFee}
         tax={payTax}
-        freePrinting={isSubscriptionActive}   // ✅ المهم: فعّال فقط
+        freePrinting={isSubscriptionActive} // ✅ فعّال فقط بناءً على اشتراك العميل
         clientType={category}
         coinsBalance={coinsBalance}
         cashbackCoins={coins}
@@ -629,7 +628,7 @@ export default function ServiceProfileCard({
         provider={Array.isArray(provider) ? provider : provider ? [provider] : []}
       />
 
-      <div className="absolute -bottom-6 right-0 left-0 w-full h-8 bg-gradient-to-t from-emerald-100/60 via-white/20 to-transparent blur-2xl opacity-80 z-0 pointer-events-none"></div>
+      <div className="absolute -bottom-6 right-0 left-0 w-full h-8 bg-gradient-to-t from-emerald-100/60 via-white/20 to-transparent blur-2xl opacity-80 z-0 pointer-events-none" />
     </div>
   );
 }

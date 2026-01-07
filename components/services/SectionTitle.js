@@ -1,3 +1,9 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { doc, getDoc } from "firebase/firestore";
+import { firestore } from "@/lib/firebase.client";
+
 import SectionTitle from "@/components/services/SectionTitle";
 import ServiceProfileCard from "@/components/services/ServiceProfileCard";
 
@@ -13,9 +19,115 @@ export default function ServiceSection({
   addNotification,
   category,
   selectedSection,
-  freePrinting,
 }) {
-  const filteredServices = (services || []).filter(filterService);
+  const filteredServices = useMemo(() => (services || []).filter(filterService), [services, filterService]);
+
+  // =========================
+  // ✅ Subscription state (from Firestore)
+  // companySubscriptions/{companyDocId}
+  // =========================
+  const [subInfo, setSubInfo] = useState({
+    loading: false,
+    active: false,
+    status: "none",
+    planKey: "",
+    planName: "",
+    startAt: null,
+    endAt: null,
+  });
+
+  const isCompany = category === "company";
+  const isCompanyServicesSection = selectedSection === "companyServices";
+  const companyDocId = client?.customerId || client?.companyId || client?.companyDocId || "";
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadSubscription() {
+      // الاشتراك يهمنا فقط: (حساب شركة) + (قسم خدمات الشركات)
+      if (!isCompany || !isCompanyServicesSection || !companyDocId) {
+        if (mounted) {
+          setSubInfo((p) => ({ ...p, loading: false, active: false, status: "none" }));
+        }
+        return;
+      }
+
+      try {
+        if (mounted) setSubInfo((p) => ({ ...p, loading: true }));
+
+        const ref = doc(firestore, "companySubscriptions", String(companyDocId));
+        const snap = await getDoc(ref);
+
+        if (!snap.exists()) {
+          if (mounted) {
+            setSubInfo({
+              loading: false,
+              active: false,
+              status: "none",
+              planKey: "",
+              planName: "",
+              startAt: null,
+              endAt: null,
+            });
+          }
+          return;
+        }
+
+        const d = snap.data() || {};
+        const status = String(d.status || "").toLowerCase();
+        const isActiveFlag = Boolean(d.isActive);
+
+        const startMs =
+          d.startAt?.toMillis ? d.startAt.toMillis() :
+          d.startAt?.seconds ? d.startAt.seconds * 1000 :
+          d.startAtISO ? Date.parse(d.startAtISO) :
+          0;
+
+        const endMs =
+          d.endAt?.toMillis ? d.endAt.toMillis() :
+          d.endAt?.seconds ? d.endAt.seconds * 1000 :
+          d.endAtISO ? Date.parse(d.endAtISO) :
+          0;
+
+        const now = Date.now();
+        const withinWindow = (!startMs || now >= startMs) && (!endMs || now < endMs);
+
+        const active = isActiveFlag && status === "active" && withinWindow;
+
+        if (mounted) {
+          setSubInfo({
+            loading: false,
+            active,
+            status: d.status || "none",
+            planKey: d.planKey || "",
+            planName: d.planName || "",
+            startAt: d.startAt || null,
+            endAt: d.endAt || null,
+          });
+        }
+      } catch {
+        if (mounted) {
+          setSubInfo({
+            loading: false,
+            active: false,
+            status: "error",
+            planKey: "",
+            planName: "",
+            startAt: null,
+            endAt: null,
+          });
+        }
+      }
+    }
+
+    loadSubscription();
+    return () => {
+      mounted = false;
+    };
+  }, [isCompany, isCompanyServicesSection, companyDocId]);
+
+  // ✅ دي اللي هنبعتها للكارت
+  const subscriptionActive = isCompany && isCompanyServicesSection && Boolean(subInfo.active);
 
   if (!filteredServices.length) {
     return (
@@ -24,11 +136,6 @@ export default function ServiceSection({
       </div>
     );
   }
-
-  // ✅ الاشتراك (Free Printing) يشتغل فقط داخل قسم خدمات الشركات + حساب شركة
-  const isCompanyServicesSection = selectedSection === "companyServices";
-  const effectiveFreePrinting =
-    Boolean(freePrinting) && isCompanyServicesSection && category === "company";
 
   return (
     <>
@@ -46,37 +153,31 @@ export default function ServiceSection({
             description={srv.description}
             description_en={srv.description_en}
             price={srv.price}
-
-            // ✅ سيبها زي ما هي — الكارت هيعرضها "-" / 0 في حالة الاشتراك
             printingFee={srv.printingFee}
             tax={srv.tax}
             clientPrice={srv.clientPrice}
-
             duration={srv.duration}
             requiredDocuments={srv.requiredDocuments || srv.documents || []}
             requireUpload={srv.requireUpload}
             coins={srv.coins || 0}
             lang={lang}
-
-            // ✅ حماية لو client لسه محمّلش
             userId={client?.userId}
             userWallet={client?.walletBalance || 0}
             userCoins={client?.coins || 0}
             userEmail={client?.email}
             customerId={client?.customerId}
-
             longDescription={srv.longDescription}
             longDescription_en={srv.longDescription_en}
-
             onPaid={onPaid}
             addNotification={addNotification}
             serviceId={srv.serviceId}
             repeatable={srv.repeatable}
             allowPaperCount={srv.allowPaperCount}
             pricePerPage={srv.pricePerPage}
-
-            // ✅ المهم: ابعت freePrinting الحقيقي فقط
-            freePrinting={effectiveFreePrinting}
+            provider={srv.provider}
+            // ✅ أهم سطرين
+            subscriptionActive={subscriptionActive}
+            subscriptionPlanName={subInfo.planName}
           />
         ))}
       </div>
