@@ -446,88 +446,104 @@ export default async function handler(req, res) {
         metadata: { orderId: finalRequestId, paymentIntentId },
       });
 
-      // D2) subscription
-      if (isSubscription && isCompany) {
-        const now = new Date();
-        let startDate = now;
+// D2) subscription (✅ activate now + extend endAt)
+if (isSubscription && isCompany) {
+  const now = new Date();
 
-        if (subSnap && subSnap.exists) {
-          const old = subSnap.data() || {};
-          const oldEndRaw = old.endAt || old.expiresAt || old.endAtISO || null;
+  let startDate = now;
+  let baseEnd = now; // هنزود عليها الأيام
 
-          let oldEnd = null;
-          if (oldEndRaw && typeof oldEndRaw?.toDate === "function") oldEnd = oldEndRaw.toDate();
-          else if (oldEndRaw) {
-            const d = new Date(oldEndRaw);
-            oldEnd = isNaN(d.getTime()) ? null : d;
-          }
+  if (subSnap && subSnap.exists) {
+    const old = subSnap.data() || {};
+    const oldEndRaw = old.endAt || old.expiresAt || old.endAtISO || null;
 
-          const oldStatus = String(old.status || "").toLowerCase();
-          if (oldEnd && oldEnd.getTime() > now.getTime() && (oldStatus === "active" || oldStatus === "trial")) {
-            startDate = oldEnd;
-          }
-        }
+    let oldEnd = null;
+    if (oldEndRaw && typeof oldEndRaw?.toDate === "function") oldEnd = oldEndRaw.toDate();
+    else if (oldEndRaw) {
+      const d = new Date(oldEndRaw);
+      oldEnd = isNaN(d.getTime()) ? null : d;
+    }
 
-        const endDate = new Date(startDate);
-        endDate.setDate(endDate.getDate() + daysToApply);
+    const oldStatus = String(old.status || "").toLowerCase();
 
-        const startTs = admin.firestore.Timestamp.fromDate(startDate);
-        const endTs = admin.firestore.Timestamp.fromDate(endDate);
-
-        const udata = uDoc.data() || {};
-        const companyPublicId = String(udata.companyId || udata.customerId || udata.userId || companyDocId);
-        const companyEmail = String(udata.email || md.userEmail || "");
-
-        tx.set(
-          subRef,
-          {
-            companyDocId,
-            companyId: companyPublicId,
-            email: companyEmail,
-
-            status: "active",
-            isActive: true,
-
-            planKey,
-            planName,
-            pricingKey,
-
-            subscriptionDays: daysToApply,
-
-            startAt: startTs,
-            endAt: endTs,
-            startAtISO: startDate.toISOString(),
-            endAtISO: endDate.toISOString(),
-
-            lastRequestId: finalRequestId,
-            lastPaymentIntentId: paymentIntentId,
-
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            ...(subSnap && subSnap.exists ? {} : { createdAt: admin.firestore.FieldValue.serverTimestamp() }),
-          },
-          { merge: true }
-        );
-
-        tx.set(subRef.collection("history").doc(paymentIntentId), {
-          companyDocId,
-          companyId: companyPublicId,
-          email: companyEmail,
-
-          requestId: finalRequestId,
-          paymentIntentId,
-
-          planKey,
-          planName,
-          pricingKey,
-
-          subscriptionDays: daysToApply,
-          startAt: startTs,
-          endAt: endTs,
-
-          status: "active",
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
+    // لو الاشتراك القديم شغال: نخلي البداية كما هي (أو now) ونزود على النهاية القديمة
+    if (oldEnd && oldEnd.getTime() > now.getTime() && (oldStatus === "active" || oldStatus === "trial")) {
+      // خلي startAt ثابت (الأقدم) لو موجود
+      const oldStartRaw = old.startAt || old.startAtISO || null;
+      if (oldStartRaw && typeof oldStartRaw?.toDate === "function") startDate = oldStartRaw.toDate();
+      else if (oldStartRaw) {
+        const d = new Date(oldStartRaw);
+        startDate = isNaN(d.getTime()) ? now : d;
       }
+
+      baseEnd = oldEnd; // هنمد هنا
+    } else {
+      // مفيش اشتراك شغال: يبدأ الآن
+      startDate = now;
+      baseEnd = now;
+    }
+  }
+
+  const endDate = new Date(baseEnd);
+  endDate.setDate(endDate.getDate() + daysToApply);
+
+  const startTs = admin.firestore.Timestamp.fromDate(startDate);
+  const endTs = admin.firestore.Timestamp.fromDate(endDate);
+
+  const udata = uDoc.data() || {};
+  const companyPublicId = String(udata.companyId || udata.customerId || udata.userId || companyDocId);
+  const companyEmail = String(udata.email || md.userEmail || "");
+
+  tx.set(
+    subRef,
+    {
+      companyDocId,
+      companyId: companyPublicId,
+      email: companyEmail,
+
+      status: "active",
+      isActive: true,
+
+      planKey,
+      planName,
+      pricingKey,
+
+      subscriptionDays: daysToApply,
+
+      startAt: startTs,
+      endAt: endTs,
+      startAtISO: startDate.toISOString(),
+      endAtISO: endDate.toISOString(),
+
+      lastRequestId: finalRequestId,
+      lastPaymentIntentId: paymentIntentId,
+
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      ...(subSnap && subSnap.exists ? {} : { createdAt: admin.firestore.FieldValue.serverTimestamp() }),
+    },
+    { merge: true }
+  );
+
+  tx.set(subRef.collection("history").doc(paymentIntentId), {
+    companyDocId,
+    companyId: companyPublicId,
+    email: companyEmail,
+
+    requestId: finalRequestId,
+    paymentIntentId,
+
+    planKey,
+    planName,
+    pricingKey,
+
+    subscriptionDays: daysToApply,
+    startAt: startTs,
+    endAt: endTs,
+
+    status: "active",
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+}
 
       // E) processed (مرة واحدة فقط)
       tx.set(processedRef, {
