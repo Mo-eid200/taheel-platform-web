@@ -12,24 +12,23 @@ export default function ServiceSection({
   onPaid,
   addNotification,
   category,
-
   selectedSection,
-  setClient,
   freePrinting,
 }) {
-  const filteredServices = services.filter(filterService);
-  const isCompanyServicesSection = selectedSection === "companyServices";
+  const filteredServices = (services || []).filter(filterService);
 
-  if (!filteredServices.length)
+  if (!filteredServices.length) {
     return (
       <div className="text-gray-400 text-xl text-center py-8">
         {lang === "ar" ? "لا توجد خدمات متاحة حالياً" : "No services available now"}
       </div>
     );
+  }
 
-  // ✅ Free printing applies ONLY for company services section (and company category)
+  // ✅ الاشتراك (Free Printing) يشتغل فقط داخل قسم خدمات الشركات + حساب شركة
+  const isCompanyServicesSection = selectedSection === "companyServices";
   const effectiveFreePrinting =
-    Boolean(freePrinting) && Boolean(isCompanyServicesSection) && category === "company";
+    Boolean(freePrinting) && isCompanyServicesSection && category === "company";
 
   return (
     <>
@@ -40,7 +39,7 @@ export default function ServiceSection({
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
         {filteredServices.map((srv, i) => (
           <ServiceProfileCard
-            key={(srv.serviceId || srv.name) + "-" + i}
+            key={(srv.serviceId || srv.name || "srv") + "-" + i}
             category={category}
             name={srv.name}
             name_en={srv.name_en}
@@ -48,31 +47,35 @@ export default function ServiceSection({
             description_en={srv.description_en}
             price={srv.price}
 
-            // ✅ سيبها زي ما هي — والـ card هي اللي هتخليها 0 لو الاشتراك فعّال
+            // ✅ سيبها زي ما هي — الكارت هيعرضها "-" / 0 في حالة الاشتراك
             printingFee={srv.printingFee}
-
             tax={srv.tax}
             clientPrice={srv.clientPrice}
+
             duration={srv.duration}
             requiredDocuments={srv.requiredDocuments || srv.documents || []}
             requireUpload={srv.requireUpload}
             coins={srv.coins || 0}
             lang={lang}
-            userId={client.userId}
-            userWallet={client.walletBalance || 0}
-            userCoins={client.coins || 0}
-            userEmail={client.email}
+
+            // ✅ حماية لو client لسه محمّلش
+            userId={client?.userId}
+            userWallet={client?.walletBalance || 0}
+            userCoins={client?.coins || 0}
+            userEmail={client?.email}
+            customerId={client?.customerId}
+
             longDescription={srv.longDescription}
             longDescription_en={srv.longDescription_en}
+
             onPaid={onPaid}
             addNotification={addNotification}
             serviceId={srv.serviceId}
             repeatable={srv.repeatable}
             allowPaperCount={srv.allowPaperCount}
             pricePerPage={srv.pricePerPage}
-            customerId={client.customerId}
 
-            // ✅ المهم: ابعت freePrinting الحقيقي للـ card
+            // ✅ المهم: ابعت freePrinting الحقيقي فقط
             freePrinting={effectiveFreePrinting}
           />
         ))}
