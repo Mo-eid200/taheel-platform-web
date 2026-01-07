@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useState, useEffect, useMemouseMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { FaFileAlt, FaBuilding, FaUserTie, FaUser, FaTag, FaCoins } from "react-icons/fa";
 import ServiceUploadModal from "./ServiceUploadModal";
 import ServicePayModal from "./ServicePayModal";
@@ -142,21 +142,13 @@ export default function ServiceProfileCard({
   longDescription,
   longDescription_en,
   provider,
-  freePrinting = false,
 
-  // ✅ NEW: جاية من الأب حسب اشتراك العميل في companySubscriptions
+  // ✅ جاية من الأب (companySubscriptions)
   subscriptionActive = false,
 }) {
-  useEffect(() => {
-    if (!customerId) {
-      console.error("❌ customerId is missing in ServiceProfileCard! يجب تمريره من الكمبوننت الأب.");
-    }
-  }, [customerId]);
-
   const style = CATEGORY_STYLES[category] || CATEGORY_STYLES.resident;
 
-  // ✅ الاتفاق النهائي:
-  // الاشتراك يطبّق على كل خدمات الشركات (مش لازم خدمة الباقة نفسها)
+  // ✅ الاشتراك يُطبّق فقط على خدمات الشركات
   const isSubscriptionActive = category === "company" && Boolean(subscriptionActive);
 
   const [wallet, setWallet] = useState(userWallet);
@@ -184,7 +176,6 @@ export default function ServiceProfileCard({
     return [];
   }, [requiredDocuments]);
 
-  // keys ثابتة
   const docKeys = useMemo(() => {
     return docsArray.map((doc, i) => {
       const fallback =
@@ -195,7 +186,6 @@ export default function ServiceProfileCard({
     });
   }, [docsArray, serviceId, name]);
 
-  // labels للـ UI
   useEffect(() => {
     let cancel = false;
     async function buildDocsForUI() {
@@ -222,7 +212,6 @@ export default function ServiceProfileCard({
     };
   }, [docsArray, lang, serviceId, name]);
 
-  // ترجمة اسم/وصف الخدمة
   useEffect(() => {
     let ignore = false;
     async function run() {
@@ -275,9 +264,7 @@ export default function ServiceProfileCard({
   ]);
 
   // =========================
-  // ✅ Pricing (FINAL AGREED)
-  // - If subscription ACTIVE: show Service Price ONLY + hide printing & VAT ("-")
-  // - Else: normal (clientPrice or service+printing+vat)
+  // Pricing (FINAL)
   // =========================
   const baseServiceCount = repeatable ? quantity : 1;
   const basePaperCount = allowPaperCount ? paperCount : 1;
@@ -295,23 +282,19 @@ export default function ServiceProfileCard({
 
   const vatTotal = +((vatPerUnit * basePaperCount)).toFixed(2);
 
-  // ✅ display rows
   const printingDisplay = isSubscriptionActive ? 0 : printingTotal;
   const vatDisplay = isSubscriptionActive ? 0 : vatTotal;
 
-  // ✅ BIG number
   const totalDisplay = isSubscriptionActive
     ? servicePriceTotal
     : typeof clientPrice !== "undefined"
       ? +(Number(clientPrice) * baseServiceCount).toFixed(2)
       : +(servicePriceTotal + printingTotal + vatTotal).toFixed(2);
 
-  // ✅ Payment
   const payTotal = isSubscriptionActive ? servicePriceTotal : totalDisplay;
   const payPrintingFee = isSubscriptionActive ? 0 : printingPerUnit;
   const payTax = isSubscriptionActive ? 0 : vatPerUnit;
 
-  // canPay
   const allDocsUploaded = !requireUpload || docKeys.every((k) => uploadedDocs[k]);
   const isPaperCountReady = !allowPaperCount || (paperCount && paperCount > 0);
   const canPay = allDocsUploaded && isPaperCountReady;
@@ -327,7 +310,6 @@ export default function ServiceProfileCard({
     setShowPayModal(true);
   }
 
-  // Tooltip
   const [showTooltip, setShowTooltip] = useState(false);
   const cardRef = useRef(null);
 
@@ -435,11 +417,6 @@ export default function ServiceProfileCard({
           <FaCoins className="text-yellow-500" size={12} />
           <span className="text-yellow-700 font-bold text-xs">{coins}</span>
         </div>
-        <div className="absolute z-20 left-1/2 -translate-x-1/2 top-7 whitespace-nowrap bg-yellow-200 text-yellow-900 text-xs font-bold px-3 py-1 rounded shadow-lg opacity-0 group-hover/coins:opacity-100 transition pointer-events-none">
-          {lang === "ar"
-            ? `عدد الكوينات: ${coins}${repeatable ? ` × ${quantity}` : ""}`
-            : `Coins cashback: ${coins}${repeatable ? ` × ${quantity}` : ""}`}
-        </div>
       </div>
 
       {/* Category */}
@@ -515,41 +492,6 @@ export default function ServiceProfileCard({
           </table>
         </div>
 
-        {/* Counters */}
-        {repeatable && (
-          <div className="flex flex-row items-center justify-center mt-1 gap-1">
-            <label className="text-[10px] font-bold text-gray-600 mb-0">
-              {lang === "ar" ? "عدد مرات" : "Qty"}
-            </label>
-            <input
-              type="number"
-              min={1}
-              max={99}
-              value={quantity}
-              onChange={(e) => setQuantity(Math.max(1, Math.min(99, Number(e.target.value))))}
-              className="w-[36px] p-0.5 rounded border border-emerald-200 text-emerald-900 text-center font-bold text-xs"
-              style={{ direction: "ltr", height: "22px" }}
-            />
-          </div>
-        )}
-
-        {allowPaperCount && (
-          <div className="flex flex-row items-center justify-center mt-1 gap-1">
-            <label className="text-[10px] font-bold text-gray-600 mb-0">
-              {lang === "ar" ? "عدد الأوراق" : "Pages"}
-            </label>
-            <input
-              type="number"
-              min={1}
-              max={99}
-              value={paperCount}
-              onChange={(e) => setPaperCount(Math.max(1, Math.min(99, Number(e.target.value))))}
-              className="w-[36px] p-0.5 rounded border border-emerald-200 text-emerald-900 text-center font-bold text-xs"
-              style={{ direction: "ltr", height: "22px" }}
-            />
-          </div>
-        )}
-
         {/* رفع المستندات */}
         {requireUpload && (
           <div className="w-full flex flex-col max-w-full mt-1 mb-1">
@@ -614,7 +556,7 @@ export default function ServiceProfileCard({
         totalPrice={+payTotal.toFixed(2)}
         printingFee={payPrintingFee}
         tax={payTax}
-        freePrinting={isSubscriptionActive} // ✅ فعّال فقط بناءً على اشتراك العميل
+        freePrinting={isSubscriptionActive} // ✅
         clientType={category}
         coinsBalance={coinsBalance}
         cashbackCoins={coins}
