@@ -1,4 +1,6 @@
-import { useState, useMemo } from "react";
+"use client";
+
+import { useState } from "react";
 import {
   FaWallet,
   FaCreditCard,
@@ -8,39 +10,50 @@ import {
   FaTimes,
   FaSpinner,
 } from "react-icons/fa";
-import { firestore } from "@/lib/firebase.client";
 import { motion, AnimatePresence } from "framer-motion";
-import { doc, setDoc, updateDoc, increment, collection, addDoc, getDoc } from "firebase/firestore";
-import { translateText } from "@/utils/translate";
 import { useRouter } from "next/navigation";
+
+import { firestore } from "@/lib/firebase.client";
+import {
+  doc,
+  setDoc,
+  updateDoc,
+  increment,
+  collection,
+  addDoc,
+  getDoc,
+} from "firebase/firestore";
+
+import { translateText } from "@/utils/translate";
 import calcStripeFees from "@/utils/calcStripeFees";
 
-// دالة توليد رقم تتبع بالشكل المطلوب
+// --------------------
+// Generate tracking number
+// --------------------
 function generateOrderNumber() {
   const part1 = Math.floor(100 + Math.random() * 900);
   const part2 = Math.floor(1000 + Math.random() * 9000);
   return `REQ-${part1}-${part2}`;
 }
 
-// دالة حفظ الطلب في requests بنفس هيكل الصورة
+// --------------------
+// Save request (consistent schema)
+// --------------------
 async function saveRequestToFirestore({
   orderNumber,
   customerId,
-  assignedTo,
-  assignedToName,
-  serviceName,
-  serviceId,
-  providers,
-  paidAmount,
-  printingFee,
-  coinsUsed,
-  coinsGiven,
-  uploadedDocs,
+  assignedTo = "",
+  assignedToName = "",
+  serviceName = "",
+  serviceId = "",
+  providers = [],
+  paidAmount = 0,
+  printingFee = 0,
+  coinsUsed = 0,
+  coinsGiven = 0,
+  uploadedDocs = {},
   status = "completed",
   statusHistory = [],
-  // (اختياري) لو حبيت تسجل VAT صريح
-  vat = 0,
-  processingFee = 0,
 }) {
   await setDoc(doc(firestore, "requests", orderNumber), {
     requestId: orderNumber,
@@ -50,10 +63,8 @@ async function saveRequestToFirestore({
     serviceName,
     serviceId,
     providers,
-    paidAmount,       // اللي اتخصم من العميل فعلياً (بعد خصم الكوينات) — *بدون Stripe fee*
+    paidAmount,
     printingFee,
-    vat,
-    processingFee,
     coinsUsed,
     coinsGiven,
     createdAt: new Date().toISOString(),
@@ -67,28 +78,35 @@ async function saveRequestToFirestore({
 export default function ServicePayModal({
   open,
   onClose,
+
   serviceName,
   serviceId,
-  provider,
-  totalPrice,     // قد يكون شامل
+  totalPrice,
   printingFee,
-  tax,            // VAT (مربوطة بالطباعة)
+  tax,
+
   coinsBalance,
   cashbackCoins,
   userWallet,
+
   lang = "ar",
   customerId,
   userId,
   userEmail,
   uploadedDocs,
   onPaid,
+
   clientType = "resident",
 
-  // ✅ NEW: لو الشركة عندها اشتراك فعّال
+  // ✅ subscription
   freePrinting = false,
 
+  // assignment (optional)
   assignedTo,
   assignedToName,
+
+  // provider list
+  provider,
 }) {
   const [useCoins, setUseCoins] = useState(false);
   const [payMethod, setPayMethod] = useState("wallet");
@@ -98,119 +116,109 @@ export default function ServicePayModal({
 
   const router = useRouter();
 
-  if (!open) return null;
-
-  // ✅ effective printing fee (subscription => 0 for companies)
+  // ✅ effective printing fee
   const effectivePrintingFee =
-    clientType === "company" && freePrinting ? 0 : (Number(printingFee) || 0);
+    clientType === "company" && freePrinting ? 0 : Number(printingFee) || 0;
 
-  // ✅ VAT مرتبط بالطباعة فقط => لو طباعة = 0 يبقى VAT = 0
-  const effectiveVat =
-    effectivePrintingFee > 0
-      ? (typeof tax !== "undefined"
-          ? Number(tax) || 0
-          : +(effectivePrintingFee * 0.05).toFixed(2))
-      : 0;
+  // totalPrice passed from card already includes printingFee,
+  // so replace it with effectivePrintingFee
+  const effectiveTotalPrice =
+    (Number(totalPrice) || 0) - (Number(printingFee) || 0) + effectivePrintingFee;
 
-  /**
-   * ✅ استخراج "سعر الخدمة فقط" من totalPrice القديم (اللي غالباً شامل طباعة + VAT)
-   * serviceBase = totalPrice - printingFee - oldVat
-   * oldVat نحسبه بناءً على printingFee (مش effectivePrintingFee) عشان نفكك totalPrice القديم صح.
-   */
-  const oldVatFromOldPrinting =
-    (Number(printingFee) || 0) > 0
-      ? (typeof tax !== "undefined"
-          ? Number(tax) || 0
-          : +((Number(printingFee) || 0) * 0.05).toFixed(2))
-      : 0;
-
-  const serviceBase = useMemo(() => {
-    const tp = Number(totalPrice) || 0;
-    const pf = Number(printingFee) || 0;
-    const base = tp - pf - oldVatFromOldPrinting;
-    // حماية لو حصل negative بسبب بيانات قديمة
-    return base > 0 ? +base.toFixed(2) : 0;
-  }, [totalPrice, printingFee, oldVatFromOldPrinting]);
-
-  // ✅ الإجمالي الصحيح: خدمة + طباعة + VAT
-  const effectiveTotalPrice = +(serviceBase + effectivePrintingFee + effectiveVat).toFixed(2);
-
-  // ✅ الكوينات: انت عاملها خصم على printing فقط (10%)
-  const maxCoinDiscount = Math.floor(effectivePrintingFee * 0.1 * 100); // بالـ "فلس" (cents)
-  const coinDiscount = useCoins ? Math.min(coinsBalance, maxCoinDiscount) : 0;
+  // coins (max 10% of printing fee) => coins stored as "points" (100 = 1 AED)
+  const maxCoinDiscount = Math.floor(effectivePrintingFee * 0.1 * 100);
+  const coinDiscount = useCoins ? Math.min(coinsBalance || 0, maxCoinDiscount) : 0;
   const coinDiscountValue = coinDiscount / 100;
 
-  // ✅ السعر بعد خصم الكوينات (قبل Stripe)
-  const finalPrice = +(effectiveTotalPrice - coinDiscountValue).toFixed(2);
+  const finalPrice = Math.max(0, effectiveTotalPrice - coinDiscountValue);
   const willGetCashback = !useCoins;
 
-  // Stripe
+  // Stripe fees (only if gateway)
   const stripeFeesResult = calcStripeFees(finalPrice, {
     isInternational: false,
     isCurrencyConversion: false,
   });
-  const stripeFeeValue = payMethod === "gateway" ? (stripeFeesResult.stripeFee || 0) : 0;
   const finalPriceWithFees =
-    payMethod === "gateway" ? (stripeFeesResult.totalAmount || finalPrice) : finalPrice;
+    payMethod === "gateway" ? stripeFeesResult.totalAmount : finalPrice;
+  const stripeFeeValue = payMethod === "gateway" ? stripeFeesResult.stripeFee : 0;
 
-  // دفع المحفظة
-  async function handlePayment() {
+  // Fetch service data (optional enrichment)
+  async function getServiceData() {
+    if (!serviceName && !serviceId) return {};
+    try {
+      const ref = doc(firestore, "servicesByClientType", clientType);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return {};
+      const all = snap.data() || {};
+      if (serviceId && all[serviceId]) return all[serviceId];
+      return Object.values(all).find((s) => s?.name === serviceName) || {};
+    } catch {
+      return {};
+    }
+  }
+
+  async function handleWalletPayment() {
     setIsPaying(true);
     setPayMsg("");
     setMsgSuccess(false);
 
-    if (!customerId || !userEmail || !serviceName) {
-      setPayMsg(lang === "ar" ? "بيانات العميل أو البريد أو الخدمة ناقصة." : "Customer ID, email or service name missing.");
-      setIsPaying(false);
-      return;
-    }
-
     try {
-      if (userWallet < finalPrice) {
+      if (!customerId || !userEmail || !serviceName) {
+        setPayMsg(
+          lang === "ar"
+            ? "بيانات العميل أو البريد أو الخدمة ناقصة."
+            : "Customer ID, email or service name missing."
+        );
+        return;
+      }
+
+      if ((Number(userWallet) || 0) < finalPrice) {
         setPayMsg(lang === "ar" ? "رصيد المحفظة غير كافي." : "Insufficient wallet balance.");
-        setIsPaying(false);
         return;
       }
 
       const userRef = doc(firestore, "users", customerId);
 
-      await updateDoc(userRef, { walletBalance: userWallet - finalPrice });
+      // update wallet
+      await updateDoc(userRef, { walletBalance: (Number(userWallet) || 0) - finalPrice });
 
+      // coins usage
       if (useCoins && coinDiscount > 0) {
         await updateDoc(userRef, { coins: increment(-coinDiscount) });
       }
-      if (willGetCashback && cashbackCoins > 0) {
-        await updateDoc(userRef, { coins: increment(cashbackCoins) });
+
+      // cashback (only if not using coins)
+      if (willGetCashback && (Number(cashbackCoins) || 0) > 0) {
+        await updateDoc(userRef, { coins: increment(Number(cashbackCoins) || 0) });
       }
 
       const orderNumber = generateOrderNumber();
+      const serviceData = await getServiceData();
 
-      // جلب بيانات الخدمة
-      let serviceData = {};
-      try {
-        const serviceDocRef = doc(firestore, "servicesByClientType", clientType);
-        const serviceDocSnap = await getDoc(serviceDocRef);
-        if (serviceDocSnap.exists()) {
-          const allServices = serviceDocSnap.data();
-          serviceData =
-            serviceId && allServices[serviceId]
-              ? allServices[serviceId]
-              : Object.values(allServices).find((s) => s.name === serviceName) || {};
-        }
-      } catch (e) {
-        console.log("خطأ في جلب بيانات الخدمة:", e);
-      }
+      const finalServiceName = serviceData?.name || serviceName || "";
+      const finalServiceId = serviceData?.serviceId || serviceId || "";
 
-      const originalServiceName = serviceData?.name || serviceName || "";
       const providers = Array.isArray(serviceData?.providers)
         ? serviceData.providers
         : serviceData?.providers
           ? [serviceData.providers]
-          : [];
+          : Array.isArray(provider)
+            ? provider
+            : provider
+              ? [provider]
+              : [];
 
       const statusHistory = [
-        { status: "awaiting_payment", timestamp: new Date().toISOString(), updatedBy: assignedToName || "System" },
-        { status: "completed",        timestamp: new Date().toISOString(), updatedBy: assignedToName || "System" },
+        {
+          status: "awaiting_payment",
+          timestamp: new Date().toISOString(),
+          updatedBy: assignedToName || "System",
+        },
+        {
+          status: "completed",
+          timestamp: new Date().toISOString(),
+          updatedBy: assignedToName || "System",
+        },
       ];
 
       await saveRequestToFirestore({
@@ -218,38 +226,42 @@ export default function ServicePayModal({
         customerId,
         assignedTo: assignedTo || "",
         assignedToName: assignedToName || "",
-        serviceName: originalServiceName,
-        serviceId: serviceData.serviceId || serviceId || "",
+        serviceName: finalServiceName,
+        serviceId: finalServiceId,
         providers,
         paidAmount: finalPrice,
         printingFee: effectivePrintingFee,
-        vat: effectiveVat,
-        processingFee: 0,
         coinsUsed: useCoins ? coinDiscountValue : 0,
-        coinsGiven: willGetCashback ? cashbackCoins : 0,
+        coinsGiven: willGetCashback ? Number(cashbackCoins) || 0 : 0,
         uploadedDocs,
         status: "completed",
         statusHistory,
       });
 
+      // notification
       await addDoc(collection(firestore, "notifications"), {
         targetId: customerId,
         title: lang === "ar" ? "تم الدفع" : "Payment Successful",
         body:
           lang === "ar"
-            ? `دفعت لخدمة ${originalServiceName} بقيمة ${finalPrice.toFixed(2)} د.إ${useCoins ? ` واستخدمت خصم الكوينات (${coinDiscountValue.toFixed(2)} د.إ)` : ""}.\nرقم التتبع: ${orderNumber}`
-            : `You paid for ${originalServiceName} (${finalPrice.toFixed(2)} AED${useCoins ? `, using coins discount (${coinDiscountValue.toFixed(2)} AED)` : ""}).\nTracking No.: ${orderNumber}`,
+            ? `دفعت لخدمة ${finalServiceName} بقيمة ${finalPrice.toFixed(2)} د.إ${
+                useCoins ? ` واستخدمت خصم الكوينات (${coinDiscountValue.toFixed(2)} د.إ)` : ""
+              }.\nرقم التتبع: ${orderNumber}`
+            : `You paid for ${finalServiceName} (${finalPrice.toFixed(2)} AED${
+                useCoins ? `, using coins discount (${coinDiscountValue.toFixed(2)} AED)` : ""
+              }).\nTracking No.: ${orderNumber}`,
         timestamp: new Date().toISOString(),
         isRead: false,
       });
 
+      // email
       await fetch("/api/sendOrderEmail", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           to: userEmail,
           orderNumber,
-          serviceName: originalServiceName,
+          serviceName: finalServiceName,
           price: finalPrice.toFixed(2),
         }),
       });
@@ -266,7 +278,6 @@ export default function ServicePayModal({
     }
   }
 
-  // دفع بوابة Stripe Elements
   async function handleGatewayPayWithElements() {
     setIsPaying(true);
     setPayMsg("");
@@ -283,49 +294,53 @@ export default function ServicePayModal({
               fieldKey: `service:${serviceId || serviceName}:name:en`,
             });
 
-      const response = await fetch("/api/create-payment-intent", {
+      const res = await fetch("/api/create-payment-intent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          amount: finalPriceWithFees,     // شامل Stripe Fee
+          amount: finalPriceWithFees,
           serviceName: uiServiceName,
           customerId,
           userEmail,
           printingFee: effectivePrintingFee,
-          vat: effectiveVat,              // ✅ هنا VAT الصح
+          vat: 0,
         }),
       });
 
-      const result = await response.json();
+      const result = await res.json();
 
-      if (result.clientSecret) {
-        localStorage.setItem(
-          "paymentData",
-          JSON.stringify({
-            clientSecret: result.clientSecret,
-            service: {
-              name: uiServiceName,
-              id: serviceId,
-              price: serviceBase,                 // سعر الخدمة فقط
-              printingFee: effectivePrintingFee,
-              vat: effectiveVat,
-              coinDiscount: useCoins ? coinDiscountValue : 0,
-              userEmail,
-            },
-            totalPrice: effectiveTotalPrice,      // (خدمة + طباعة + VAT) قبل Stripe + قبل خصم coins؟ (هنا بعد coins؟ لا)
-            finalPrice: finalPriceWithFees,       // النهائي شامل Stripe Fee وبعد خصم coins
-            processingFee: stripeFeeValue,
-            customerId,
-            lang,
-            orderNumber: result.orderNumber,
-          })
-        );
-
-        router.push("/payment/service");
-      } else {
+      if (!result?.clientSecret) {
         setPayMsg(lang === "ar" ? "تعذر فتح بوابة الدفع." : "Failed to open payment gateway.");
+        return;
       }
+
+      localStorage.setItem(
+        "paymentData",
+        JSON.stringify({
+          clientSecret: result.clientSecret,
+          service: {
+            name: uiServiceName,
+            id: serviceId,
+            printingFee: effectivePrintingFee,
+            vat:
+              typeof tax !== "undefined"
+                ? Number(tax) || 0
+                : +(effectivePrintingFee * 0.05).toFixed(2),
+            coinDiscount: useCoins ? coinDiscountValue : 0,
+            userEmail,
+          },
+          totalPrice: effectiveTotalPrice,
+          finalPrice: finalPriceWithFees,
+          processingFee: stripeFeeValue,
+          customerId,
+          lang,
+          orderNumber: result.orderNumber,
+        })
+      );
+
+      router.push("/payment/service");
     } catch (e) {
+      console.log(e);
       setPayMsg(lang === "ar" ? "تعذر الاتصال بالخادم." : "Failed to connect to server.");
     } finally {
       setIsPaying(false);
@@ -333,11 +348,11 @@ export default function ServicePayModal({
   }
 
   function onPayClick() {
-    if (payMethod === "wallet") handlePayment();
-    if (payMethod === "gateway") handleGatewayPayWithElements();
+    if (payMethod === "wallet") return handleWalletPayment();
+    return handleGatewayPayWithElements();
   }
 
-  const payBtnCursor = isPaying ? "wait" : "pointer";
+  if (!open) return null;
 
   return (
     <AnimatePresence>
@@ -363,10 +378,9 @@ export default function ServicePayModal({
           />
 
           <button
-            className="absolute top-3 right-4 bg-emerald-600 text-white rounded-full w-8 h-8 flex items-center justify-center text-xl shadow hover:bg-emerald-700 transition cursor-pointer"
+            className="absolute top-3 right-4 bg-emerald-600 text-white rounded-full w-8 h-8 flex items-center justify-center text-xl shadow hover:bg-emerald-700 transition"
             onClick={onClose}
             aria-label={lang === "ar" ? "إغلاق" : "Close"}
-            style={{ cursor: "pointer" }}
           >
             <FaTimes />
           </button>
@@ -381,17 +395,31 @@ export default function ServicePayModal({
           <table className="w-full text-xs text-gray-700 font-bold mb-2 border-separate border-spacing-y-1">
             <tbody>
               <tr>
-                <td>{lang === "ar" ? "سعر الخدمة" : "Service Price"}</td>
-                <td className="text-right">{serviceBase.toFixed(2)} د.إ</td>
+                <td>{lang === "ar" ? "الإجمالي قبل الخصم" : "Total Before Discount"}</td>
+                <td className="text-right">{effectiveTotalPrice.toFixed(2)} د.إ</td>
               </tr>
-              <tr>
-                <td>{lang === "ar" ? "رسوم الطباعة" : "Printing Fee"}</td>
-                <td className="text-right">{effectivePrintingFee.toFixed(2)} د.إ</td>
-              </tr>
-              <tr>
-                <td>{lang === "ar" ? "ضريبة القيمة المضافة 5%" : "VAT 5%"}</td>
-                <td className="text-right">{effectiveVat.toFixed(2)} د.إ</td>
-              </tr>
+
+              {/* ✅ إظهار رسوم الطباعة والـVAT فقط لو مش Free Printing */}
+              {!(clientType === "company" && freePrinting) && (
+                <>
+                  <tr>
+                    <td>{lang === "ar" ? "رسوم الطباعة" : "Printing Fee"}</td>
+                    <td className="text-right">{effectivePrintingFee.toFixed(2)} د.إ</td>
+                  </tr>
+                  <tr>
+                    <td>{lang === "ar" ? "ضريبة القيمة المضافة 5%" : "VAT 5%"}</td>
+                    <td className="text-right">
+                      {(
+                        typeof tax !== "undefined"
+                          ? Number(tax) || 0
+                          : +(effectivePrintingFee * 0.05).toFixed(2)
+                      ).toFixed(2)}{" "}
+                      د.إ
+                    </td>
+                  </tr>
+                </>
+              )}
+
               <tr>
                 <td className="flex items-center gap-1">
                   <FaCoins className="text-yellow-500 mr-1" size={10} />
@@ -401,16 +429,14 @@ export default function ServicePayModal({
                   {useCoins ? `-${coinDiscountValue.toFixed(2)} د.إ` : "0 د.إ"}
                 </td>
               </tr>
-              <tr>
-                <td>{lang === "ar" ? "الإجمالي قبل الخصم" : "Total Before Discount"}</td>
-                <td className="text-right">{effectiveTotalPrice.toFixed(2)} د.إ</td>
-              </tr>
+
               <tr>
                 <td>{lang === "ar" ? "رسوم معالجة الدفع الإلكتروني" : "Processing Fee"}</td>
                 <td className="text-right">
                   {payMethod === "gateway" ? stripeFeeValue.toFixed(2) : "0.00"} د.إ
                 </td>
               </tr>
+
               <tr>
                 <td className="font-extrabold text-emerald-700">
                   {lang === "ar" ? "السعر النهائي" : "Final"}
@@ -428,27 +454,29 @@ export default function ServicePayModal({
                 type="checkbox"
                 checked={useCoins}
                 onChange={(e) => setUseCoins(e.target.checked)}
-                disabled={coinsBalance < 1 || effectivePrintingFee <= 0} // ✅ منطقي: مفيش طباعة => مفيش خصم coins
+                disabled={(coinsBalance || 0) < 1}
                 className="accent-yellow-500 scale-90"
-                style={{ marginTop: 0 }}
               />
               <FaCoins className="text-yellow-500" size={12} />
               {lang === "ar" ? "استخدم الكوينات (خصم حتى 10%)" : "Use coins (up to 10%)"}
             </label>
             <span className="font-black text-yellow-700 text-xs">
-              {lang === "ar" ? "رصيدك:" : "Your coins:"} {coinsBalance}
+              {lang === "ar" ? "رصيدك:" : "Your coins:"} {coinsBalance || 0}
             </span>
           </div>
 
           <div className="w-full flex flex-row items-center justify-between mb-1">
-            <label className={`flex items-center gap-1 font-bold text-emerald-800 text-xs cursor-pointer ${userWallet < finalPrice ? "opacity-60" : ""}`}>
+            <label
+              className={`flex items-center gap-1 font-bold text-emerald-800 text-xs cursor-pointer ${
+                (Number(userWallet) || 0) < finalPrice ? "opacity-60" : ""
+              }`}
+            >
               <input
                 type="radio"
                 checked={payMethod === "wallet"}
                 onChange={() => setPayMethod("wallet")}
-                disabled={userWallet < finalPrice}
+                disabled={(Number(userWallet) || 0) < finalPrice}
                 className="accent-emerald-600 scale-90"
-                style={{ marginTop: 0 }}
               />
               <FaWallet className="text-emerald-600" size={12} />
               {lang === "ar" ? "المحفظة" : "Wallet"}
@@ -461,7 +489,6 @@ export default function ServicePayModal({
                 checked={payMethod === "gateway"}
                 onChange={() => setPayMethod("gateway")}
                 className="accent-emerald-600 scale-90"
-                style={{ marginTop: 0 }}
               />
               <FaCreditCard className="text-emerald-600" size={12} />
               {lang === "ar" ? "بوابة الدفع" : "Gateway"}
@@ -469,7 +496,7 @@ export default function ServicePayModal({
           </div>
 
           <div className="w-full mb-1 text-center">
-            {!useCoins ? (
+            {willGetCashback ? (
               <div className="flex flex-row items-center justify-center gap-1 text-yellow-700 font-bold text-xs">
                 <FaCoins className="text-yellow-500" size={12} />
                 {lang === "ar"
@@ -493,7 +520,7 @@ export default function ServicePayModal({
               focus:outline-none focus:ring-2 focus:ring-emerald-400
               ${isPaying ? "opacity-40" : ""}
             `}
-            style={{ cursor: payBtnCursor }}
+            style={{ cursor: isPaying ? "wait" : "pointer" }}
           >
             {isPaying ? (
               <span className="flex items-center justify-center gap-2 text-xs">
@@ -510,8 +537,16 @@ export default function ServicePayModal({
           </button>
 
           {payMsg && (
-            <div className={`mt-2 text-center font-bold text-xs flex flex-row items-center justify-center gap-1 ${msgSuccess ? "text-emerald-700" : "text-red-600"}`}>
-              {msgSuccess ? <FaCheckCircle className="text-emerald-500" size={16} /> : <FaExclamationCircle className="text-red-400" size={14} />}
+            <div
+              className={`mt-2 text-center font-bold text-xs flex flex-row items-center justify-center gap-1 ${
+                msgSuccess ? "text-emerald-700" : "text-red-600"
+              }`}
+            >
+              {msgSuccess ? (
+                <FaCheckCircle className="text-emerald-500" size={16} />
+              ) : (
+                <FaExclamationCircle className="text-red-400" size={14} />
+              )}
               <span>{payMsg}</span>
             </div>
           )}
@@ -525,7 +560,7 @@ export default function ServicePayModal({
             </div>
           </div>
 
-          <div className="absolute -bottom-6 right-0 left-0 w-full h-7 bg-gradient-to-t from-emerald-200/70 via-white/20 to-transparent blur-2xl opacity-80 pointer-events-none"></div>
+          <div className="absolute -bottom-6 right-0 left-0 w-full h-7 bg-gradient-to-t from-emerald-200/70 via-white/20 to-transparent blur-2xl opacity-80 pointer-events-none" />
         </motion.div>
       </motion.div>
     </AnimatePresence>
