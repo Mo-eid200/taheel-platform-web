@@ -152,11 +152,8 @@ export default function ServiceProfileCard({
 
   const style = CATEGORY_STYLES[category] || CATEGORY_STYLES.resident;
 
-  // ✅ تعريف الاشتراك: شركات + freePrinting
+  // ✅ الاشتراك = شركة + freePrinting true
   const isSubscription = category === "company" && Boolean(freePrinting);
-
-  // ✅ الطباعة الفعلية (0 في الاشتراك)
-  const effectivePrintingFee = isSubscription ? 0 : (Number(printingFee) || 0);
 
   const [wallet, setWallet] = useState(userWallet);
   const [coinsBalance, setCoinsBalance] = useState(userCoins);
@@ -274,42 +271,38 @@ export default function ServiceProfileCard({
   ]);
 
   // =========================
-  // ✅ Pricing (Final Correct)
+  // ✅ Pricing (EXACT user requirement)
+  // - Subscription: big number == DB service price ONLY (price)
+  // - Non-subscription: normal (clientPrice or price+printing+vat)
   // =========================
   const baseServiceCount = repeatable ? quantity : 1;
   const basePaperCount = allowPaperCount ? paperCount : 1;
 
-  // ✅ سعر الخدمة (دايمًا حقيقي)
-  const servicePriceTotal = (Number(price) || 0) * baseServiceCount;
+  const dbServiceUnitPrice = Number(price) || 0;
+  const servicePriceTotal = +(dbServiceUnitPrice * baseServiceCount).toFixed(2);
 
-  // ✅ الطباعة الفعلية (0 لو اشتراك)
-  const printingTotal = (Number(effectivePrintingFee) || 0) * basePaperCount;
+  const printingPerUnit = Number(printingFee) || 0;
+  const printingTotal = +(printingPerUnit * basePaperCount).toFixed(2);
 
-  // ✅ VAT على الطباعة فقط (0 لو الطباعة 0)
   const taxPerUnit =
-    printingTotal > 0
-      ? (typeof tax !== "undefined"
-          ? (Number(tax) || 0)
-          : +((Number(effectivePrintingFee) * 0.05).toFixed(2)))
-      : 0;
+    typeof tax !== "undefined" ? (Number(tax) || 0) : +((printingPerUnit * 0.05).toFixed(2));
+  const taxTotal = +((taxPerUnit * basePaperCount)).toFixed(2);
 
-  const taxTotal = +(taxPerUnit * basePaperCount).toFixed(2);
-
-  // ✅ العرض داخل الجدول
+  // ✅ Display on card table
   const printingDisplay = isSubscription ? 0 : printingTotal;
   const taxDisplay = isSubscription ? 0 : taxTotal;
 
-  // ✅ الإجمالي الكبير اللي يظهر فوق
+  // ✅ BIG number on card top
   const totalDisplay = isSubscription
-    ? +servicePriceTotal.toFixed(2)
-    : (typeof clientPrice !== "undefined"
-        ? +(Number(clientPrice) * baseServiceCount).toFixed(2)
-        : +(servicePriceTotal + printingTotal + taxTotal).toFixed(2));
+    ? servicePriceTotal
+    : typeof clientPrice !== "undefined"
+      ? +(Number(clientPrice) * baseServiceCount).toFixed(2)
+      : +(servicePriceTotal + printingTotal + taxTotal).toFixed(2);
 
-  // ✅ اللي هيتبعت للدفع (المودال)
+  // ✅ Payment sent to modal (same logic)
   const payTotal = isSubscription ? servicePriceTotal : totalDisplay;
-  const payPrintingFee = isSubscription ? 0 : (Number(effectivePrintingFee) || 0);
-  const payTax = isSubscription ? 0 : (Number(tax) || 0);
+  const payPrintingFee = isSubscription ? 0 : printingPerUnit;
+  const payTax = isSubscription ? 0 : taxPerUnit;
 
   // canPay
   const allDocsUploaded = !requireUpload || docKeys.every((k) => uploadedDocs[k]);
@@ -349,7 +342,7 @@ export default function ServiceProfileCard({
     const tService = servicePriceTotal;
     const tPrinting = isSubscription ? 0 : printingTotal;
     const tVat = isSubscription ? 0 : taxTotal;
-    const tTotal = isSubscription ? +tService.toFixed(2) : +(tService + tPrinting + tVat).toFixed(2);
+    const tTotal = isSubscription ? tService : +(tService + tPrinting + tVat).toFixed(2);
 
     return (
       <div
