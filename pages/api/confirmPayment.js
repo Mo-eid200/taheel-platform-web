@@ -5,12 +5,10 @@ import admin from "firebase-admin";
 
 /**
  * Confirm a Stripe PaymentIntent (idempotent) and sync with Firestore.
- * Handles wallet recharge & service payments.
  *
- * ✅ Subscriptions:
- * - Do NOT change requests structure/logic.
- * - Only write subscription info into NEW collection: companySubscriptions
- * - Keep requests flow intact (still creates/updates request doc normally).
+ * ✅ It MUST be safe alongside webhook:
+ * - writes stripePaymentsProcessed/{paymentIntentId}
+ * - webhook will skip if already processed
  */
 
 if (!admin.apps.length) {
@@ -57,11 +55,7 @@ function toDateSafe(v) {
   try {
     if (!v) return null;
     if (v instanceof Date) return v;
-    if (typeof v?.toDate === "function") return v.toDate(); // Firestore Timestamp
-    if (typeof v === "number") {
-      const d = new Date(v);
-      return Number.isNaN(d.getTime()) ? null : d;
-    }
+    if (typeof v?.toDate === "function") return v.toDate(); // Timestamp
     const d = new Date(v);
     return Number.isNaN(d.getTime()) ? null : d;
   } catch {
@@ -74,7 +68,7 @@ function addDays(date, days) {
   return d;
 }
 
-// نفس اللى في الويب هوك: نقرأ الخدمة من servicesByClientType
+// service reader
 async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFallback = "") {
   const clientTypesToTry = clientType ? [clientType] : ["company", "resident", "nonresident", "other"];
 
@@ -83,6 +77,7 @@ async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFa
       const docRef = db.collection("servicesByClientType").doc(String(ct));
       const snap = await docRef.get();
       if (!snap.exists) continue;
+
       const all = snap.data() || {};
 
       if (serviceId && Object.prototype.hasOwnProperty.call(all, serviceId)) {
@@ -127,12 +122,10 @@ export default async function handler(req, res) {
     const md = pi.metadata || {};
     let reqId = providedRequestId || md.requestId || md.orderNumber || null;
 
-    // ✅ normalize requestType + clientType hard
     const requestTypeMeta = normLower(
       md.requestType ||
         (md.serviceName && normLower(md.serviceName).includes("wallet") ? "wallet_recharge" : "service")
     );
-
     const clientTypeMeta = normLower(md.clientType || md.client_type || md.serviceClientType || "");
 
     const coinsGiven = safeNum(md.coinsGiven ?? md.cashbackCoins ?? md.coins ?? 0);
@@ -147,22 +140,20 @@ export default async function handler(req, res) {
     const assignedToMeta = safeStr(md.assignedTo || md.assigned_to || "");
     const assignedToNameMeta = safeStr(md.assignedToName || md.assigned_to_name || "");
 
-    // ✅ Subscription metadata
-    const subPlanKey = safeStr(md.planKey || "").trim();
-    const subPricingKey = safeStr(md.pricingKey || "").trim();
-    const subPaidMonths = safeNum(md.paidMonths || 0);
-    const subBonus = safeNum(md.bonus || 0);
+    // subscription flags
+    const planKey = safeStr(md.planKey || "").trim();
+    const planName = safeStr(md.planName || md.subscriptionName || md.planTitle || "").trim() || planKey;
+    const pricingKey = safeStr(md.pricingKey || "").trim();
 
-    // ✅ prefer totalSubscriptionDays
     const totalSubscriptionDays = safeNum(md.totalSubscriptionDays || md.totalSubDays || 0);
-    const subDays = safeNum(md.subscriptionDays || 0);
-    const daysToApply = totalSubscriptionDays > 0 ? totalSubscriptionDays : subDays > 0 ? subDays : 30;
+    const subscriptionDays = safeNum(md.subscriptionDays || 0);
+    const giftDays = safeNum(md.giftDays || 0);
+    const daysToApply = totalSubscriptionDays > 0 ? totalSubscriptionDays : Math.max(0, subscriptionDays + giftDays) || 30;
 
-    const subPlanName =
-      safeStr(md.planName || md.subscriptionName || md.planTitle || "").trim() || subPlanKey;
+    const paidMonths = safeNum(md.paidMonths || 0);
+    const bonus = safeNum(md.bonus || 0);
 
-    // ✅ isSubscription hard (planKey OR requestType)
-    const isSubscription = subPlanKey.length > 0 || requestTypeMeta === "subscription";
+    const isSubscription = requestTypeMeta === "subscription" || planKey.length > 0;
 
     // attachments JSON
     let attachmentsMeta = null;
@@ -186,11 +177,11 @@ export default async function handler(req, res) {
         ok: true,
         alreadyProcessed: true,
         paymentIntentId,
-        orderNumber: processedSnap.data().requestId || null,
+        orderNumber: processedSnap.data()?.requestId || null,
       });
     }
 
-    // 4) Get request (if exists)
+    // 4) Find request
     let requestRef = null;
     let requestSnap = null;
 
@@ -218,10 +209,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Missing customerId in metadata" });
     }
 
-    // ✅ IMPORTANT: in your system company doc id = customerId (COM-xxx)
-    const companyDocId = customerIdMeta;
-
-    const userRef = db.collection("users").doc(companyDocId);
+    const userRef = db.collection("users").doc(customerIdMeta);
     const userSnap = await userRef.get();
     if (!userSnap.exists) {
       await processedRef.set({
@@ -233,17 +221,14 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "User not found" });
     }
 
-    // ✅ stronger company detection (metadata + user doc fallback)
     const udataTop = userSnap.data() || {};
-    const userIsCompany =
-      normLower(udataTop.accountType || udataTop.type || "") === "company";
-    const isCompany = clientTypeMeta === "company" || userIsCompany;
+    const userIsCompany = normLower(udataTop.accountType || udataTop.type || "") === "company";
+    const isCompany = clientTypeMeta === "company" || customerIdMeta.startsWith("COM-") || userIsCompany;
 
-    // 6) Fetch service definition (for embedding in request)
     const serviceDoc = await fetchServiceFromByClientType(serviceId, clientTypeMeta, serviceNameFromMeta);
 
     // =========================
-    // 7) Transaction
+    // Transaction
     // =========================
     let finalRequestId = reqId || null;
 
@@ -254,13 +239,9 @@ export default async function handler(req, res) {
       const uDoc = await tx.get(userRef);
       if (!uDoc.exists) throw new Error("User disappeared during transaction");
 
-      let reqIdToUse = reqId;
-
-      // A) UPDATE EXISTING REQUEST
-      if (requestSnap && requestSnap.exists) {
-        reqIdToUse = String(requestSnap.id);
-        finalRequestId = reqIdToUse;
-
+      // A) request
+      if (requestRef && requestSnap && requestSnap.exists) {
+        finalRequestId = String(requestRef.id);
         const rdata = requestSnap.data() || {};
         const history = Array.isArray(rdata.statusHistory) ? rdata.statusHistory.slice() : [];
         history.push({ status: "paid", timestamp: nowISO(), updatedBy: "server-confirmPayment" });
@@ -273,6 +254,8 @@ export default async function handler(req, res) {
           statusHistory: history,
           paidAt: nowISO(),
           processingFee: typeof rdata.processingFee !== "undefined" ? rdata.processingFee : processingFeeMeta || 0,
+          assignedTo: rdata.assignedTo || assignedToMeta || "",
+          assignedToName: rdata.assignedToName || assignedToNameMeta || "",
         };
 
         if (rdata.attachments) updates.attachments = rdata.attachments;
@@ -316,17 +299,11 @@ export default async function handler(req, res) {
           if (serviceId) updates.serviceId = serviceId;
         }
 
-        updates.assignedTo = rdata.assignedTo || assignedToMeta || "";
-        updates.assignedToName = rdata.assignedToName || assignedToNameMeta || "";
-
-        // ✅ IMPORTANT: DO NOT write any subscription fields into requests
         tx.update(requestRef, updates);
       } else {
-        // B) CREATE NEW REQUEST
-        if (!reqIdToUse) {
-          reqIdToUse = `REQ-${Math.floor(100 + Math.random() * 900)}-${Math.floor(1000 + Math.random() * 9000)}`;
+        if (!finalRequestId) {
+          finalRequestId = `REQ-${Math.floor(100 + Math.random() * 900)}-${Math.floor(1000 + Math.random() * 9000)}`;
         }
-        finalRequestId = reqIdToUse;
 
         let serviceMap = null;
         if (serviceDoc) {
@@ -354,8 +331,10 @@ export default async function handler(req, res) {
           };
         }
 
-        const reqObj = {
-          requestId: reqIdToUse,
+        const newRef = db.collection("requests").doc(finalRequestId);
+
+        tx.set(newRef, {
+          requestId: finalRequestId,
           paymentIntentId,
           customerId: userRef.id,
 
@@ -374,7 +353,7 @@ export default async function handler(req, res) {
           lastUpdated: nowISO(),
           status: "paid",
           paidAt: nowISO(),
-          userEmail: uDoc.data().email || "",
+          userEmail: safeStr(uDoc.data()?.email || ""),
 
           statusHistory: [{ status: "paid", timestamp: nowISO(), updatedBy: "server-confirmPayment" }],
 
@@ -385,12 +364,12 @@ export default async function handler(req, res) {
           assignedTo: assignedToMeta || "",
           assignedToName: assignedToNameMeta || "",
           ...(serviceMap ? { service: serviceMap, requiredDocuments: serviceMap.requiredDocuments || [] } : {}),
-        };
+        });
 
-        tx.set(db.collection("requests").doc(reqIdToUse), reqObj);
+        requestRef = newRef;
       }
 
-      // C) UPDATE WALLET / COINS
+      // B) wallet/coins
       if (requestTypeMeta === "wallet_recharge") {
         const prevWallet = Number(uDoc.data().walletBalance ?? uDoc.data().wallet ?? 0);
         const newWallet = +(prevWallet + amountAED).toFixed(2);
@@ -406,59 +385,66 @@ export default async function handler(req, res) {
         }
       }
 
-      // ✅ D) SUBSCRIPTION — create companySubscriptions/{COM-...}
+      // C) subscription
       if (isSubscription && isCompany) {
-        const subRef = db.collection("companySubscriptions").doc(companyDocId);
+        const subRef = db.collection("companySubscriptions").doc(customerIdMeta);
         const subSnap = await tx.get(subRef);
 
         const now = new Date();
         let startDate = now;
+        let baseEnd = now;
 
         if (subSnap.exists) {
           const old = subSnap.data() || {};
-          const oldEnd = toDateSafe(old.endAt) || toDateSafe(old.expiresAt) || toDateSafe(old.endAtISO) || null;
+          const oldEnd = toDateSafe(old.endAt) || toDateSafe(old.expiresAt) || toDateSafe(old.endAtISO);
           const oldStatus = normLower(old.status || "");
 
           if (oldEnd && oldEnd.getTime() > now.getTime() && (oldStatus === "active" || oldStatus === "trial")) {
-            startDate = oldEnd;
+            baseEnd = oldEnd; // extend from old end
+            const oldStart = toDateSafe(old.startAt) || toDateSafe(old.startAtISO);
+            startDate = oldStart || toDateSafe(old.createdAt) || now;
           }
         }
 
-        const endDate = addDays(startDate, daysToApply);
-
+        const endDate = addDays(baseEnd, daysToApply);
         const startTs = admin.firestore.Timestamp.fromDate(startDate);
         const endTs = admin.firestore.Timestamp.fromDate(endDate);
 
-        const udata = uDoc.data() || {};
-        const companyPublicId = safeStr(udata.companyId || udata.customerId || udata.userId || companyDocId);
-        const companyEmail = safeStr(udata.email || md.userEmail || "");
+        const isExpiredNow = endDate.getTime() <= now.getTime();
+        const statusNow = isExpiredNow ? "expired" : "active";
 
-        const planName =
-          subPlanName || safeStr(serviceNameFromMeta) || (normLower(md.lang) === "en" ? "Subscription" : "اشتراك");
+        const udata = uDoc.data() || {};
+        const companyPublicId = safeStr(udata.companyId || udata.customerId || udata.userId || customerIdMeta);
+        const companyEmail = safeStr(udata.email || md.userEmail || "");
 
         tx.set(
           subRef,
           {
-            companyDocId,
+            companyDocId: customerIdMeta,
             companyId: companyPublicId,
             email: companyEmail,
 
-            isActive: true,
-            status: "active",
-
-            planKey: subPlanKey,
+            planKey,
             planName,
-            pricingKey: subPricingKey,
+            pricingKey,
 
             subscriptionDays: daysToApply,
-            paidMonths: subPaidMonths,
-            bonus: subBonus,
+            paidMonths,
+            bonus,
 
             startAt: startTs,
             endAt: endTs,
-
             startAtISO: startDate.toISOString(),
             endAtISO: endDate.toISOString(),
+
+            status: statusNow,
+            isActive: !isExpiredNow,
+
+            computed: {
+              isExpired: isExpiredNow,
+              isActiveNow: !isExpiredNow,
+              nowISO: now.toISOString(),
+            },
 
             lastRequestId: finalRequestId,
             lastPaymentIntentId: paymentIntentId,
@@ -469,23 +455,22 @@ export default async function handler(req, res) {
           { merge: true }
         );
 
-        // history subcollection
-        const histRef = subRef.collection("history").doc();
-        tx.set(histRef, {
-          companyDocId,
+        // history (idempotent by PI id)
+        tx.set(subRef.collection("history").doc(paymentIntentId), {
+          companyDocId: customerIdMeta,
           companyId: companyPublicId,
           email: companyEmail,
 
           requestId: finalRequestId,
           paymentIntentId,
 
-          planKey: subPlanKey,
+          planKey,
           planName,
-          pricingKey: subPricingKey,
+          pricingKey,
 
           subscriptionDays: daysToApply,
-          paidMonths: subPaidMonths,
-          bonus: subBonus,
+          paidMonths,
+          bonus,
 
           startAt: startTs,
           endAt: endTs,
@@ -495,9 +480,9 @@ export default async function handler(req, res) {
         });
       }
 
-      // E) TRANSACTION LOG
-      const txRef = db.collection("transactions").doc();
-      tx.set(txRef, {
+      // D) transactions log
+      const tRef = db.collection("transactions").doc();
+      tx.set(tRef, {
         userId: userRef.id,
         requestId: finalRequestId,
         amount: amountAED,
@@ -509,87 +494,54 @@ export default async function handler(req, res) {
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      // F) NOTIFICATION
+      // E) notification
       const notifRef = db.collection("notifications").doc();
+      const langIsEn = normLower(md.lang) === "en";
       tx.set(notifRef, {
         targetId: userRef.id,
-        title:
-          normLower(md.lang) === "en"
-            ? isSubscription
-              ? "Subscription Confirmed"
-              : "Payment Confirmed"
-            : isSubscription
-            ? "تم تفعيل الاشتراك"
-            : "تم تأكيد الدفع",
-        body:
-          normLower(md.lang) === "en"
-            ? isSubscription
-              ? `Your subscription is now active. Plan: ${subPlanKey || "N/A"} • Order: ${finalRequestId}`
-              : `Your payment of ${amountAED.toFixed(2)} AED was received. Order: ${finalRequestId}`
-            : isSubscription
-            ? `تم تفعيل اشتراكك بنجاح. الخطة: ${subPlanKey || "—"} • رقم الطلب: ${finalRequestId}`
-            : `تم استلام دفعتك بقيمة ${amountAED.toFixed(2)} د.إ الآن. رقم الطلب: ${finalRequestId}`,
+        title: langIsEn ? (isSubscription ? "Subscription Confirmed" : "Payment Confirmed") : (isSubscription ? "تم تفعيل الاشتراك" : "تم تأكيد الدفع"),
+        body: langIsEn
+          ? (isSubscription
+              ? `Your subscription is now active. Plan: ${planKey || "N/A"} • Order: ${finalRequestId}`
+              : `Your payment of ${amountAED.toFixed(2)} AED was received. Order: ${finalRequestId}`)
+          : (isSubscription
+              ? `تم تفعيل اشتراكك بنجاح. الخطة: ${planKey || "—"} • رقم الطلب: ${finalRequestId}`
+              : `تم استلام دفعتك بقيمة ${amountAED.toFixed(2)} د.إ الآن. رقم الطلب: ${finalRequestId}`),
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
         isRead: false,
         metadata: {
           orderId: finalRequestId,
           paymentIntentId,
-          ...(isSubscription
-            ? {
-                type: "subscription",
-                planKey: subPlanKey,
-                planName: subPlanName,
-                pricingKey: subPricingKey,
-                subscriptionDays: daysToApply,
-              }
-            : {}),
+          ...(isSubscription ? { type: "subscription", planKey, planName, pricingKey, subscriptionDays: daysToApply } : {}),
         },
       });
 
-      // G) MARK AS PROCESSED (WITH DEBUG)
-      tx.set(
-        processedRef,
-        {
-          paymentIntentId,
-          processedAt: admin.firestore.FieldValue.serverTimestamp(),
-          requestId: finalRequestId,
-          amount: amountAED,
-
-          // ✅ DEBUG (helps you know why sub didn't run)
-          debug: {
-            requestTypeMeta,
-            clientTypeMeta,
-            subPlanKey,
-            subPricingKey,
-            isSubscription,
-            isCompany,
-            userIsCompany,
-            companyDocId,
-            daysToApply,
-          },
+      // F) processed
+      tx.set(processedRef, {
+        paymentIntentId,
+        processedAt: admin.firestore.FieldValue.serverTimestamp(),
+        requestId: finalRequestId,
+        amount: amountAED,
+        debug: {
+          requestTypeMeta,
+          clientTypeMeta,
+          planKey,
+          pricingKey,
+          isSubscription,
+          isCompany,
+          userIsCompany,
+          daysToApply,
         },
-        { merge: true }
-      );
+      });
     });
 
     return res.status(200).json({
       ok: true,
       orderNumber: finalRequestId,
-      ...(isSubscription
-        ? {
-            subscription: {
-              planKey: safeStr(md.planKey || ""),
-              planName: safeStr(md.planName || md.subscriptionName || ""),
-              pricingKey: safeStr(md.pricingKey || ""),
-              subscriptionDays: safeNum(md.totalSubscriptionDays || md.subscriptionDays || 0) || 30,
-            },
-          }
-        : {}),
+      ...(isSubscription ? { subscription: { planKey, planName, pricingKey, subscriptionDays: daysToApply } } : {}),
     });
   } catch (err) {
-    if (err?.message === "ALREADY_PROCESSED") {
-      return res.status(200).json({ ok: true, alreadyProcessed: true });
-    }
+    if (err?.message === "ALREADY_PROCESSED") return res.status(200).json({ ok: true, alreadyProcessed: true });
     console.error("confirmPayment error:", err);
     return res.status(500).json({ error: err?.message || "internal_error" });
   }

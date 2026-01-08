@@ -1,13 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  collection,
-  doc,
-  getDocs,
-  serverTimestamp,
-  setDoc,
-} from "firebase/firestore";
+import { collection, doc, getDocs, serverTimestamp, setDoc } from "firebase/firestore";
 import { firestore } from "@/lib/firebase.client";
 import {
   Zap,
@@ -22,6 +16,7 @@ import {
   Check,
   BadgePercent,
   LayoutGrid,
+  Eye,
 } from "lucide-react";
 
 function cn(...a) {
@@ -39,7 +34,7 @@ const DUR_LABELS = {
 
 const isOfferDuration = (k) => k === "semiannual" || k === "yearly";
 
-/** ✅ Visual identity per plan (fits green admin theme) */
+/** ✅ Visual identity per plan (admin theme) */
 const BRAND = {
   starter: {
     icon: Zap,
@@ -96,6 +91,7 @@ const uiText = (lang) => ({
   saved: lang === "ar" ? "تم الحفظ ✅" : "Saved ✅",
   error: lang === "ar" ? "خطأ في الحفظ ❌" : "Save failed ❌",
   active: lang === "ar" ? "مفعلة" : "Active",
+  visible: lang === "ar" ? "ظاهرة" : "Visible",
   sortIndex: lang === "ar" ? "الترتيب" : "Sort",
   key: lang === "ar" ? "Key" : "Key",
   nameAr: lang === "ar" ? "اسم (عربي)" : "Name (AR)",
@@ -118,6 +114,9 @@ const uiText = (lang) => ({
   tag: lang === "ar" ? "Tag" : "Tag",
   best: lang === "ar" ? "Best" : "Best",
 
+  stripePriceId: lang === "ar" ? "Stripe Price ID" : "Stripe Price ID",
+  currency: lang === "ar" ? "Currency" : "Currency",
+
   helperTag: lang === "ar" ? "المسموح: most / offer فقط" : "Allowed: most / offer only",
   helperOffer:
     lang === "ar"
@@ -132,17 +131,13 @@ const uiText = (lang) => ({
   most: lang === "ar" ? "الأكثر اختيارًا" : "Most chosen",
   ok: lang === "ar" ? "تمام" : "OK",
   fix: lang === "ar" ? "يحتاج تعديل" : "Needs fix",
-
-  offerLine:
-    lang === "ar"
-      ? "صيغة العرض: تدفع X + مجاني Y"
-      : "Offer formula: Pay X + Free Y",
 });
 
 function normalizePlanDoc(id, data) {
   const d = data || {};
   const pricing = d.pricing || {};
   const normalizedPricing = {};
+
   for (const k of DURATION_ORDER) {
     const v = pricing[k] || {};
     normalizedPricing[k] = {
@@ -153,14 +148,23 @@ function normalizePlanDoc(id, data) {
       price: Number(v.price ?? 0),
       tag: String(v.tag || ""),
       best: Boolean(v.best),
+
+      // ✅ optional Stripe
+      stripePriceId: String(v.stripePriceId || ""),
+      currency: String(v.currency || "aed"),
     };
   }
 
   const perks = d.perks || { ar: [], en: [] };
+
   return {
     id,
     key: d.key || id,
+
+    // ✅ unified flags (used by offers page)
     isActive: Boolean(d.isActive ?? true),
+    isVisible: Boolean(d.isVisible ?? true),
+
     sortIndex: Number(d.sortIndex ?? 0),
     name: d.name || { ar: "", en: "" },
     fit: d.fit || { ar: "", en: "" },
@@ -168,6 +172,10 @@ function normalizePlanDoc(id, data) {
       ar: Array.isArray(perks.ar) ? perks.ar : [],
       en: Array.isArray(perks.en) ? perks.en : [],
     },
+
+    // ✅ optional brand (offers page can use it)
+    brand: d.brand && typeof d.brand === "object" ? d.brand : null,
+
     pricing: normalizedPricing,
   };
 }
@@ -184,11 +192,7 @@ function SafeToast({ toast, isAr }) {
         isAr && "flex-row-reverse"
       )}
     >
-      {toast.type === "ok" ? (
-        <CheckCircle2 className="w-4 h-4" />
-      ) : (
-        <AlertTriangle className="w-4 h-4" />
-      )}
+      {toast.type === "ok" ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
       {toast.msg}
     </div>
   );
@@ -201,17 +205,10 @@ function Toggle({ checked, onChange }) {
       onClick={() => onChange(!checked)}
       className={cn(
         "w-12 h-7 rounded-full border transition relative",
-        checked
-          ? "bg-emerald-500/30 border-emerald-400/25"
-          : "bg-white/8 border-white/10"
+        checked ? "bg-emerald-500/30 border-emerald-400/25" : "bg-white/8 border-white/10"
       )}
     >
-      <span
-        className={cn(
-          "absolute top-1 w-5 h-5 rounded-full transition",
-          checked ? "left-6 bg-emerald-300" : "left-1 bg-white/60"
-        )}
-      />
+      <span className={cn("absolute top-1 w-5 h-5 rounded-full transition", checked ? "left-6 bg-emerald-300" : "left-1 bg-white/60")} />
     </button>
   );
 }
@@ -338,10 +335,12 @@ export default function SubscriptionsSection({ lang = "ar" }) {
 
           let tag = sanitizeTag(v.tag);
 
-          if (!isOfferDuration(k)) {
-            tag = tag === "most" ? tag : "";
-          }
+          // ✅ enforce: offers only semiannual/yearly
           const safeBonus = isOfferDuration(k) ? bonus : 0;
+
+          // ✅ keep 'most' only on yearly, and 'offer' only on semiannual/yearly
+          if (!isOfferDuration(k) && tag === "offer") tag = "";
+          if (k !== "yearly" && tag === "most") tag = "";
 
           return [
             k,
@@ -353,6 +352,10 @@ export default function SubscriptionsSection({ lang = "ar" }) {
               price: Number(v.price ?? 0),
               tag,
               best: Boolean(v.best),
+
+              // ✅ optional stripe fields
+              stripePriceId: String(v.stripePriceId || ""),
+              currency: String(v.currency || "aed"),
             },
           ];
         })
@@ -360,7 +363,11 @@ export default function SubscriptionsSection({ lang = "ar" }) {
 
       const payload = {
         key: String(plan.key || plan.id),
+
+        // ✅ unified flags (offers page uses them)
         isActive: Boolean(plan.isActive),
+        isVisible: Boolean(plan.isVisible),
+
         sortIndex: Number(plan.sortIndex || 0),
         name: { ar: String(plan.name?.ar || ""), en: String(plan.name?.en || "") },
         fit: { ar: String(plan.fit?.ar || ""), en: String(plan.fit?.en || "") },
@@ -368,6 +375,10 @@ export default function SubscriptionsSection({ lang = "ar" }) {
           ar: Array.isArray(plan.perks?.ar) ? plan.perks.ar.filter(Boolean) : [],
           en: Array.isArray(plan.perks?.en) ? plan.perks.en.filter(Boolean) : [],
         },
+
+        // ✅ optional brand
+        ...(plan.brand ? { brand: plan.brand } : {}),
+
         pricing: pricingOut,
         updatedAt: serverTimestamp(),
       };
@@ -399,6 +410,7 @@ export default function SubscriptionsSection({ lang = "ar" }) {
   }, [plans, query, onlyActive]);
 
   const totalActive = useMemo(() => plans.filter((x) => x.isActive).length, [plans]);
+  const totalVisible = useMemo(() => plans.filter((x) => x.isVisible).length, [plans]);
 
   return (
     <section className="rounded-3xl border border-white/10 bg-gradient-to-b from-[#07120d] via-[#071610] to-[#040a07] p-4 sm:p-6 shadow-[0_25px_90px_-55px_rgba(16,185,129,0.35)]">
@@ -413,10 +425,17 @@ export default function SubscriptionsSection({ lang = "ar" }) {
               <LayoutGrid className="w-4 h-4" />
               {isAr ? `إجمالي: ${plans.length}` : `Total: ${plans.length}`}
             </span>
+
             <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[12px] font-extrabold border border-emerald-400/15 bg-emerald-500/10 text-emerald-200">
               <Check className="w-4 h-4" />
               {isAr ? `مفعّل: ${totalActive}` : `Active: ${totalActive}`}
             </span>
+
+            <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[12px] font-extrabold border border-sky-400/15 bg-sky-500/10 text-sky-200">
+              <Eye className="w-4 h-4" />
+              {isAr ? `ظاهر: ${totalVisible}` : `Visible: ${totalVisible}`}
+            </span>
+
             <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[12px] font-extrabold border border-amber-400/15 bg-amber-500/10 text-amber-200">
               <BadgePercent className="w-4 h-4" />
               {t.helperOffer}
@@ -448,9 +467,7 @@ export default function SubscriptionsSection({ lang = "ar" }) {
           </div>
         </div>
 
-        <div className="hidden sm:block text-xs text-white/45 font-bold">
-          {t.helperTag}
-        </div>
+        <div className="hidden sm:block text-xs text-white/45 font-bold">{t.helperTag}</div>
       </div>
 
       {/* Body */}
@@ -472,11 +489,10 @@ export default function SubscriptionsSection({ lang = "ar" }) {
 
               const yearly = p.pricing?.yearly || {};
               const yearlyTag = String(yearly.tag || "").toLowerCase();
-              const badge =
-                yearly.best || yearlyTag === "most" ? (isAr ? "الأكثر اختيارًا" : "Most chosen") : null;
+              const badge = yearly.best || yearlyTag === "most" ? (isAr ? "الأكثر اختيارًا" : "Most chosen") : null;
 
               return (
-                <div key={p.id} className={cn(softCard, "ring-1", brand.ring, open ? brand.glow : "")}>
+                <div key={p.id} className={cn("rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl overflow-hidden ring-1", brand.ring, open ? brand.glow : "")}>
                   <div className={cn("h-[5px] bg-gradient-to-r", brand.bar)} />
 
                   {/* header */}
@@ -520,12 +536,22 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                           >
                             {isOk ? t.ok : t.fix}
                           </span>
+
+                          {/* ✅ Visible badge */}
+                          <span
+                            className={cn(
+                              "px-2.5 py-1 rounded-full text-[11px] font-extrabold border",
+                              p.isVisible
+                                ? "border-sky-400/20 bg-sky-500/10 text-sky-200"
+                                : "border-white/10 bg-white/5 text-white/60"
+                            )}
+                          >
+                            {t.visible}: {p.isVisible ? (isAr ? "نعم" : "Yes") : (isAr ? "لا" : "No")}
+                          </span>
                         </div>
 
                         {p.fit?.[isAr ? "ar" : "en"] ? (
-                          <div className="text-sm text-white/60 mt-1 line-clamp-2">
-                            {p.fit?.[isAr ? "ar" : "en"]}
-                          </div>
+                          <div className="text-sm text-white/60 mt-1 line-clamp-2">{p.fit?.[isAr ? "ar" : "en"]}</div>
                         ) : null}
 
                         <div className={cn("mt-2 flex items-center gap-2 flex-wrap", isAr && "flex-row-reverse")}>
@@ -540,6 +566,13 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                     </div>
 
                     <div className={cn("flex items-center gap-3 shrink-0", isAr && "flex-row-reverse")}>
+                      {/* ✅ Visible toggle */}
+                      <div className={cn("flex items-center gap-2", isAr && "flex-row-reverse")}>
+                        <span className="text-white/65 text-sm font-extrabold">{t.visible}</span>
+                        <Toggle checked={!!p.isVisible} onChange={(v) => setField(p.id, { isVisible: v })} />
+                      </div>
+
+                      {/* Active toggle */}
                       <div className={cn("flex items-center gap-2", isAr && "flex-row-reverse")}>
                         <span className="text-white/65 text-sm font-extrabold">{t.active}</span>
                         <Toggle checked={!!p.isActive} onChange={(v) => setField(p.id, { isActive: v })} />
@@ -592,7 +625,7 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                                   value={p.sortIndex}
                                   onChange={(e) => setField(p.id, { sortIndex: Number(e.target.value || 0) })}
                                   type="number"
-                                  className={cn(inputBaseDark, brand.focus)}
+                                  className={cn("w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-extrabold text-white/90 shadow-sm outline-none focus:ring-4 transition placeholder:text-white/35", brand.focus)}
                                 />
                               </div>
 
@@ -601,7 +634,7 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                                 <input
                                   value={p.key}
                                   onChange={(e) => setField(p.id, { key: e.target.value })}
-                                  className={cn(inputBaseDark, brand.focus)}
+                                  className={cn("w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-extrabold text-white/90 shadow-sm outline-none focus:ring-4 transition placeholder:text-white/35", brand.focus)}
                                 />
                               </div>
 
@@ -610,7 +643,7 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                                 <input
                                   value={p.name?.ar || ""}
                                   onChange={(e) => setNested(p.id, ["name", "ar"], e.target.value)}
-                                  className={cn(inputBaseDark, brand.focus)}
+                                  className={cn("w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-extrabold text-white/90 shadow-sm outline-none focus:ring-4 transition placeholder:text-white/35", brand.focus)}
                                 />
                               </div>
 
@@ -619,7 +652,7 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                                 <input
                                   value={p.name?.en || ""}
                                   onChange={(e) => setNested(p.id, ["name", "en"], e.target.value)}
-                                  className={cn(inputBaseDark, brand.focus)}
+                                  className={cn("w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-extrabold text-white/90 shadow-sm outline-none focus:ring-4 transition placeholder:text-white/35", brand.focus)}
                                 />
                               </div>
 
@@ -628,7 +661,7 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                                 <input
                                   value={p.fit?.ar || ""}
                                   onChange={(e) => setNested(p.id, ["fit", "ar"], e.target.value)}
-                                  className={cn(inputBaseDark, brand.focus)}
+                                  className={cn("w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-extrabold text-white/90 shadow-sm outline-none focus:ring-4 transition placeholder:text-white/35", brand.focus)}
                                 />
                               </div>
 
@@ -637,7 +670,7 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                                 <input
                                   value={p.fit?.en || ""}
                                   onChange={(e) => setNested(p.id, ["fit", "en"], e.target.value)}
-                                  className={cn(inputBaseDark, brand.focus)}
+                                  className={cn("w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-extrabold text-white/90 shadow-sm outline-none focus:ring-4 transition placeholder:text-white/35", brand.focus)}
                                 />
                               </div>
                             </div>
@@ -647,6 +680,7 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                         {/* PERKS */}
                         {tab === "perks" ? (
                           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                            {/* AR */}
                             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                               <div className={cn("flex items-center justify-between", isAr && "flex-row-reverse")}>
                                 <div className="text-sm font-extrabold text-white">{t.perksAr}</div>
@@ -687,6 +721,7 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                               </div>
                             </div>
 
+                            {/* EN */}
                             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                               <div className={cn("flex items-center justify-between", isAr && "flex-row-reverse")}>
                                 <div className="text-sm font-extrabold text-white">{t.perksEn}</div>
@@ -729,7 +764,7 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                           </div>
                         ) : null}
 
-                        {/* PRICING ✅ (STACKED FIELDS) */}
+                        {/* PRICING */}
                         {tab === "pricing" ? (
                           <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                             <div className={cn("flex items-center justify-between gap-3 mb-2", isAr && "flex-row-reverse")}>
@@ -778,18 +813,14 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                                       </div>
                                     </div>
 
-                                    {/* ✅ stacked layout */}
                                     <div className="mt-3 space-y-3">
-                                      {/* monthsShown + paidMonths */}
                                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                         <div>
                                           <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.monthsShown}</div>
                                           <input
                                             type="number"
                                             value={row.monthsShown ?? 1}
-                                            onChange={(e) =>
-                                              setNested(p.id, ["pricing", k, "monthsShown"], Number(e.target.value || 1))
-                                            }
+                                            onChange={(e) => setNested(p.id, ["pricing", k, "monthsShown"], Number(e.target.value || 1))}
                                             className={cn(inputBaseDark, brand.focus)}
                                           />
                                         </div>
@@ -799,23 +830,18 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                                           <input
                                             type="number"
                                             value={row.paidMonths ?? row.monthsShown ?? 1}
-                                            onChange={(e) =>
-                                              setNested(p.id, ["pricing", k, "paidMonths"], Number(e.target.value || 1))
-                                            }
+                                            onChange={(e) => setNested(p.id, ["pricing", k, "paidMonths"], Number(e.target.value || 1))}
                                             className={cn(inputBaseDark, brand.focus)}
                                           />
                                         </div>
                                       </div>
 
-                                      {/* bonus */}
                                       <div>
                                         <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.bonus}</div>
                                         <input
                                           type="number"
                                           value={row.bonus ?? 0}
-                                          onChange={(e) =>
-                                            setNested(p.id, ["pricing", k, "bonus"], Number(e.target.value || 0))
-                                          }
+                                          onChange={(e) => setNested(p.id, ["pricing", k, "bonus"], Number(e.target.value || 0))}
                                           className={cn(inputBaseDark, brand.focus, bonusBad ? "border-amber-400/30" : "")}
                                         />
                                         {bonusBad ? (
@@ -825,28 +851,45 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                                         ) : null}
                                       </div>
 
-                                      {/* price (full width ✅) */}
                                       <div>
                                         <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.price}</div>
                                         <input
                                           type="number"
                                           value={row.price ?? 0}
-                                          onChange={(e) =>
-                                            setNested(p.id, ["pricing", k, "price"], Number(e.target.value || 0))
-                                          }
+                                          onChange={(e) => setNested(p.id, ["pricing", k, "price"], Number(e.target.value || 0))}
                                           className={cn(inputBaseDark, brand.focus, "text-lg tracking-wide")}
                                         />
                                       </div>
 
-                                      {/* tag + best */}
+                                      {/* ✅ optional Stripe mapping */}
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        <div>
+                                          <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.stripePriceId}</div>
+                                          <input
+                                            value={row.stripePriceId || ""}
+                                            onChange={(e) => setNested(p.id, ["pricing", k, "stripePriceId"], e.target.value.trim())}
+                                            className={cn(inputBaseDark, brand.focus)}
+                                            placeholder="price_..."
+                                          />
+                                        </div>
+
+                                        <div>
+                                          <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.currency}</div>
+                                          <input
+                                            value={row.currency || "aed"}
+                                            onChange={(e) => setNested(p.id, ["pricing", k, "currency"], e.target.value.trim().toLowerCase())}
+                                            className={cn(inputBaseDark, brand.focus)}
+                                            placeholder="aed"
+                                          />
+                                        </div>
+                                      </div>
+
                                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                         <div>
                                           <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.tag}</div>
                                           <input
                                             value={row.tag || ""}
-                                            onChange={(e) =>
-                                              setNested(p.id, ["pricing", k, "tag"], e.target.value.trim().toLowerCase())
-                                            }
+                                            onChange={(e) => setNested(p.id, ["pricing", k, "tag"], e.target.value.trim().toLowerCase())}
                                             className={cn(inputBaseDark, brand.focus, tagBad ? "border-amber-400/30" : "")}
                                             placeholder="most / offer"
                                           />
@@ -878,7 +921,6 @@ export default function SubscriptionsSection({ lang = "ar" }) {
                         ) : null}
                       </div>
 
-                      {/* bottom save */}
                       <div className={cn("mt-4 flex items-center justify-end", isAr && "justify-start")}>
                         <button
                           onClick={() => savePlan(p)}
@@ -903,3 +945,4 @@ export default function SubscriptionsSection({ lang = "ar" }) {
     </section>
   );
 }
+

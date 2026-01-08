@@ -1,10 +1,9 @@
-// pages/api/stripe-webhook.js
 "use strict";
 
 import Stripe from "stripe";
 import admin from "firebase-admin";
 
-// -------- Next.js config عشان ناخد raw body من Stripe --------
+// -------- Next.js config (raw body) --------
 export const config = { api: { bodyParser: false } };
 
 // -------- Firebase Admin init (idempotent) --------
@@ -31,20 +30,40 @@ if (!admin.apps.length) {
 }
 
 const db = admin.firestore();
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2022-11-15" });
 
-// -------- Stripe init --------
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: "2022-11-15",
-});
-
-// -------- helpers --------
+// helpers
 function safeNum(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 }
+function safeStr(v) {
+  if (v == null) return "";
+  return String(v);
+}
+function normLower(v) {
+  return safeStr(v).trim().toLowerCase();
+}
 function nowISO() {
   return new Date().toISOString();
 }
+function toDateSafe(v) {
+  try {
+    if (!v) return null;
+    if (v instanceof Date) return v;
+    if (typeof v?.toDate === "function") return v.toDate();
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? null : d;
+  } catch {
+    return null;
+  }
+}
+function addDays(date, days) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + Number(days || 0));
+  return d;
+}
+
 async function getRawBody(req) {
   const chunks = [];
   for await (const chunk of req) {
@@ -53,7 +72,7 @@ async function getRawBody(req) {
   return Buffer.concat(chunks);
 }
 
-// نجيب تعريف الخدمة من servicesByClientType (عشان embed service details جوه الطلب)
+// service reader
 async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFallback = "") {
   const clientTypesToTry = clientType ? [clientType] : ["company", "resident", "nonresident", "other"];
 
@@ -62,6 +81,7 @@ async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFa
       const docRef = db.collection("servicesByClientType").doc(String(ct));
       const snap = await docRef.get();
       if (!snap.exists) continue;
+
       const all = snap.data() || {};
 
       if (serviceId && Object.prototype.hasOwnProperty.call(all, serviceId)) {
@@ -87,22 +107,15 @@ async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFa
   return null;
 }
 
-// -------- push notification sender (Expo Push API) --------
+// Expo push
 async function sendExpoPushToUser(userRef, title, body, data = {}) {
   try {
     const userSnap = await userRef.get();
-    if (!userSnap.exists) {
-      console.warn("sendExpoPushToUser: user not found");
-      return;
-    }
+    if (!userSnap.exists) return;
 
     const userData = userSnap.data() || {};
     const expoPushToken = userData.expoPushToken;
-
-    if (!expoPushToken) {
-      console.warn("No expoPushToken for user:", userRef.id);
-      return;
-    }
+    if (!expoPushToken) return;
 
     const resp = await fetch("https://exp.host/--/api/v2/push/send", {
       method: "POST",
@@ -111,13 +124,7 @@ async function sendExpoPushToUser(userRef, title, body, data = {}) {
         "Accept-Encoding": "gzip, deflate",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        to: expoPushToken,
-        sound: "default",
-        title,
-        body,
-        data,
-      }),
+      body: JSON.stringify({ to: expoPushToken, sound: "default", title, body, data }),
     });
 
     const json = await resp.json();
@@ -127,24 +134,14 @@ async function sendExpoPushToUser(userRef, title, body, data = {}) {
   }
 }
 
-const PLAN_NAMES = {
-  enterprise: "Enterprise",
-  growth: "Growth",
-  scale: "Scale",
-  starter: "Starter",
-};
-
 // -------- MAIN HANDLER --------
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
 
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (!webhookSecret) {
-    console.error("Missing STRIPE_WEBHOOK_SECRET");
-    return res.status(500).send("Server misconfigured");
-  }
+  if (!webhookSecret) return res.status(500).send("Server misconfigured (missing STRIPE_WEBHOOK_SECRET)");
 
-  // 1) verify Stripe signature
+  // 1) verify signature
   let event;
   try {
     const buf = await getRawBody(req);
@@ -156,25 +153,20 @@ export default async function handler(req, res) {
   }
 
   // 2) only payment_intent.succeeded
-  if (event.type !== "payment_intent.succeeded") {
-    return res.json({ received: true });
-  }
+  if (event.type !== "payment_intent.succeeded") return res.json({ received: true });
 
   try {
-    // =============================
-    //        Extract data
-    // =============================
     const pi = event.data.object;
     const paymentIntentId = pi.id;
     const md = pi.metadata || {};
 
-    const requestType =
-      md.requestType ||
-      (md.serviceName && String(md.serviceName).toLowerCase().includes("wallet")
-        ? "wallet_recharge"
-        : "service");
+    const reqIdFromMeta = md.requestId || md.orderNumber || null;
 
-    let reqId = md.requestId || md.orderNumber || null;
+    const requestTypeMeta = normLower(
+      md.requestType ||
+        (md.serviceName && normLower(md.serviceName).includes("wallet") ? "wallet_recharge" : "service")
+    );
+    const clientTypeMeta = normLower(md.clientType || md.client_type || md.serviceClientType || "");
 
     const coinsGiven = safeNum(md.coinsGiven ?? md.cashbackCoins ?? md.coins ?? 0);
     const coinsUsed = safeNum(md.coinsUsed ?? 0);
@@ -182,13 +174,28 @@ export default async function handler(req, res) {
     const printingFeeFromMeta = safeNum(md.printingFee ?? 0);
     const processingFeeMeta = safeNum(md.processingFee ?? md.processing_fee ?? md.processing_fee_value ?? 0);
 
-    const serviceId = md.serviceId || "";
-    const serviceNameFromMeta = md.serviceName || "";
-    const clientTypeMeta = md.clientType || md.client_type || md.serviceClientType || "";
+    const serviceId = safeStr(md.serviceId || "");
+    const serviceNameFromMeta = safeStr(md.serviceName || "");
 
-    const assignedToMeta = md.assignedTo || md.assigned_to || "";
-    const assignedToNameMeta = md.assignedToName || md.assigned_to_name || "";
+    const assignedToMeta = safeStr(md.assignedTo || md.assigned_to || "");
+    const assignedToNameMeta = safeStr(md.assignedToName || md.assigned_to_name || "");
 
+    // subscription
+    const planKey = safeStr(md.planKey || "").trim();
+    const planName = safeStr(md.planName || md.subscriptionName || md.planTitle || "").trim() || planKey;
+    const pricingKey = safeStr(md.pricingKey || "").trim();
+
+    const totalSubscriptionDays = safeNum(md.totalSubscriptionDays || md.totalSubDays || 0);
+    const subscriptionDays = safeNum(md.subscriptionDays || 0);
+    const giftDays = safeNum(md.giftDays || 0);
+    const daysToApply = totalSubscriptionDays > 0 ? totalSubscriptionDays : Math.max(0, subscriptionDays + giftDays) || 30;
+
+    const paidMonths = safeNum(md.paidMonths || 0);
+    const bonus = safeNum(md.bonus || 0);
+
+    const isSubscription = requestTypeMeta === "subscription" || planKey.length > 0;
+
+    // attachments
     let attachmentsMeta = {};
     if (md.attachments) {
       try {
@@ -198,19 +205,19 @@ export default async function handler(req, res) {
       }
     }
 
+    // amount
     const amountSmallest = pi.amount_received ?? pi.amount ?? 0;
     const amountAED = Number((amountSmallest / 100).toFixed(2));
 
     const processedRef = db.collection("stripePaymentsProcessed").doc(paymentIntentId);
 
-    // =============================
-    //   Find requestRef (outside tx only for locating)
-    // =============================
+    // locate requestRef
     let requestRef = null;
+    let reqId = reqIdFromMeta;
+
     if (reqId) {
       requestRef = db.collection("requests").doc(String(reqId));
     } else {
-      // fallback: find by paymentIntentId
       const q = await db.collection("requests").where("paymentIntentId", "==", paymentIntentId).limit(1).get();
       if (!q.empty) {
         requestRef = q.docs[0].ref;
@@ -218,12 +225,9 @@ export default async function handler(req, res) {
       }
     }
 
-    // =============================
-    //   Locate user (must exist)
-    // =============================
-    const customerIdMeta = md.customerId || md.userId || null;
+    // locate user
+    const customerIdMeta = safeStr(md.customerId || md.userId || "").trim();
     if (!customerIdMeta) {
-      console.warn("❗ Missing customerId in Stripe metadata for PI:", paymentIntentId);
       await processedRef.set({
         paymentIntentId,
         processedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -233,10 +237,9 @@ export default async function handler(req, res) {
       return res.json({ received: true });
     }
 
-    const userRef = db.collection("users").doc(String(customerIdMeta));
+    const userRef = db.collection("users").doc(customerIdMeta);
     const userSnap = await userRef.get();
     if (!userSnap.exists) {
-      console.warn("❗ user not found for PI:", paymentIntentId, "customerId:", customerIdMeta);
       await processedRef.set({
         paymentIntentId,
         processedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -246,64 +249,44 @@ export default async function handler(req, res) {
       return res.json({ received: true });
     }
 
-    // service doc (read outside tx ok)
+    // service doc (outside tx ok)
     const serviceDoc = await fetchServiceFromByClientType(serviceId, clientTypeMeta, serviceNameFromMeta);
 
     // push vars
-    const langIsEn = md.lang === "en";
+    const langIsEn = normLower(md.lang) === "en";
     let finalRequestIdAfterTx = null;
     let notifyTitleAfterTx = "";
     let notifyBodyAfterTx = "";
     let notifyDataAfterTx = {};
 
     // =============================
-    //   Firestore Transaction (READS THEN WRITES)
+    // Transaction
     // =============================
     await db.runTransaction(async (tx) => {
-      // ---------- PRE FLAGS ----------
-      const planKey = String(md.planKey || "").trim();
-      const pricingKey = String(md.pricingKey || "").trim();
-      const planName =
-            PLAN_NAMES[String(planKey).toLowerCase()] || planKey || "Subscription";
-
-      const clientTypeNorm = String(clientTypeMeta || "").trim().toLowerCase();
-      const requestTypeNorm = String(requestType || "").trim().toLowerCase();
-
-      const isSubscription = requestTypeNorm === "subscription" || planKey.length > 0;
-      const isCompany =
-      clientTypeNorm === "company" ||
-      clientTypeNorm.includes("company") ||
-      String(customerIdMeta || "").startsWith("COM-") ||
-      String(uDoc.data()?.accountType || "").toLowerCase() === "company";
-
-
-      const totalSubscriptionDays = safeNum(md.totalSubscriptionDays || md.totalSubDays || 0);
-      const subscriptionDays = safeNum(md.subscriptionDays || 0);
-      const giftDays = safeNum(md.giftDays || 0);
-      const daysToApply =
-        totalSubscriptionDays > 0
-          ? totalSubscriptionDays
-          : Math.max(0, subscriptionDays + giftDays) || 30;
-
-      const companyDocId = String(customerIdMeta);
-      const subRef = db.collection("companySubscriptions").doc(companyDocId);
-
-      // ---------- ALL READS FIRST ----------
+      // all reads first
       const procCheck = await tx.get(processedRef);
       if (procCheck.exists) throw new Error("ALREADY_PROCESSED");
 
       const uDoc = await tx.get(userRef);
       if (!uDoc.exists) throw new Error("User disappeared during transaction");
 
+      const udata = uDoc.data() || {};
+      const userIsCompany = normLower(udata.accountType || udata.type || "") === "company";
+      const isCompany =
+        clientTypeMeta === "company" ||
+        customerIdMeta.startsWith("COM-") ||
+        userIsCompany;
+
       const rDoc = requestRef ? await tx.get(requestRef) : null;
 
+      const subRef = db.collection("companySubscriptions").doc(customerIdMeta);
       const subSnap = isSubscription && isCompany ? await tx.get(subRef) : null;
 
-      // ---------- NOW WRITES ----------
+      // writes
       let finalRequestId = reqId || null;
 
       // A) request
-      if (rDoc && rDoc.exists) {
+      if (requestRef && rDoc && rDoc.exists) {
         finalRequestId = String(rDoc.id);
         const rdata = rDoc.data() || {};
 
@@ -318,7 +301,6 @@ export default async function handler(req, res) {
           statusHistory: history,
           paidAt: nowISO(),
           processingFee: typeof rdata.processingFee !== "undefined" ? rdata.processingFee : processingFeeMeta || 0,
-
           assignedTo: rdata.assignedTo || assignedToMeta || "",
           assignedToName: rdata.assignedToName || assignedToNameMeta || "",
         };
@@ -369,14 +351,14 @@ export default async function handler(req, res) {
 
         const newReqRef = db.collection("requests").doc(finalRequestId);
 
-        const reqObj = {
+        tx.set(newReqRef, {
           requestId: finalRequestId,
           paymentIntentId,
           customerId: userRef.id,
 
           serviceId: serviceId || "",
           serviceName: serviceNameFromMeta || "",
-          requestType,
+          requestType: requestTypeMeta,
 
           paidAmount: amountAED,
           printingFee: printingFeeFromMeta ?? 0,
@@ -389,7 +371,7 @@ export default async function handler(req, res) {
           lastUpdated: nowISO(),
           status: "paid",
           paidAt: nowISO(),
-          userEmail: uDoc.data().email || "",
+          userEmail: safeStr(udata.email || ""),
 
           statusHistory: [{ status: "paid", timestamp: nowISO(), updatedBy: "stripe-webhook" }],
 
@@ -399,15 +381,14 @@ export default async function handler(req, res) {
 
           assignedTo: assignedToMeta || "",
           assignedToName: assignedToNameMeta || "",
-        };
+        });
 
-        tx.set(newReqRef, reqObj);
         requestRef = newReqRef;
       }
 
       // B) wallet/coins
-      if (requestType === "wallet_recharge") {
-        const prevWallet = Number(uDoc.data().walletBalance ?? uDoc.data().wallet ?? 0);
+      if (requestTypeMeta === "wallet_recharge") {
+        const prevWallet = Number(udata.walletBalance ?? udata.wallet ?? 0);
         const newWallet = +(prevWallet + amountAED).toFixed(2);
 
         tx.update(userRef, {
@@ -437,10 +418,14 @@ export default async function handler(req, res) {
 
       // D) notification doc
       const notifRef = db.collection("notifications").doc();
-      const notifTitle = langIsEn ? "Payment Confirmed" : "تم تأكيد الدفع";
+      const notifTitle = langIsEn ? (isSubscription ? "Subscription Confirmed" : "Payment Confirmed") : (isSubscription ? "تم تفعيل الاشتراك" : "تم تأكيد الدفع");
       const notifBody = langIsEn
-        ? `Your payment of ${amountAED.toFixed(2)} AED was received. Order: ${finalRequestId}`
-        : `تم استلام دفعتك بقيمة ${amountAED.toFixed(2)} د.إ الآن. رقم الطلب: ${finalRequestId}`;
+        ? (isSubscription
+            ? `Your subscription is now active. Plan: ${planKey || "N/A"} • Order: ${finalRequestId}`
+            : `Your payment of ${amountAED.toFixed(2)} AED was received. Order: ${finalRequestId}`)
+        : (isSubscription
+            ? `تم تفعيل اشتراكك بنجاح. الخطة: ${planKey || "—"} • رقم الطلب: ${finalRequestId}`
+            : `تم استلام دفعتك بقيمة ${amountAED.toFixed(2)} د.إ الآن. رقم الطلب: ${finalRequestId}`);
 
       tx.set(notifRef, {
         targetId: userRef.id,
@@ -448,141 +433,125 @@ export default async function handler(req, res) {
         body: notifBody,
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
         isRead: false,
-        metadata: { orderId: finalRequestId, paymentIntentId },
+        metadata: { orderId: finalRequestId, paymentIntentId, ...(isSubscription ? { type: "subscription", planKey, planName, pricingKey, subscriptionDays: daysToApply } : {}) },
       });
 
-// D2) subscription (✅ activate now + extend endAt + computed fields)
-if (isSubscription && isCompany) {
-  const now = new Date();
+      // D2) subscription
+      if (isSubscription && isCompany) {
+        const now = new Date();
+        let startDate = now;
+        let baseEnd = now;
 
-  // --- decide start/baseEnd ---
-  let startDate = now;
-  let baseEnd = now;
+        if (subSnap && subSnap.exists) {
+          const old = subSnap.data() || {};
+          const oldEnd = toDateSafe(old.endAt) || toDateSafe(old.expiresAt) || toDateSafe(old.endAtISO);
+          const oldStatus = normLower(old.status || "");
 
-  if (subSnap && subSnap.exists) {
-    const old = subSnap.data() || {};
-    const oldEndRaw = old.endAt || old.expiresAt || old.endAtISO || null;
+          if (oldEnd && oldEnd.getTime() > now.getTime() && (oldStatus === "active" || oldStatus === "trial")) {
+            baseEnd = oldEnd;
+            const oldStart = toDateSafe(old.startAt) || toDateSafe(old.startAtISO);
+            startDate = oldStart || toDateSafe(old.createdAt) || now;
+          }
+        }
 
-    let oldEnd = null;
-    if (oldEndRaw && typeof oldEndRaw?.toDate === "function") oldEnd = oldEndRaw.toDate();
-    else if (oldEndRaw) {
-      const d = new Date(oldEndRaw);
-      oldEnd = isNaN(d.getTime()) ? null : d;
-    }
+        const endDate = addDays(baseEnd, daysToApply);
+        const startTs = admin.firestore.Timestamp.fromDate(startDate);
+        const endTs = admin.firestore.Timestamp.fromDate(endDate);
 
-    const oldStatus = String(old.status || "").toLowerCase();
+        const isExpiredNow = endDate.getTime() <= now.getTime();
+        const statusNow = isExpiredNow ? "expired" : "active";
 
-    // لو شغال ولسه ماانتهيش: نمد على النهاية القديمة ونثبت بداية الاشتراك القديمة إن وُجدت
-    if (oldEnd && oldEnd.getTime() > now.getTime() && (oldStatus === "active" || oldStatus === "trial")) {
-      const oldStartRaw = old.startAt || old.startAtISO || null;
-      if (oldStartRaw && typeof oldStartRaw?.toDate === "function") startDate = oldStartRaw.toDate();
-      else if (oldStartRaw) {
-        const d = new Date(oldStartRaw);
-        startDate = isNaN(d.getTime()) ? now : d;
+        const companyPublicId = safeStr(udata.companyId || udata.customerId || udata.userId || customerIdMeta);
+        const companyEmail = safeStr(udata.email || md.userEmail || "");
+
+        tx.set(
+          subRef,
+          {
+            companyDocId: customerIdMeta,
+            companyId: companyPublicId,
+            email: companyEmail,
+
+            planKey,
+            planName,
+            pricingKey,
+
+            subscriptionDays: daysToApply,
+            paidMonths,
+            bonus,
+
+            startAt: startTs,
+            endAt: endTs,
+            startAtISO: startDate.toISOString(),
+            endAtISO: endDate.toISOString(),
+
+            status: statusNow,
+            isActive: !isExpiredNow,
+
+            computed: {
+              isExpired: isExpiredNow,
+              isActiveNow: !isExpiredNow,
+              nowISO: now.toISOString(),
+            },
+
+            lastRequestId: finalRequestId,
+            lastPaymentIntentId: paymentIntentId,
+
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            ...(subSnap && subSnap.exists ? {} : { createdAt: admin.firestore.FieldValue.serverTimestamp() }),
+          },
+          { merge: true }
+        );
+
+        tx.set(subRef.collection("history").doc(paymentIntentId), {
+          companyDocId: customerIdMeta,
+          companyId: companyPublicId,
+          email: companyEmail,
+
+          requestId: finalRequestId,
+          paymentIntentId,
+
+          planKey,
+          planName,
+          pricingKey,
+
+          subscriptionDays: daysToApply,
+          paidMonths,
+          bonus,
+
+          startAt: startTs,
+          endAt: endTs,
+
+          status: "active",
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
       }
-      baseEnd = oldEnd;
-    } else {
-      // مفيش اشتراك شغال: يبدأ الآن
-      startDate = now;
-      baseEnd = now;
-    }
-  }
 
-  // --- compute endDate ---
-  const endDate = new Date(baseEnd);
-  endDate.setDate(endDate.getDate() + daysToApply);
-
-  const startTs = admin.firestore.Timestamp.fromDate(startDate);
-  const endTs = admin.firestore.Timestamp.fromDate(endDate);
-
-  // --- compute "active now" flags ---
-  const isExpiredNow = endDate.getTime() <= now.getTime();
-  const statusNow = isExpiredNow ? "expired" : "active";
-
-  const udata = uDoc.data() || {};
-  const companyPublicId = String(udata.companyId || udata.customerId || udata.userId || companyDocId);
-  const companyEmail = String(udata.email || md.userEmail || "");
-
-  // --- write subscription doc ---
-  tx.set(
-    subRef,
-    {
-      companyDocId,
-      companyId: companyPublicId,
-      email: companyEmail,
-
-      planKey,
-      planName,
-      pricingKey,
-
-      subscriptionDays: daysToApply,
-
-      startAt: startTs,
-      endAt: endTs,
-      startAtISO: startDate.toISOString(),
-      endAtISO: endDate.toISOString(),
-
-      // ✅ الحالة الأساسية
-      status: statusNow,              // active / expired
-      isActive: !isExpiredNow,        // boolean سريع للفرونت
-
-      // ✅ computed section للوضوح
-      computed: {
-        isExpired: isExpiredNow,
-        isActiveNow: !isExpiredNow,
-        nowISO: now.toISOString(),
-      },
-
-      lastRequestId: finalRequestId,
-      lastPaymentIntentId: paymentIntentId,
-
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      ...(subSnap && subSnap.exists ? {} : { createdAt: admin.firestore.FieldValue.serverTimestamp() }),
-    },
-    { merge: true }
-  );
-
-  // --- history record ---
-  tx.set(subRef.collection("history").doc(paymentIntentId), {
-    companyDocId,
-    companyId: companyPublicId,
-    email: companyEmail,
-
-    requestId: finalRequestId,
-    paymentIntentId,
-
-    planKey,
-    planName,
-    pricingKey,
-
-    subscriptionDays: daysToApply,
-    startAt: startTs,
-    endAt: endTs,
-
-    status: "active",
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
-}
-
-
-      // E) processed (مرة واحدة فقط)
+      // E) processed (idempotency)
       tx.set(processedRef, {
         paymentIntentId,
         processedAt: admin.firestore.FieldValue.serverTimestamp(),
         requestId: finalRequestId,
         amount: amountAED,
+        debug: {
+          requestTypeMeta,
+          clientTypeMeta,
+          planKey,
+          pricingKey,
+          isSubscription,
+          isCompany,
+          userIsCompany,
+          daysToApply,
+        },
       });
 
-      // push vars for after-tx
+      // push vars
       finalRequestIdAfterTx = finalRequestId;
       notifyTitleAfterTx = notifTitle;
       notifyBodyAfterTx = notifBody;
       notifyDataAfterTx = { type: "payment_success", orderId: finalRequestId, paymentIntentId };
     });
 
-    // =============================
-    //   Send PUSH after transaction
-    // =============================
+    // push after tx
     try {
       if (finalRequestIdAfterTx) {
         await sendExpoPushToUser(userRef, notifyTitleAfterTx, notifyBodyAfterTx, notifyDataAfterTx);
@@ -591,7 +560,6 @@ if (isSubscription && isCompany) {
       console.error("push send failed:", pushErr);
     }
 
-    console.log(`✅ webhook processed ${paymentIntentId} (AED ${amountAED})`);
     return res.json({ received: true });
   } catch (err) {
     if (err?.message === "ALREADY_PROCESSED") return res.json({ received: true });

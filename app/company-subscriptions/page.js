@@ -16,7 +16,7 @@ function cn(...a) {
 }
 
 /* =========================
-   ✅ Safe text helpers (prevents React crash #31)
+   ✅ Safe text helpers
 ========================= */
 function asText(v, fallback = "") {
   if (v == null) return fallback;
@@ -44,7 +44,6 @@ function safeArray(x) {
 
 /* =========================
    ✅ Offer logic (ONLY semiannual + yearly)
-   - Offer = paidMonths + bonus => total months
 ========================= */
 function isOfferDuration(durKey) {
   return durKey === "semiannual" || durKey === "yearly";
@@ -64,7 +63,7 @@ function offerText(d, isArabic, t) {
   return `${t.pay} ${paid} mo + ${bonus} ${t.free} = ${total} mo`;
 }
 
-/** ✅ Quiet glow wrapper (ONLY for buttons/cards) */
+/** ✅ Quiet glow wrapper */
 function ButtonGlow({ active = false, radius = "rounded-full", children }) {
   return (
     <div className={cn("relative group", radius)}>
@@ -136,6 +135,15 @@ function packageLabel(key) {
   return String(key || "").toUpperCase();
 }
 
+function pickDefaultDurationKey(durations = []) {
+  const keys = durations.map((d) => d.key);
+  if (keys.includes("yearly")) return "yearly";
+  if (keys.includes("semiannual")) return "semiannual";
+  if (keys.includes("quarterly")) return "quarterly";
+  if (keys.includes("monthly")) return "monthly";
+  return durations?.[durations.length - 1]?.key || "yearly";
+}
+
 export default function CompanySubscriptionsPage() {
   const sp = useSearchParams();
   const router = useRouter();
@@ -203,6 +211,8 @@ export default function CompanySubscriptionsPage() {
   const [loading, setLoading] = useState(true);
 
   const [activePackage, setActivePackage] = useState(pkgFromUrl);
+
+  // ✅ duration selection per package (will be auto-fixed after load)
   const [selectedDurationByPkg, setSelectedDurationByPkg] = useState({
     starter: "yearly",
     growth: "yearly",
@@ -223,14 +233,18 @@ export default function CompanySubscriptionsPage() {
 
         const snap = await getDocs(collection(firestore, "companySubscriptionPlans"));
 
-        const rows = snap.docs.map((docSnap) => {
+        const rowsRaw = snap.docs.map((docSnap) => {
           const data = docSnap.data() || {};
           const key = docSnap.id;
 
           const Icon = ICONS_BY_KEY[key] || Sparkles;
           const brand = data.brand || DEFAULT_BRAND[key] || DEFAULT_BRAND.starter;
 
-          // ✅ durations (NEW SEED LOGIC)
+          // ✅ optional visibility flags
+          const isVisible = data.isVisible !== false; // default true
+          const isActive = data.isActive !== false;   // default true
+
+          // ✅ durations
           const rawPricing = data.pricing || {};
           const durations = Object.entries(rawPricing)
             .map(([durKey, v]) => {
@@ -242,7 +256,10 @@ export default function CompanySubscriptionsPage() {
               const bonus = Number(vv.bonus ?? 0);
               const price = Number(vv.price ?? 0);
 
-              // ✅ Offer is ONLY allowed for semiannual/yearly AND bonus>0
+              // ✅ Optional stripePriceId support (if you store it)
+              const stripePriceId = asText(vv.stripePriceId, "");
+              const currency = asText(vv.currency, "aed");
+
               const hasOffer = isOfferDuration(durKey) && bonus > 0 && paidMonths > 0;
               const offerLine = hasOffer ? offerText({ paidMonths, bonus }, isArabic, t) : "";
 
@@ -253,10 +270,13 @@ export default function CompanySubscriptionsPage() {
                 paidMonths,
                 bonus,
                 price,
+                currency,
+                stripePriceId,
                 offerLine,
                 hasOffer,
               };
             })
+            .filter((d) => d && d.price >= 0)
             .sort((a, b) => (DURATION_ORDER[a.key] || 99) - (DURATION_ORDER[b.key] || 99));
 
           // perks
@@ -273,12 +293,35 @@ export default function CompanySubscriptionsPage() {
             brand,
             perks,
             durations,
+            isVisible,
+            isActive,
           };
         });
 
-        rows.sort((a, b) => (PACKAGE_ORDER[a.key] || 99) - (PACKAGE_ORDER[b.key] || 99));
+        // ✅ remove hidden / inactive / empty durations
+        const rows = rowsRaw
+          .filter((p) => p.isVisible && p.isActive)
+          .filter((p) => safeArray(p.durations).length > 0)
+          .sort((a, b) => (PACKAGE_ORDER[a.key] || 99) - (PACKAGE_ORDER[b.key] || 99));
 
-        if (mounted) setPackages(rows);
+        if (!mounted) return;
+
+        setPackages(rows);
+
+        // ✅ after load: fix defaults per package if missing
+        setSelectedDurationByPkg((prev) => {
+          const next = { ...prev };
+          for (const p of rows) {
+            const current = next[p.key];
+            const hasCurrent = p.durations.some((d) => d.key === current);
+            if (!hasCurrent) next[p.key] = pickDefaultDurationKey(p.durations);
+          }
+          return next;
+        });
+
+        // ✅ active package fallback if not found
+        const stillExists = rows.some((p) => p.key === (pkgFromUrl || activePackage));
+        if (!stillExists && rows[0]?.key) setActivePackage(rows[0].key);
       } catch (e) {
         console.error("Failed to load companySubscriptionPlans:", e);
         if (mounted) setPackages([]);
@@ -290,12 +333,13 @@ export default function CompanySubscriptionsPage() {
     return () => {
       mounted = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isArabic, t]);
 
   const PACKAGES = packages;
 
   const pkgObj = PACKAGES.find((p) => p.key === activePackage) || PACKAGES[0];
-  const selectedDurationKey = selectedDurationByPkg?.[activePackage] || "yearly";
+  const selectedDurationKey = selectedDurationByPkg?.[activePackage] || pickDefaultDurationKey(pkgObj?.durations || []);
   const durationObj =
     pkgObj?.durations?.find((d) => d.key === selectedDurationKey) ||
     pkgObj?.durations?.[pkgObj?.durations?.length - 1];
@@ -305,17 +349,35 @@ export default function CompanySubscriptionsPage() {
     setActivePackage(pkgKey);
   };
 
+  // ✅ unified redirect to login with full metadata (same contract we’ll use in dashboard)
   const goSubscribe = () => {
     if (!pkgObj || !durationObj) return;
 
     const qs = new URLSearchParams();
     qs.set("lang", lang);
+
+    // intent contract (important)
     qs.set("intent", "company_subscription");
-    qs.set("package", pkgObj.key);
+
+    // plan identity
+    qs.set("planKey", pkgObj.key);               // ✅ canonical
+    qs.set("planName", asText(pkgObj.name, "")); // ✅ display
+    qs.set("package", pkgObj.key);               // ✅ backward compatibility (if old code reads "package")
+
+    // duration identity
     qs.set("duration", durationObj.key);
-    qs.set("price", String(durationObj.price));
+
+    // price & months
+    qs.set("price", String(Number(durationObj.price || 0)));
+    qs.set("paidMonths", String(Number(durationObj.paidMonths || 0)));
+    qs.set("bonus", String(Number(durationObj.bonus || 0)));
+
     const totalMonths = Number(durationObj.paidMonths || 0) + Number(durationObj.bonus || 0);
     qs.set("months", String(totalMonths || durationObj.monthsShown || 1));
+
+    // optional stripe price id (if stored)
+    if (durationObj.stripePriceId) qs.set("stripePriceId", durationObj.stripePriceId);
+
     router.push(`/login?${qs.toString()}`);
   };
 
@@ -377,7 +439,8 @@ export default function CompanySubscriptionsPage() {
             {PACKAGES.map((p, idx) => {
               const Icon = p.icon;
               const isOpen = p.key === activePackage;
-              const selectedKey = selectedDurationByPkg[p.key] || "yearly";
+
+              const selectedKey = selectedDurationByPkg[p.key] || pickDefaultDurationKey(p.durations);
               const selectedDur =
                 p.durations.find((d) => d.key === selectedKey) || p.durations[p.durations.length - 1];
 
@@ -423,7 +486,6 @@ export default function CompanySubscriptionsPage() {
                               {asText(p.name, p.key)}
                             </div>
 
-                            {/* ✅ Package key chip (starter/growth/scale/enterprise) colored per plan */}
                             <span
                               className={cn(
                                 "inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-[11px] font-extrabold border",
@@ -599,7 +661,6 @@ export default function CompanySubscriptionsPage() {
               <div className={cn("min-w-0", isArabic && "text-right")}>
                 <div className="text-[11px] text-white/55 font-bold">
                   {t.package}: <span className="text-white/85">{asText(pkgObj?.name, "")}</span>
-                  {/* ✅ package chip in bottom bar */}
                   <span
                     className={cn(
                       "inline-flex items-center gap-2 px-2 py-0.5 rounded-full text-[10px] font-extrabold border",

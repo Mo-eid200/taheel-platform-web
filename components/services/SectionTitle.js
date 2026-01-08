@@ -37,12 +37,12 @@ export default function ServiceSection({
 
   const isCompany = String(category || "").toLowerCase().includes("company");
 
-  // ✅ جرّب كل الـ IDs المحتملة (بالترتيب)
+  // ✅ Try possible IDs (docId in companySubscriptions is usually customerId like COM-xxx)
   const candidateIds = useMemo(() => {
     const c = client || {};
     const arr = [
+      c.customerId,      // ✅ غالبًا ده هو COM-xxx
       c.companyDocId,
-      c.customerId,
       c.userId,
       c.uid,
       c.id,
@@ -53,7 +53,6 @@ export default function ServiceSection({
       .map((x) => (typeof x === "string" ? x.trim() : ""))
       .filter(Boolean);
 
-    // إزالة التكرار
     return Array.from(new Set(arr));
   }, [client]);
 
@@ -72,7 +71,6 @@ export default function ServiceSection({
         let found = null;
         let foundId = "";
 
-        // ✅ حاول getDoc لكل ID لحد ما تلاقي الدوك
         for (const id of candidateIds) {
           const ref = doc(firestore, "companySubscriptions", String(id));
           const snap = await getDoc(ref);
@@ -119,7 +117,6 @@ export default function ServiceSection({
 
         const active = (isActiveFlag || status === "active") && withinWindow;
 
-
         if (mounted) {
           setSubInfo({
             loading: false,
@@ -132,7 +129,7 @@ export default function ServiceSection({
             usedDocId: foundId,
           });
         }
-      } catch (e) {
+      } catch {
         if (mounted) {
           setSubInfo({
             loading: false,

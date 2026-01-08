@@ -17,37 +17,34 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-/** ✅ Collection name */
-const COLLECTION = "companySubscriptionPlans";
+/** ✅ Collections */
+const PLANS_COLLECTION = "companySubscriptionPlans";
+const ADDONS_COLLECTION = "companyAddonsCatalog";
 
 /** ✅ Version for safe migrations */
-const VERSION = 2;
+const VERSION = 3;
 
 /* =========================
-   ✅ NORMALIZERS (الحل الحقيقي)
+   ✅ NORMALIZERS
 ========================= */
 function toNum(x, fallback = 0) {
   const n = Number(x);
   return Number.isFinite(n) ? n : fallback;
 }
 
-function normTitle(title) {
-  // ensure map {ar,en}
-  if (title && typeof title === "object") {
-    return { ar: String(title.ar || ""), en: String(title.en || "") };
+function normMap2(x) {
+  // ensure {ar,en}
+  if (x && typeof x === "object") {
+    return { ar: String(x.ar || ""), en: String(x.en || "") };
+  }
+  if (typeof x === "string") {
+    return { ar: x, en: x };
   }
   return { ar: "", en: "" };
 }
 
-function normName(name) {
-  // convert string -> {ar,en}
-  if (name && typeof name === "object") {
-    return { ar: String(name.ar || ""), en: String(name.en || "") };
-  }
-  if (typeof name === "string") {
-    return { ar: name, en: name };
-  }
-  return { ar: "", en: "" };
+function normStrArray(arr) {
+  return Array.isArray(arr) ? arr.map((s) => String(s)).filter(Boolean) : [];
 }
 
 function normalizePricing(pricing) {
@@ -60,7 +57,7 @@ function normalizePricing(pricing) {
     const paidMonths = toNum(v.paidMonths, 0);
     let bonus = toNum(v.bonus, 0);
 
-    // ✅ Offer only on semiannual & yearly
+    // ✅ Offer only on semiannual & yearly (as you wanted)
     const isOfferAllowed = durKey === "semiannual" || durKey === "yearly";
     if (!isOfferAllowed) bonus = 0;
 
@@ -76,122 +73,423 @@ function normalizePricing(pricing) {
     const best = durKey === "yearly";
 
     out[durKey] = {
-      title: normTitle(v.title),
+      title: normMap2(v.title),
       price: toNum(v.price, 0),
+      currency: String(v.currency || "AED"),
       paidMonths,
       bonus,
       monthsShown,
       tag,
       best,
+      // Optional stripe mapping per duration (safe to keep empty)
+      stripe: {
+        productId: String(v?.stripe?.productId || ""),
+        priceId: String(v?.stripe?.priceId || ""),
+        mode: "subscription",
+      },
     };
   }
 
   return out;
 }
 
-/** ✅ Plans payload (مظبوط + موحّد) */
+/** =========================
+ * ✅ FINAL PLANS (Ops + UI + Pricing)
+ * - Based on your FINAL logic:
+ *   Starter: yearly mandatory, entities tasheel+amer, limit 10/month
+ *   Growth: semi/year, entities tasheel+amer+courts, limit 20/month
+ *   Scale: semi/year, add extra entity, limit 30/month
+ *   Enterprise: custom high cap, SLA, all entities
+========================= */
 const plans = {
   starter: {
     key: "starter",
-    name: { ar: "Starter PRO", en: "Starter PRO" },
-    fit: { ar: "للشركات الصغيرة (1–5)", en: "Small companies (1–5)" },
+    planKey: "starter",
+
+    // ---- Ops Rules ----
     isActive: true,
-    sortIndex: 1,
-    perks: {
-      ar: ["إلغاء رسوم الطباعة", "دعم مباشر", "تفعيل سريع", "متابعة أسهل"],
-      en: ["Printing fees waived", "Direct support", "Fast activation", "Easier tracking"],
+    currency: "AED",
+    isMandatory: true,
+    allowedBillingPeriods: ["yearly"], // ✅ yearly only (mandatory)
+    monthlyIncludedTxLimit: 10,
+    includedEntities: ["tasheel", "amer"],
+    allowEntitiesOutsidePlan: false,
+
+    covers: {
+      printingFee: true,
+      vat: true,
+      adminProcessing: true,
+      governmentFee: false,
+      stripeFee: false, // ✅ always excluded
     },
+
+    afterLimit: {
+      mode: "charge_normal", // ✅ printing+vat+admin return automatically
+      allowAddon: true,
+      allowUpgrade: true,
+      hardBlock: false, // ✅ never block
+    },
+
+    // ---- UI / Marketing ----
+    name: { ar: "Starter GovOps", en: "Starter GovOps" },
+    fit: { ar: "للشركات الصغيرة (1–5)", en: "Small companies (1–5)" },
+    perks: {
+      ar: ["حتى 10 معاملات شهريًا بدون طباعة وضريبة", "دعم مباشر", "تفعيل سريع", "إدارة أسهل"],
+      en: ["Up to 10 monthly tx without printing & VAT", "Direct support", "Fast activation", "Easier management"],
+    },
+    sortIndex: 1,
+
+    // ---- Pricing ----
     pricing: {
-      monthly:   { title: { ar: "شهري", en: "Monthly" },     paidMonths: 1,  bonus: 0, price: 299 },
-      quarterly: { title: { ar: "3 شهور", en: "3 Months" },  paidMonths: 3,  bonus: 0, price: 799 },
-      semiannual:{ title: { ar: "نصف سنوي", en: "Semiannual" }, paidMonths: 6, bonus: 1, price: 1799 }, // ✅ pay 6 + 1 free = 7
-      yearly:    { title: { ar: "سنوي", en: "Yearly" },      paidMonths: 12, bonus: 1, price: 3499 },  // ✅ pay 12 + 1 free = 13
+      // keep fields if UI needs them, but only yearly will be used by rules
+      yearly: { title: { ar: "سنوي", en: "Yearly" }, paidMonths: 12, bonus: 0, price: 3499 },
+      semiannual: { title: { ar: "نصف سنوي", en: "Semiannual" }, paidMonths: 0, bonus: 0, price: 0 }, // not used
+      quarterly: { title: { ar: "3 شهور", en: "3 Months" }, paidMonths: 0, bonus: 0, price: 0 }, // not used
+      monthly: { title: { ar: "شهري", en: "Monthly" }, paidMonths: 0, bonus: 0, price: 0 }, // not used
     },
   },
 
   growth: {
     key: "growth",
-    name: { ar: "Growth PRO", en: "Growth PRO" },
-    fit: { ar: "للشركات المتوسطة (5–10)", en: "Mid teams (5–10)" },
+    planKey: "growth",
+
+    // ---- Ops Rules ----
     isActive: true,
-    sortIndex: 2,
-    perks: {
-      ar: ["متابعة أسرع", "إلغاء رسوم الطباعة", "أولوية أعلى", "تقارير مبسطة"],
-      en: ["Faster tracking", "Printing fees waived", "Higher priority", "Simplified reports"],
+    currency: "AED",
+    isMandatory: false,
+    allowedBillingPeriods: ["semiannual", "yearly"],
+    monthlyIncludedTxLimit: 20,
+    includedEntities: ["tasheel", "amer", "courts"],
+    allowEntitiesOutsidePlan: false,
+
+    covers: {
+      printingFee: true,
+      vat: true,
+      adminProcessing: true,
+      governmentFee: false,
+      stripeFee: false,
     },
+
+    afterLimit: {
+      mode: "charge_normal",
+      allowAddon: true,
+      allowUpgrade: true,
+      hardBlock: false,
+    },
+
+    // ---- UI ----
+    name: { ar: "Growth GovOps", en: "Growth GovOps" },
+    fit: { ar: "للشركات المتوسطة (5–10)", en: "Mid teams (5–10)" },
+    perks: {
+      ar: ["حتى 20 معاملة شهريًا بدون طباعة وضريبة", "أولوية أعلى", "تقارير مبسطة", "دعم أسرع"],
+      en: ["Up to 20 monthly tx without printing & VAT", "Higher priority", "Simplified reports", "Faster support"],
+    },
+    sortIndex: 2,
+
     pricing: {
-      monthly:   { title: { ar: "شهري", en: "Monthly" },     paidMonths: 1,  bonus: 0, price: 499 },
-      quarterly: { title: { ar: "3 شهور", en: "3 Months" },  paidMonths: 3,  bonus: 0, price: 1399 },
-      semiannual:{ title: { ar: "نصف سنوي", en: "Semiannual" }, paidMonths: 6, bonus: 1, price: 2999 }, // ✅ 6+1=7
-      yearly:    { title: { ar: "سنوي", en: "Yearly" },      paidMonths: 12, bonus: 1, price: 5999 },  // ✅ 12+1=13
+      semiannual: { title: { ar: "نصف سنوي", en: "Semiannual" }, paidMonths: 6, bonus: 0, price: 2999 },
+      yearly: { title: { ar: "سنوي", en: "Yearly" }, paidMonths: 12, bonus: 0, price: 5999 },
+      quarterly: { title: { ar: "3 شهور", en: "3 Months" }, paidMonths: 0, bonus: 0, price: 0 },
+      monthly: { title: { ar: "شهري", en: "Monthly" }, paidMonths: 0, bonus: 0, price: 0 },
     },
   },
 
   scale: {
     key: "scale",
-    name: { ar: "Scale PRO", en: "Scale PRO" },
-    fit: { ar: "للشركات الكبيرة (10–20)", en: "Larger teams (10–20)" },
+    planKey: "scale",
+
+    // ---- Ops Rules ----
     isActive: true,
-    sortIndex: 3,
-    perks: {
-      ar: ["أولوية معالجة أعلى", "إلغاء رسوم الطباعة", "تقارير أسهل", "تنظيم أكبر"],
-      en: ["Higher priority", "Printing fees waived", "Cleaner reports", "More workload"],
+    currency: "AED",
+    isMandatory: false,
+    allowedBillingPeriods: ["semiannual", "yearly"],
+    monthlyIncludedTxLimit: 30,
+    includedEntities: ["tasheel", "amer", "courts", "hr_immigration"], // ✅ your "extra entity"
+    allowEntitiesOutsidePlan: false,
+
+    covers: {
+      printingFee: true,
+      vat: true,
+      adminProcessing: true,
+      governmentFee: false,
+      stripeFee: false,
     },
+
+    afterLimit: {
+      mode: "charge_normal",
+      allowAddon: true,
+      allowUpgrade: true,
+      hardBlock: false,
+    },
+
+    // ---- UI ----
+    name: { ar: "Scale GovOps", en: "Scale GovOps" },
+    fit: { ar: "للشركات الكبيرة (10–20)", en: "Large teams (10–20)" },
+    perks: {
+      ar: ["حتى 30 معاملة شهريًا بدون طباعة وضريبة", "أولوية معالجة أعلى", "تنظيم أكبر", "تقارير أوضح"],
+      en: ["Up to 30 monthly tx without printing & VAT", "Higher processing priority", "Better organization", "Clearer reports"],
+    },
+    sortIndex: 3,
+
     pricing: {
-      monthly:   { title: { ar: "شهري", en: "Monthly" },     paidMonths: 1,  bonus: 0, price: 799 },
-      quarterly: { title: { ar: "3 شهور", en: "3 Months" },  paidMonths: 3,  bonus: 0, price: 2199 },
-      semiannual:{ title: { ar: "نصف سنوي", en: "Semiannual" }, paidMonths: 6, bonus: 1, price: 4999 }, // ✅ 6+1=7
-      yearly:    { title: { ar: "سنوي", en: "Yearly" },      paidMonths: 12, bonus: 1, price: 9999 },  // ✅ 12+1=13
+      semiannual: { title: { ar: "نصف سنوي", en: "Semiannual" }, paidMonths: 6, bonus: 0, price: 4999 },
+      yearly: { title: { ar: "سنوي", en: "Yearly" }, paidMonths: 12, bonus: 0, price: 9999 },
+      quarterly: { title: { ar: "3 شهور", en: "3 Months" }, paidMonths: 0, bonus: 0, price: 0 },
+      monthly: { title: { ar: "شهري", en: "Monthly" }, paidMonths: 0, bonus: 0, price: 0 },
     },
   },
 
   enterprise: {
     key: "enterprise",
-    name: { ar: "Enterprise PRO", en: "Enterprise PRO" },
-    fit: { ar: "مؤسسات / 20+", en: "Enterprise / 20+" },
+    planKey: "enterprise",
+
+    // ---- Ops Rules ----
     isActive: true,
-    sortIndex: 4,
-    perks: {
-      ar: ["SLA ودعم مخصص", "أولوية قصوى", "حلول حسب النشاط", "مدير حساب"],
-      en: ["SLA & dedicated support", "Maximum priority", "Tailored solutions", "Account manager"],
+    currency: "AED",
+    isMandatory: false,
+    allowedBillingPeriods: ["semiannual", "yearly", "contract"],
+    monthlyIncludedTxLimit: 999, // ✅ high/custom cap
+    includedEntities: ["all"],
+    allowEntitiesOutsidePlan: true, // ✅ by definition
+
+    covers: {
+      printingFee: true,
+      vat: true,
+      adminProcessing: true,
+      governmentFee: false,
+      stripeFee: false,
     },
+
+    afterLimit: {
+      mode: "custom", // for enterprise you can still charge or not depending contract
+      allowAddon: true,
+      allowUpgrade: false,
+      hardBlock: false,
+    },
+
+    // ---- UI ----
+    name: { ar: "Enterprise GovOps", en: "Enterprise GovOps" },
+    fit: { ar: "مؤسسات / 20+", en: "Enterprise / 20+" },
+    perks: {
+      ar: ["سقف معاملات مخصص", "SLA + فريق مخصص", "أولوية قصوى", "مدير حساب"],
+      en: ["Custom transaction cap", "SLA + dedicated team", "Maximum priority", "Account manager"],
+    },
+    sortIndex: 4,
+
     pricing: {
-      monthly:   { title: { ar: "شهري", en: "Monthly" },     paidMonths: 1,  bonus: 0, price: 1299 },
-      quarterly: { title: { ar: "3 شهور", en: "3 Months" },  paidMonths: 3,  bonus: 0, price: 3599 },
-      semiannual:{ title: { ar: "نصف سنوي", en: "Semiannual" }, paidMonths: 6, bonus: 1, price: 7999 },  // ✅ 6+1=7
-      yearly:    { title: { ar: "سنوي", en: "Yearly" },      paidMonths: 12, bonus: 1, price: 15999 }, // ✅ 12+1=13
+      semiannual: { title: { ar: "نصف سنوي", en: "Semiannual" }, paidMonths: 6, bonus: 0, price: 7999 },
+      yearly: { title: { ar: "سنوي", en: "Yearly" }, paidMonths: 12, bonus: 0, price: 15999 },
+      quarterly: { title: { ar: "3 شهور", en: "3 Months" }, paidMonths: 0, bonus: 0, price: 0 },
+      monthly: { title: { ar: "شهري", en: "Monthly" }, paidMonths: 0, bonus: 0, price: 0 },
     },
   },
 };
 
-/**
- * ✅ FORCE UPDATE MODE:
- * - always merge & normalize
- * - updates old docs instead of skipping
- */
-async function upsertPlan(planKey, data) {
-  const ref = doc(db, COLLECTION, planKey);
+/** =========================
+ * ✅ ADD-ONS CATALOG (Universal)
+ * - Covers: printing + VAT + adminProcessing
+ * - Excludes: govFee + stripeFee
+========================= */
+const addons = {
+  extra_5: {
+    addonKey: "extra_5",
+    title: { ar: "Add-On 5 معاملات إضافية", en: "Add-On 5 Extra Transactions" },
+    qty: 5,
+    price: 250,
+    currency: "AED",
+    perTxn: 50,
+    popular: false,
+    isActive: true,
+    type: "bundle",
+
+    covers: {
+      printingFee: true,
+      vat: true,
+      adminProcessing: true,
+      governmentFee: false,
+      stripeFee: false,
+    },
+
+    stripe: {
+      mode: "payment",
+      productId: "",
+      priceId: "",
+    },
+  },
+
+  extra_10: {
+    addonKey: "extra_10",
+    title: { ar: "Add-On 10 معاملات إضافية", en: "Add-On 10 Extra Transactions" },
+    qty: 10,
+    price: 450,
+    currency: "AED",
+    perTxn: 45,
+    popular: true, // ⭐ Most popular
+    isActive: true,
+    type: "bundle",
+
+    covers: {
+      printingFee: true,
+      vat: true,
+      adminProcessing: true,
+      governmentFee: false,
+      stripeFee: false,
+    },
+
+    stripe: {
+      mode: "payment",
+      productId: "",
+      priceId: "",
+    },
+  },
+
+  extra_20: {
+    addonKey: "extra_20",
+    title: { ar: "Add-On 20 معاملة إضافية", en: "Add-On 20 Extra Transactions" },
+    qty: 20,
+    price: 800,
+    currency: "AED",
+    perTxn: 40,
+    popular: false,
+    isActive: true,
+    type: "bundle",
+
+    covers: {
+      printingFee: true,
+      vat: true,
+      adminProcessing: true,
+      governmentFee: false,
+      stripeFee: false,
+    },
+
+    stripe: {
+      mode: "payment",
+      productId: "",
+      priceId: "",
+    },
+  },
+
+  emergency_single: {
+    addonKey: "emergency_single",
+    title: { ar: "معاملة طوارئ / مستعجلة", en: "Emergency / Urgent Transaction" },
+    qty: 1,
+    priceMin: 120,
+    priceMax: 150,
+    currency: "AED",
+    isActive: true,
+    type: "emergency",
+
+    covers: {
+      printingFee: true,
+      vat: true,
+      adminProcessing: true,
+      governmentFee: false,
+      stripeFee: false,
+    },
+
+    stripe: {
+      mode: "payment",
+      productId: "",
+      priceId: "",
+    },
+  },
+};
+
+/* =========================
+   ✅ UPSERT HELPERS
+========================= */
+async function upsertDoc(collectionName, docId, data) {
+  const ref = doc(db, collectionName, docId);
   const snap = await getDoc(ref);
 
-  // ✅ normalize to prevent UI madness
   const payload = {
     ...data,
-    name: normName(data.name),
-    pricing: normalizePricing(data.pricing),
     version: VERSION,
     updatedAt: serverTimestamp(),
     ...(snap.exists() ? {} : { createdAt: serverTimestamp() }),
   };
 
   await setDoc(ref, payload, { merge: true });
-  console.log(`✅ UPDATED: ${planKey} ${snap.exists() ? "(merged)" : "(created)"}`);
+  console.log(`✅ UPDATED: ${collectionName}/${docId} ${snap.exists() ? "(merged)" : "(created)"}`);
 }
 
+function normalizePlanPayload(data) {
+  return {
+    ...data,
+    key: String(data.key || data.planKey || ""),
+    planKey: String(data.planKey || data.key || ""),
+    name: normMap2(data.name),
+    fit: normMap2(data.fit),
+    includedEntities: normStrArray(data.includedEntities),
+    allowedBillingPeriods: normStrArray(data.allowedBillingPeriods),
+    perks: {
+      ar: normStrArray(data?.perks?.ar),
+      en: normStrArray(data?.perks?.en),
+    },
+    covers: {
+      printingFee: !!data?.covers?.printingFee,
+      vat: !!data?.covers?.vat,
+      adminProcessing: !!data?.covers?.adminProcessing,
+      governmentFee: !!data?.covers?.governmentFee,
+      stripeFee: !!data?.covers?.stripeFee,
+    },
+    afterLimit: {
+      mode: String(data?.afterLimit?.mode || "charge_normal"),
+      allowAddon: !!data?.afterLimit?.allowAddon,
+      allowUpgrade: !!data?.afterLimit?.allowUpgrade,
+      hardBlock: !!data?.afterLimit?.hardBlock,
+    },
+    monthlyIncludedTxLimit: toNum(data.monthlyIncludedTxLimit, 0),
+    pricing: normalizePricing(data.pricing),
+  };
+}
+
+function normalizeAddonPayload(data) {
+  return {
+    ...data,
+    addonKey: String(data.addonKey || ""),
+    title: normMap2(data.title),
+    qty: toNum(data.qty, 0),
+    price: toNum(data.price, 0),
+    priceMin: toNum(data.priceMin, 0),
+    priceMax: toNum(data.priceMax, 0),
+    perTxn: toNum(data.perTxn, 0),
+    popular: !!data.popular,
+    isActive: !!data.isActive,
+    type: String(data.type || "bundle"),
+    currency: String(data.currency || "AED"),
+    covers: {
+      printingFee: !!data?.covers?.printingFee,
+      vat: !!data?.covers?.vat,
+      adminProcessing: !!data?.covers?.adminProcessing,
+      governmentFee: !!data?.covers?.governmentFee,
+      stripeFee: !!data?.covers?.stripeFee,
+    },
+    stripe: {
+      mode: String(data?.stripe?.mode || "payment"),
+      productId: String(data?.stripe?.productId || ""),
+      priceId: String(data?.stripe?.priceId || ""),
+    },
+  };
+}
+
+/* =========================
+   ✅ RUN
+========================= */
 async function run() {
+  // ---- Upsert Plans ----
   for (const key of Object.keys(plans)) {
-    await upsertPlan(key, plans[key]);
+    const planPayload = normalizePlanPayload(plans[key]);
+    await upsertDoc(PLANS_COLLECTION, key, planPayload);
   }
-  console.log("🎉 DONE. Company subscription plans are normalized + updated.");
+
+  // ---- Upsert Add-ons ----
+  for (const key of Object.keys(addons)) {
+    const addonPayload = normalizeAddonPayload(addons[key]);
+    await upsertDoc(ADDONS_COLLECTION, key, addonPayload);
+  }
+
+  console.log("🎉 DONE. Plans + Add-ons are fully synced (Ops + UI + Pricing).");
 }
 
 run().catch((e) => {

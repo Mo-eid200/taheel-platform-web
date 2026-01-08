@@ -4,11 +4,11 @@ import Stripe from "stripe";
 import admin from "firebase-admin";
 
 /**
- * Create Stripe PaymentIntent (server-side fee calc) and create/merge request doc.
+ * Create Stripe PaymentIntent (server-side fee calc) + create/merge request doc.
  *
  * ✅ Rules:
- * - DO NOT touch requests schema/logic
- * - Subscription info stays in metadata ONLY; confirm endpoint will write into companySubscriptions
+ * - Keep requests flow intact
+ * - Subscription info stays in metadata ONLY; webhook/confirmPayment writes companySubscriptions
  */
 
 if (!admin.apps.length) {
@@ -16,6 +16,7 @@ if (!admin.apps.length) {
     const sa = process.env.GOOGLE_SERVICE_ACCOUNT_KEY
       ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY)
       : null;
+
     if (sa && sa.private_key) {
       sa.private_key = sa.private_key.replace(/\\n/g, "\n");
       admin.initializeApp({ credential: admin.credential.cert(sa) });
@@ -53,7 +54,7 @@ function generateOrderNumber() {
   return `REQ-${part1}-${part2}`;
 }
 
-// نفس اللى في الويب هوك: نقرأ الخدمة من servicesByClientType
+// Read service definition from servicesByClientType
 async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFallback = "") {
   const clientTypesToTry = clientType ? [clientType] : ["company", "resident", "nonresident", "other"];
 
@@ -62,6 +63,7 @@ async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFa
       const docRef = db.collection("servicesByClientType").doc(String(ct));
       const snap = await docRef.get();
       if (!snap.exists) continue;
+
       const all = snap.data() || {};
 
       if (serviceId && Object.prototype.hasOwnProperty.call(all, serviceId)) {
@@ -106,58 +108,62 @@ export default async function handler(req, res) {
     const body = req.body || {};
 
     // REQUIRED
-    const customerId = safeStr(body.customerId || body.userId);
-    const lang = safeStr(body.lang || "ar");
+    const customerId = safeStr(body.customerId || body.userId).trim();
+    const lang = safeStr(body.lang || "ar").trim();
 
-    // Payment context
-    const requestType = safeStr(body.requestType || "service"); // "service" | "wallet_recharge" | "subscription"
-    const clientType = safeStr(body.clientType || body.client_type || "");
-    const serviceId = safeStr(body.serviceId || "");
-    const serviceName = safeStr(body.serviceName || "");
+    // context
+    const requestType = safeStr(body.requestType || "service").trim(); // service | wallet_recharge | subscription
+    const clientType = safeStr(body.clientType || body.client_type || "").trim();
+    const serviceId = safeStr(body.serviceId || "").trim();
+    const serviceName = safeStr(body.serviceName || "").trim();
 
-    // Optional assignment
-    const assignedTo = safeStr(body.assignedTo || "");
-    const assignedToName = safeStr(body.assignedToName || "");
+    // assignment
+    const assignedTo = safeStr(body.assignedTo || "").trim();
+    const assignedToName = safeStr(body.assignedToName || "").trim();
 
-    // Optional coins
+    // coins
     const coinsUsed = safeNum(body.coinsUsed || 0);
     const coinsGiven = safeNum(body.coinsGiven || 0);
 
-    // ---------------- Subscription metadata ----------------
-    // ✅ Plan identity
-    const planKey = safeStr(body.planKey || "");
-    const planName = safeStr(body.planName || body.subscriptionName || "") || planKey; // يظهر في كارت الشركة
-    const pricingKey = safeStr(body.pricingKey || "");
+    // subscription metadata
+    const planKey = safeStr(body.planKey || "").trim();
+    const planName = safeStr(body.planName || body.subscriptionName || "").trim() || planKey;
+    const pricingKey = safeStr(body.pricingKey || "").trim();
 
-    // ✅ DAYS (monthly 30 days + gift 7 days = 37)
-    const subscriptionDays = safeNum(body.subscriptionDays || body.subDays || 0); // مثال: 30
-    const giftDays = safeNum(body.giftDays || body.bonusDays || 0);              // مثال: 7
+    const subscriptionDays = safeNum(body.subscriptionDays || body.subDays || 0);
+    const giftDays = safeNum(body.giftDays || body.bonusDays || 0);
     const totalSubDays = Math.max(0, subscriptionDays + giftDays);
 
-    // (optional old fields for compatibility)
     const monthsShown = safeNum(body.monthsShown || 0);
     const paidMonths = safeNum(body.paidMonths || 0);
     const bonus = safeNum(body.bonus || 0);
 
     if (!customerId) return res.status(400).json({ ok: false, error: "Missing customerId" });
 
-    // Load user (customerId لازم يبقى موجود)
+    // user must exist
     const userRef = db.collection("users").doc(customerId);
     const userSnap = await userRef.get();
     if (!userSnap.exists) return res.status(400).json({ ok: false, error: "User not found" });
 
-    // ✅ IMPORTANT:
-    // Frontend sends "amount" (not amountAED) for subscriptions/services flow
+    // amount calc
     let baseAmountAED = safeNum(body.amountAED || body.amount || 0);
     let printingFeeAED = safeNum(body.printingFee || 0);
 
-    // لو مش مبعوت amount (خدمات فقط)، نجيب من servicesByClientType
+    // For service: if amount not sent, load from servicesByClientType
     let serviceDoc = null;
-    if (!baseAmountAED && requestType !== "wallet_recharge") {
+    if (!baseAmountAED && requestType !== "wallet_recharge" && requestType !== "subscription") {
       serviceDoc = await fetchServiceFromByClientType(serviceId, clientType, serviceName);
       if (serviceDoc) {
         baseAmountAED = safeNum(serviceDoc.clientPrice ?? serviceDoc.price ?? 0);
         printingFeeAED = safeNum(serviceDoc.printingFee ?? 0);
+      }
+    }
+
+    // For subscription: printingFee should be 0 (subscription covers printing/vat/admin by your logic)
+    if (requestType === "subscription") {
+      printingFeeAED = 0;
+      if (baseAmountAED <= 0) {
+        return res.status(400).json({ ok: false, error: "Missing/invalid amount for subscription" });
       }
     }
 
@@ -170,18 +176,18 @@ export default async function handler(req, res) {
       return res.status(400).json({ ok: false, error: "Invalid amount (0)" });
     }
 
-    // ✅ Calculate processing fee on server
+    // processing fee on server
     const processingFeeAED = calcProcessingFeeAED(baseAmountAED + printingFeeAED);
 
-    // Total charge
+    // total
     const totalAED = Number((baseAmountAED + printingFeeAED + processingFeeAED).toFixed(2));
     const amountSmallest = Math.round(totalAED * 100);
 
-    // Request id (doc id) => orderNumber
-    const orderNumber = safeStr(body.requestId || generateOrderNumber());
+    // request id
+    const orderNumber = safeStr(body.requestId || body.orderNumber || generateOrderNumber()).trim();
 
-    // Attachments metadata
-    let attachments = body.attachments || null;
+    // attachments
+    const attachments = body.attachments || null;
     let attachmentsJson = "";
     if (attachments) {
       try {
@@ -217,7 +223,7 @@ export default async function handler(req, res) {
         coinsUsed: String(coinsUsed),
         coinsGiven: String(coinsGiven),
 
-        // ✅ subscription fields (DAYS)
+        // subscription
         planKey,
         planName,
         pricingKey,
@@ -225,7 +231,6 @@ export default async function handler(req, res) {
         giftDays: String(giftDays),
         totalSubscriptionDays: String(totalSubDays),
 
-        // optional old fields (leave them if you want)
         monthsShown: String(monthsShown),
         paidMonths: String(paidMonths),
         bonus: String(bonus),
@@ -234,75 +239,53 @@ export default async function handler(req, res) {
       },
     });
 
-    // Create/merge request doc (normal schema)
-    await db
-      .collection("requests")
-      .doc(orderNumber)
-      .set(
-        {
-          requestId: orderNumber,
-          paymentIntentId: pi.id,
-          clientSecret: pi.client_secret || null,
+    // Create/merge request doc (keep your flow)
+    await db.collection("requests").doc(orderNumber).set(
+      {
+        requestId: orderNumber,
+        paymentIntentId: pi.id,
+        clientSecret: pi.client_secret || null,
 
-          customerId,
-          userEmail: safeStr(userSnap.data()?.email || ""),
+        customerId,
+        userEmail: safeStr(userSnap.data()?.email || ""),
 
-          requestType,
-          clientType,
-          serviceId,
-          serviceName,
+        requestType,
+        clientType,
+        serviceId,
+        serviceName,
 
-          paidAmount: 0,
-          status: "pending_payment",
-          createdAt: nowISO(),
-          lastUpdated: nowISO(),
+        paidAmount: 0,
+        status: "pending_payment",
+        createdAt: nowISO(),
+        lastUpdated: nowISO(),
 
-          printingFee: printingFeeAED,
-          processingFee: processingFeeAED,
+        printingFee: printingFeeAED,
+        processingFee: processingFeeAED,
 
-          coinsUsed,
-          coinsGiven,
+        coinsUsed,
+        coinsGiven,
 
-          assignedTo,
-          assignedToName,
+        assignedTo,
+        assignedToName,
 
-          metadata: pi.metadata || {},
-          ...(attachments ? { attachments } : {}),
-        },
-        { merge: true }
-      );
+        metadata: pi.metadata || {},
+        ...(attachments ? { attachments } : {}),
+      },
+      { merge: true }
+    );
 
-    // ✅ RETURN KEYS THE FRONTEND EXPECTS
     return res.status(200).json({
       ok: true,
       clientSecret: pi.client_secret,
       paymentIntentId: pi.id,
-
-      // frontend expects this name:
       orderNumber,
-
-      // frontend expects these:
       processingFee: processingFeeAED,
       finalPrice: totalAED,
-
-      // optional details (safe)
-      breakdown: {
-        baseAmountAED,
-        printingFeeAED,
-        processingFeeAED,
-      },
-
-      // useful for UI
-      subscription: requestType === "subscription"
-        ? {
-            planKey,
-            planName,
-            pricingKey,
-            subscriptionDays,
-            giftDays,
-            totalSubscriptionDays: totalSubDays,
-          }
-        : null,
+      breakdown: { baseAmountAED, printingFeeAED, processingFeeAED },
+      subscription:
+        requestType === "subscription"
+          ? { planKey, planName, pricingKey, subscriptionDays, giftDays, totalSubscriptionDays: totalSubDays }
+          : null,
     });
   } catch (e) {
     console.error("createPaymentIntent error:", e);
