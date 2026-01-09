@@ -127,7 +127,6 @@ const DEFAULT_BRAND = {
   },
 };
 
-const DURATION_ORDER = { monthly: 1, quarterly: 2, semiannual: 3, yearly: 4 };
 const PACKAGE_ORDER = { starter: 1, growth: 2, scale: 3, enterprise: 4 };
 
 // ✅ chip label helper
@@ -139,10 +138,31 @@ function pickDefaultDurationKey(durations = []) {
   const keys = durations.map((d) => d.key);
   if (keys.includes("yearly")) return "yearly";
   if (keys.includes("semiannual")) return "semiannual";
-  if (keys.includes("quarterly")) return "quarterly";
-  if (keys.includes("monthly")) return "monthly";
   return durations?.[durations.length - 1]?.key || "yearly";
 }
+
+/**
+ * ✅ FINAL RULES (User final decision):
+ * - Starter: yearly only
+ * - Growth: semiannual or yearly
+ * - Scale: semiannual or yearly
+ * - Enterprise: semiannual or yearly (contract special later, not here)
+ */
+function allowedDurationsForPackage(pkgKey) {
+  if (pkgKey === "starter") return new Set(["yearly"]);
+  if (pkgKey === "growth") return new Set(["semiannual", "yearly"]);
+  if (pkgKey === "scale") return new Set(["semiannual", "yearly"]);
+  if (pkgKey === "enterprise") return new Set(["semiannual", "yearly"]);
+  return new Set(["semiannual", "yearly"]);
+}
+
+/**
+ * ✅ Fixed labels (we do NOT need vv.title / monthsShown anymore)
+ */
+const DUR_LABELS = {
+  semiannual: { ar: "نصف سنوي", en: "Semiannual" },
+  yearly: { ar: "سنوي", en: "Yearly" },
+};
 
 export default function CompanySubscriptionsPage() {
   const sp = useSearchParams();
@@ -164,7 +184,6 @@ export default function CompanySubscriptionsPage() {
       summary: "ملخص الباقة",
       package: "الباقة",
       duration: "المدة",
-      includes: "يشمل",
       aed: "درهم",
       finalPrice: "السعر النهائي",
       perks: "المميزات",
@@ -189,7 +208,6 @@ export default function CompanySubscriptionsPage() {
       summary: "Plan Summary",
       package: "Package",
       duration: "Duration",
-      includes: "Includes",
       aed: "AED",
       finalPrice: "Final price",
       perks: "Perks",
@@ -212,7 +230,7 @@ export default function CompanySubscriptionsPage() {
 
   const [activePackage, setActivePackage] = useState(pkgFromUrl);
 
-  // ✅ duration selection per package (will be auto-fixed after load)
+  // ✅ duration selection per package (ONLY semiannual/yearly now)
   const [selectedDurationByPkg, setSelectedDurationByPkg] = useState({
     starter: "yearly",
     growth: "yearly",
@@ -238,46 +256,44 @@ export default function CompanySubscriptionsPage() {
           const key = docSnap.id;
 
           const Icon = ICONS_BY_KEY[key] || Sparkles;
-          const brand = data.brand || DEFAULT_BRAND[key] || DEFAULT_BRAND.starter;
 
-          // ✅ optional visibility flags
-          const isVisible = data.isVisible !== false; // default true
-          const isActive = data.isActive !== false;   // default true
+          // ✅ Final: brand is fixed by key, not from firestore
+          const brand = DEFAULT_BRAND[key] || DEFAULT_BRAND.starter;
 
-          // ✅ durations
+          // ✅ Only isActive
+          const isActive = data.isActive !== false; // default true
+
+          // ✅ durations: ONLY take the allowed durations per plan
           const rawPricing = data.pricing || {};
+          const allow = allowedDurationsForPackage(key);
+
           const durations = Object.entries(rawPricing)
             .map(([durKey, v]) => {
+              if (!allow.has(durKey)) return null;
+
               const vv = v || {};
-              const title = localized(vv.title, isArabic ? "ar" : "en", durKey);
 
-              const monthsShown = Number(vv.monthsShown ?? 1);
-              const paidMonths = Number(vv.paidMonths ?? monthsShown);
-              const bonus = Number(vv.bonus ?? 0);
-              const price = Number(vv.price ?? 0);
-
-              // ✅ Optional stripePriceId support (if you store it)
-              const stripePriceId = asText(vv.stripePriceId, "");
-              const currency = asText(vv.currency, "aed");
+              const paidMonths = Number(vv.paidMonths || (durKey === "semiannual" ? 6 : 12));
+              const bonus = Number(vv.bonus || 0);
+              const price = Number(vv.price || 0);
 
               const hasOffer = isOfferDuration(durKey) && bonus > 0 && paidMonths > 0;
               const offerLine = hasOffer ? offerText({ paidMonths, bonus }, isArabic, t) : "";
 
+              const title = DUR_LABELS?.[durKey]?.[isArabic ? "ar" : "en"] || durKey;
+
               return {
                 key: durKey,
                 title,
-                monthsShown,
                 paidMonths,
                 bonus,
                 price,
-                currency,
-                stripePriceId,
                 offerLine,
                 hasOffer,
               };
             })
-            .filter((d) => d && d.price >= 0)
-            .sort((a, b) => (DURATION_ORDER[a.key] || 99) - (DURATION_ORDER[b.key] || 99));
+            .filter(Boolean)
+            .sort((a, b) => (a.key === "semiannual" ? 1 : 2) - (b.key === "semiannual" ? 1 : 2));
 
           // perks
           const perksLocale = data.perks?.[isArabic ? "ar" : "en"];
@@ -293,14 +309,13 @@ export default function CompanySubscriptionsPage() {
             brand,
             perks,
             durations,
-            isVisible,
             isActive,
           };
         });
 
-        // ✅ remove hidden / inactive / empty durations
+        // ✅ remove inactive / empty durations
         const rows = rowsRaw
-          .filter((p) => p.isVisible && p.isActive)
+          .filter((p) => p.isActive)
           .filter((p) => safeArray(p.durations).length > 0)
           .sort((a, b) => (PACKAGE_ORDER[a.key] || 99) - (PACKAGE_ORDER[b.key] || 99));
 
@@ -308,13 +323,21 @@ export default function CompanySubscriptionsPage() {
 
         setPackages(rows);
 
-        // ✅ after load: fix defaults per package if missing
+        // ✅ after load: fix defaults per package if missing (starter => yearly only)
         setSelectedDurationByPkg((prev) => {
           const next = { ...prev };
           for (const p of rows) {
+            const allow = allowedDurationsForPackage(p.key);
             const current = next[p.key];
+
+            const safeDefault = allow.has("yearly")
+              ? "yearly"
+              : allow.has("semiannual")
+              ? "semiannual"
+              : pickDefaultDurationKey(p.durations);
+
             const hasCurrent = p.durations.some((d) => d.key === current);
-            if (!hasCurrent) next[p.key] = pickDefaultDurationKey(p.durations);
+            next[p.key] = hasCurrent ? current : safeDefault;
           }
           return next;
         });
@@ -339,7 +362,9 @@ export default function CompanySubscriptionsPage() {
   const PACKAGES = packages;
 
   const pkgObj = PACKAGES.find((p) => p.key === activePackage) || PACKAGES[0];
-  const selectedDurationKey = selectedDurationByPkg?.[activePackage] || pickDefaultDurationKey(pkgObj?.durations || []);
+  const selectedDurationKey =
+    selectedDurationByPkg?.[activePackage] || pickDefaultDurationKey(pkgObj?.durations || []);
+
   const durationObj =
     pkgObj?.durations?.find((d) => d.key === selectedDurationKey) ||
     pkgObj?.durations?.[pkgObj?.durations?.length - 1];
@@ -349,20 +374,20 @@ export default function CompanySubscriptionsPage() {
     setActivePackage(pkgKey);
   };
 
-  // ✅ unified redirect to login with full metadata (same contract we’ll use in dashboard)
+  // ✅ unified redirect to login with full metadata
   const goSubscribe = () => {
     if (!pkgObj || !durationObj) return;
 
     const qs = new URLSearchParams();
     qs.set("lang", lang);
 
-    // intent contract (important)
+    // intent
     qs.set("intent", "company_subscription");
 
     // plan identity
-    qs.set("planKey", pkgObj.key);               // ✅ canonical
-    qs.set("planName", asText(pkgObj.name, "")); // ✅ display
-    qs.set("package", pkgObj.key);               // ✅ backward compatibility (if old code reads "package")
+    qs.set("planKey", pkgObj.key);
+    qs.set("planName", asText(pkgObj.name, ""));
+    qs.set("package", pkgObj.key);
 
     // duration identity
     qs.set("duration", durationObj.key);
@@ -373,10 +398,7 @@ export default function CompanySubscriptionsPage() {
     qs.set("bonus", String(Number(durationObj.bonus || 0)));
 
     const totalMonths = Number(durationObj.paidMonths || 0) + Number(durationObj.bonus || 0);
-    qs.set("months", String(totalMonths || durationObj.monthsShown || 1));
-
-    // optional stripe price id (if stored)
-    if (durationObj.stripePriceId) qs.set("stripePriceId", durationObj.stripePriceId);
+    qs.set("months", String(totalMonths || (durationObj.key === "semiannual" ? 6 : 12)));
 
     router.push(`/login?${qs.toString()}`);
   };
@@ -555,10 +577,7 @@ export default function CompanySubscriptionsPage() {
                                         {d.hasOffer ? (
                                           <div className="mt-1 text-[12px] font-extrabold text-amber-200">{d.offerLine}</div>
                                         ) : (
-                                          <div className="mt-1 text-[12px] text-white/60 font-semibold">
-                                            {Number(d.monthsShown || 1)}{" "}
-                                            {Number(d.monthsShown || 1) === 1 ? t.month : t.months}
-                                          </div>
+                                          <div className="mt-1 text-[12px] text-white/45 font-semibold">{t.noOffer}</div>
                                         )}
 
                                         <div className="mt-3">
