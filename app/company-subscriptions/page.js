@@ -23,6 +23,7 @@ import {
   Sparkle,
   PlusCircle,
   Layers,
+  Timer,
 } from "lucide-react";
 
 // ✅ Firestore
@@ -173,13 +174,14 @@ function allowedDurationsForPackage(pkgKey) {
   return new Set(["semiannual", "yearly"]);
 }
 
+/** ✅ Fixed duration labels */
 const DUR_LABELS = {
   semiannual: { ar: "نصف سنوي", en: "Semiannual" },
   yearly: { ar: "سنوي", en: "Yearly" },
 };
 
 /* =========================
-   ✅ PLAN META (official, global tone)
+   ✅ Visual + Psychological copy meta (Front-only)
 ========================= */
 const PLAN_META = {
   starter: {
@@ -188,12 +190,12 @@ const PLAN_META = {
     monthlyLimit: 10,
     vibeAr: "للشركات الصغيرة (1–5)",
     vibeEn: "For small teams (1–5)",
-    headlineAr: "ابدأ بتشغيل معاملات شركتك بمعيار احترافي وواضح.",
-    headlineEn: "Launch your company operations with clarity and control.",
+    headlineAr: "أساس قوي لتشغيل معاملات شركتك بوضوح كامل.",
+    headlineEn: "A clean foundation for company transactions with full clarity.",
     subAr:
-      "يغطي الاشتراك رسوم الطباعة والضريبة ضمن حد شهري مشمول، مع بقاء الرسوم الحكومية ورسوم Stripe محسوبة دائمًا.",
+      "يغطي الاشتراك رسوم الطباعة وضريبة القيمة المضافة ضمن حد شهري مشمول، مع بقاء الرسوم الحكومية ورسوم Stripe محسوبة دائمًا.",
     subEn:
-      "Subscription covers printing & VAT within a monthly included limit, while government fees and Stripe fees always apply.",
+      "Subscription covers printing & VAT within a monthly included limit—government fees and Stripe fees always apply.",
   },
   growth: {
     agenciesAr: ["تسهيل", "آمر", "المحاكم"],
@@ -201,12 +203,12 @@ const PLAN_META = {
     monthlyLimit: 20,
     vibeAr: "للعمليات المتنامية",
     vibeEn: "For growing operations",
-    headlineAr: "نمو أسرع… بتكاليف متوقعة وحدود استخدام واضحة.",
-    headlineEn: "Scale faster—with predictable costs and clear limits.",
+    headlineAr: "ارتقِ بالسرعة… دون فقدان التحكم في التكلفة.",
+    headlineEn: "Scale speed—without losing cost control.",
     subAr:
-      "مناسب للشركات التي يرتفع حجم معاملاتِها شهريًا، مع تطبيق سياسة الاستخدام العادل بشكل تلقائي.",
+      "مصمم لفرق ترتفع معاملاتها شهريًا، مع نفس مبدأ الاستخدام العادل ووضوح الفوترة.",
     subEn:
-      "Ideal for teams with increasing monthly volume—fair-use is applied automatically.",
+      "Built for teams with increasing monthly volume—same fair-use policy and billing clarity.",
   },
   scale: {
     agenciesAr: ["تسهيل", "آمر", "المحاكم", "جهة إضافية"],
@@ -214,39 +216,26 @@ const PLAN_META = {
     monthlyLimit: 30,
     vibeAr: "للشركات عالية الحركة",
     vibeEn: "For high-velocity teams",
-    headlineAr: "إنتاجية أعلى… وزمن أقل… دون فقدان السيطرة على التكلفة.",
-    headlineEn: "Higher throughput—less time—without losing cost control.",
+    headlineAr: "حجم أعلى… تنظيم أقوى… تجربة أكثر سلاسة.",
+    headlineEn: "Higher volume. Stronger ops. Smoother experience.",
     subAr:
-      "مناسب للفرق ذات المعاملات الكثيفة، مع رؤية أوضح قبل الوصول إلى الحد الشهري.",
+      "للمهام المكثفة مع أولوية أعلى وتخطيط واضح قبل تجاوز الحد الشهري.",
     subEn:
-      "Built for heavier workflows, with clearer visibility before reaching your monthly limit.",
+      "For heavier workflows with higher priority and clear planning before limit.",
   },
   enterprise: {
     agenciesAr: ["كل الجهات"],
     agenciesEn: ["All entities"],
     monthlyLimit: "مخصص",
-    vibeAr: "للشركات الكبيرة",
+    vibeAr: "للشركات والمؤسسات",
     vibeEn: "For enterprise teams",
-    headlineAr: "حل مؤسسي: مرونة أعلى، سقف مخصص، وخيارات اتفاقيات خدمة.",
-    headlineEn: "Enterprise-grade: higher flexibility, custom limits, and SLA options.",
+    headlineAr: "حل مؤسسي: سقف أعلى + مرونة + مزايا تشغيلية.",
+    headlineEn: "Enterprise grade: higher caps, flexibility, operational advantages.",
     subAr:
-      "للشركات ذات الأحجام الكبيرة التي تحتاج تنظيمًا أدق واستجابة أعلى، مع إمكانية التعاقد الخاص لاحقًا.",
+      "للجهات ذات الحجم الكبير والتي تتطلب مستوى خدمة أعلى وإمكانية ترتيبات خاصة لاحقًا.",
     subEn:
-      "Designed for high-volume operations needing tighter controls and higher responsiveness, with optional custom contracts later.",
+      "For large-volume teams needing higher service levels and optional custom arrangements later.",
   },
-};
-
-/* =========================
-   ✅ Add-On Meta (Pay-as-you-go)
-   Firestore: companySubscriptionAddOns
-========================= */
-const ADDON_META = {
-  titleAr: "إضافات معاملات (Pay-As-You-Go)",
-  titleEn: "Transaction Add-Ons (Pay-As-You-Go)",
-  subAr:
-    "الإضافة تغطي رسوم الطباعة والضريبة فقط، ولا تؤثر على رسوم Stripe. الرسوم الحكومية تُحتسب دائمًا على العميل.",
-  subEn:
-    "Add-ons cover printing & VAT only and do not affect Stripe fees. Government fees are always paid by the client.",
 };
 
 function StatPill({ icon: Icon, label, value, tone = "border-white/10 bg-white/6" }) {
@@ -266,16 +255,16 @@ function StatPill({ icon: Icon, label, value, tone = "border-white/10 bg-white/6
 function TrustStrip({ isArabic }) {
   const items = isArabic
     ? [
-        { icon: BadgeCheck, t: "منصة موثوقة" },
-        { icon: Receipt, t: "شفافية تسعير كاملة" },
-        { icon: Lock, t: "حماية بيانات الشركة" },
-        { icon: AlertTriangle, t: "رسوم Stripe تُحتسب دائمًا" },
+        { icon: BadgeCheck, t: "منصة موثوقة بمعايير تشغيل واضحة" },
+        { icon: Receipt, t: "شفافية كاملة في عناصر التكلفة" },
+        { icon: Lock, t: "حماية بيانات الشركة وضوابط الوصول" },
+        { icon: AlertTriangle, t: "الرسوم الحكومية وStripe تُحتسب دائمًا" },
       ]
     : [
-        { icon: BadgeCheck, t: "Trusted platform" },
-        { icon: Receipt, t: "Full pricing transparency" },
-        { icon: Lock, t: "Company data protection" },
-        { icon: AlertTriangle, t: "Stripe fees always apply" },
+        { icon: BadgeCheck, t: "Trusted platform with clear operating rules" },
+        { icon: Receipt, t: "Full cost transparency" },
+        { icon: Lock, t: "Data protection & access control" },
+        { icon: AlertTriangle, t: "Government + Stripe fees always apply" },
       ];
 
   return (
@@ -303,148 +292,116 @@ function TrustStrip({ isArabic }) {
 }
 
 /* =========================
-   ✅ One authoritative policy block (no repetition)
+   ✅ Add-ons strip (Pulled from Firestore)
+   Collection: companyAddonsCatalog
 ========================= */
-function PricingPolicyBlock({ isArabic }) {
+function AddonsStrip({ isArabic, t, addons = [], onBuy }) {
+  if (!addons?.length) return null;
+
   return (
-    <div className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-5 sm:p-6">
-      <div className={cn("flex items-start justify-between gap-4", isArabic && "flex-row-reverse")}>
-        <div className={cn("min-w-0", isArabic && "text-right")}>
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-white/10 bg-black/20 text-white/80 text-[11px] font-extrabold">
+    <div className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl overflow-hidden">
+      <div className="px-5 sm:px-6 py-4 border-b border-white/10 bg-black/20">
+        <div className={cn("flex items-center justify-between gap-3", isArabic && "flex-row-reverse")}>
+          <div className={cn("flex items-center gap-2", isArabic && "flex-row-reverse")}>
+            <div className="w-10 h-10 rounded-2xl bg-white/6 border border-white/10 flex items-center justify-center">
+              <PlusCircle className="w-5 h-5 text-white/80" />
+            </div>
+            <div className={cn("min-w-0", isArabic && "text-right")}>
+              <div className="text-white font-extrabold">{t.addonsTitle}</div>
+              <div className="text-white/60 text-[12px] font-semibold">
+                {t.addonsSub}
+              </div>
+            </div>
+          </div>
+
+          <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-[11px] font-extrabold border border-white/10 bg-white/6 text-white/80">
             <Layers className="w-4 h-4" />
-            {isArabic ? "سياسة التسعير والاستخدام" : "Pricing & Usage Policy"}
-          </div>
+            {t.addonsUniversal}
+          </span>
+        </div>
+      </div>
 
-          <h2 className="mt-3 text-xl sm:text-2xl font-extrabold text-white leading-tight">
-            {isArabic ? "تفاصيل تكلفة أي معاملة — ثابتة وواضحة" : "Transaction cost breakdown — fixed & clear"}
-          </h2>
+      {/* Scroll strip */}
+      <div className="p-4 sm:p-5">
+        <div className="flex gap-3 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {addons.map((a) => {
+            const title = asText(a?.title, "");
+            const isPopular = !!a?.popular;
 
-          <div className="mt-3 space-y-3 text-white/75 text-sm font-semibold leading-relaxed">
-            <div className={cn("rounded-2xl border border-white/10 bg-black/20 p-4", isArabic && "text-right")}>
-              <div className="text-white font-extrabold mb-2">{isArabic ? "مكوّنات أي معاملة في تأهيل:" : "Every transaction in TAHEEL includes:"}</div>
-              <div className="space-y-2">
-                <div className={cn("flex items-start gap-2", isArabic && "flex-row-reverse")}>
-                  <Check className="w-4 h-4 text-emerald-300 mt-[2px] shrink-0" />
-                  <span>
-                    <span className="text-white font-extrabold">{isArabic ? "الرسوم الحكومية:" : "Government fees:"}</span>{" "}
-                    {isArabic ? "على العميل دائمًا." : "always paid by the client."}
-                  </span>
+            const priceRange =
+              a?.type === "emergency" && (Number(a?.priceMin || 0) > 0 || Number(a?.priceMax || 0) > 0)
+                ? `${Number(a?.priceMin || 0).toLocaleString()}–${Number(a?.priceMax || 0).toLocaleString()}`
+                : Number(a?.price || 0).toLocaleString();
+
+            const qtyLabel =
+              a?.type === "bundle"
+                ? isArabic
+                  ? `${Number(a?.qty || 0)} معاملات`
+                  : `${Number(a?.qty || 0)} tx`
+                : isArabic
+                ? "معاملة واحدة"
+                : "Single";
+
+            return (
+              <div
+                key={a.addonKey}
+                className="min-w-[280px] sm:min-w-[320px] rounded-3xl border border-white/10 bg-black/20 p-4 relative"
+              >
+                {isPopular ? (
+                  <div className={cn("absolute -top-3 z-20", isArabic ? "right-4" : "left-4")}>
+                    <span className="px-3 py-1 rounded-full text-[11px] font-extrabold shadow border bg-amber-400 text-black border-amber-200/40">
+                      {t.mostPopular}
+                    </span>
+                  </div>
+                ) : null}
+
+                <div className={cn("flex items-start justify-between gap-3", isArabic && "flex-row-reverse text-right")}>
+                  <div className="min-w-0">
+                    <div className="text-white font-extrabold text-base truncate">{title}</div>
+                    <div className="mt-1 text-[12px] text-white/65 font-semibold">
+                      {t.addonsCoversLine}
+                    </div>
+                  </div>
+                  <div className="w-11 h-11 rounded-2xl bg-white/6 border border-white/10 flex items-center justify-center shrink-0">
+                    <Timer className="w-5 h-5 text-white/80" />
+                  </div>
                 </div>
 
-                <div className={cn("flex items-start gap-2", isArabic && "flex-row-reverse")}>
-                  <Check className="w-4 h-4 text-emerald-300 mt-[2px] shrink-0" />
-                  <span>
-                    <span className="text-white font-extrabold">{isArabic ? "رسوم الطباعة:" : "Printing fees:"}</span>{" "}
-                    {isArabic
-                      ? "مشمولة ضمن الاشتراك حتى الحد الشهري المشمول؛ ثم تُحتسب تلقائيًا بعده."
-                      : "covered by subscription up to the monthly included limit; then automatically applies after."}
-                  </span>
-                </div>
+                <div className="mt-4 rounded-2xl bg-white/6 border border-white/10 p-3">
+                  <div className={cn("flex items-center justify-between", isArabic && "flex-row-reverse")}>
+                    <div className="text-white/55 text-xs font-bold">{t.addonsBundle}</div>
+                    <div className="text-white font-extrabold text-sm">{qtyLabel}</div>
+                  </div>
 
-                <div className={cn("flex items-start gap-2", isArabic && "flex-row-reverse")}>
-                  <Check className="w-4 h-4 text-emerald-300 mt-[2px] shrink-0" />
-                  <span>
-                    <span className="text-white font-extrabold">{isArabic ? "ضريبة القيمة المضافة (VAT):" : "VAT:"}</span>{" "}
-                    {isArabic
-                      ? "مشمولة ضمن الاشتراك حتى الحد الشهري المشمول؛ ثم تُحتسب تلقائيًا بعده."
-                      : "covered by subscription up to the monthly included limit; then automatically applies after."}
-                  </span>
-                </div>
+                  <div className={cn("mt-3 flex items-end justify-between gap-3", isArabic && "flex-row-reverse")}>
+                    <div className="min-w-0">
+                      <div className="text-white/55 text-xs">{t.finalPrice}</div>
+                      <div className="text-white text-2xl font-extrabold leading-none mt-1">
+                        {priceRange} <span className="text-xs text-white/55 font-semibold">{t.aed}</span>
+                      </div>
+                      <div className="mt-2 text-[11px] text-white/55 font-semibold">
+                        {t.addonsStripeNote}
+                      </div>
+                    </div>
 
-                <div className={cn("flex items-start gap-2", isArabic && "flex-row-reverse")}>
-                  <AlertTriangle className="w-4 h-4 text-amber-200 mt-[2px] shrink-0" />
-                  <span>
-                    <span className="text-white font-extrabold">{isArabic ? "رسوم الدفع الإلكتروني (Stripe):" : "Payment processing (Stripe):"}</span>{" "}
-                    {isArabic
-                      ? "تُحتسب دائمًا ولا تُلغى ضمن أي باقة، لأنها تكلفة خارجية."
-                      : "always applies and is not waived by any plan, as it is an external cost."}
-                  </span>
+                    <ButtonGlow radius="rounded-full">
+                      <button
+                        type="button"
+                        onClick={() => onBuy?.(a)}
+                        className="cursor-pointer shrink-0 px-4 py-2.5 rounded-full font-extrabold text-white shadow-lg transition hover:scale-[1.02] active:scale-[0.99] bg-gradient-to-r from-sky-700 via-sky-500 to-indigo-700"
+                      >
+                        {t.addonsBuy}
+                      </button>
+                    </ButtonGlow>
+                  </div>
                 </div>
               </div>
-            </div>
-
-            <div className={cn("rounded-2xl border border-white/10 bg-black/20 p-4", isArabic && "text-right")}>
-              <div className="text-white font-extrabold mb-2">{isArabic ? "منطق الاشتراك (استخدام عادل):" : "Subscription logic (Fair use):"}</div>
-              <div className="space-y-2">
-                <div className={cn("flex items-start gap-2", isArabic && "flex-row-reverse")}>
-                  <Check className="w-4 h-4 text-emerald-300 mt-[2px] shrink-0" />
-                  <span>
-                    {isArabic
-                      ? "الاشتراك يغطي فقط: رسوم الطباعة + VAT ضمن حد شهري مشمول لكل باقة."
-                      : "Subscription covers: printing fees + VAT within a monthly included limit per plan."}
-                  </span>
-                </div>
-                <div className={cn("flex items-start gap-2", isArabic && "flex-row-reverse")}>
-                  <Check className="w-4 h-4 text-emerald-300 mt-[2px] shrink-0" />
-                  <span>
-                    {isArabic
-                      ? "بعد تجاوز الحد: تُطبق رسوم الطباعة وVAT تلقائيًا، أو يمكن الترقية أو شراء Add-On."
-                      : "After reaching the limit: printing & VAT apply automatically, or you can upgrade or purchase an add-on."}
-                  </span>
-                </div>
-                <div className={cn("flex items-start gap-2", isArabic && "flex-row-reverse")}>
-                  <AlertTriangle className="w-4 h-4 text-amber-200 mt-[2px] shrink-0" />
-                  <span>
-                    {isArabic
-                      ? "الرسوم الحكومية ورسوم Stripe تظل محسوبة دائمًا في جميع الحالات."
-                      : "Government fees and Stripe fees always apply in all cases."}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className={cn("rounded-2xl border border-white/10 bg-black/20 p-4", isArabic && "text-right")}>
-              <div className="text-white font-extrabold mb-2">{isArabic ? "مثال توضيحي (Starter):" : "Example (Starter):"}</div>
-              <div className="space-y-2 text-[13px]">
-                <div className={cn("flex items-start gap-2", isArabic && "flex-row-reverse")}>
-                  <Check className="w-4 h-4 text-emerald-300 mt-[2px] shrink-0" />
-                  <span>
-                    {isArabic
-                      ? "تنفيذ 8 معاملات: بدون رسوم طباعة + بدون VAT (مع احتساب Stripe)."
-                      : "8 transactions: no printing fees + no VAT (Stripe applies)."}
-                  </span>
-                </div>
-                <div className={cn("flex items-start gap-2", isArabic && "flex-row-reverse")}>
-                  <Check className="w-4 h-4 text-emerald-300 mt-[2px] shrink-0" />
-                  <span>
-                    {isArabic
-                      ? "المعاملة 11: تُطبق رسوم الطباعة وVAT تلقائيًا (مع احتساب Stripe)."
-                      : "11th transaction: printing fees + VAT apply automatically (Stripe applies)."}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className={cn("rounded-2xl border border-white/10 bg-black/20 p-4", isArabic && "text-right")}>
-              <div className={cn("flex items-center gap-2", isArabic && "flex-row-reverse")}>
-                <PlusCircle className="w-4 h-4 text-sky-200" />
-                <div className="text-white font-extrabold">
-                  {isArabic ? ADDON_META.titleAr : ADDON_META.titleEn}
-                </div>
-              </div>
-              <div className="mt-2 text-white/75 text-[13px] font-semibold leading-relaxed">
-                {isArabic ? ADDON_META.subAr : ADDON_META.subEn}
-              </div>
-            </div>
-          </div>
+            );
+          })}
         </div>
 
-        <div className="hidden md:flex flex-col gap-3 shrink-0">
-          <StatPill
-            icon={Globe}
-            label={isArabic ? "نطاق الخدمة" : "Scope"}
-            value={isArabic ? "داخل الإمارات" : "UAE"}
-          />
-          <StatPill
-            icon={TrendingUp}
-            label={isArabic ? "توقع التكلفة" : "Predictability"}
-            value={isArabic ? "حدود واضحة" : "Clear limits"}
-          />
-          <StatPill
-            icon={Lock}
-            label={isArabic ? "الامتثال" : "Compliance"}
-            value={isArabic ? "سياسة شفافة" : "Transparent policy"}
-          />
+        <div className={cn("mt-3 text-[12px] text-white/60 font-semibold", isArabic && "text-right")}>
+          {t.addonsFootnote}
         </div>
       </div>
     </div>
@@ -464,43 +421,44 @@ export default function CompanySubscriptionsPage() {
       back: "رجوع",
       pageTitle: "اشتراكات الشركات",
       chooseDuration: "اختر المدة",
-      fixedDuration: "مدة ثابتة",
+      fixedDuration: "المدة ثابتة",
       months: "أشهر",
       month: "شهر",
       total: "الإجمالي",
       subscribeNow: "اشترك الآن",
-      summary: "ملخص الاشتراك",
+      summary: "ملخص الباقة",
       package: "الباقة",
       duration: "المدة",
       aed: "درهم",
       finalPrice: "السعر النهائي",
       perks: "المزايا",
-      select: "محدد",
+      select: "تم الاختيار",
       langBtn: "EN",
-      loading: "جارٍ تحميل الباقات...",
+      loading: "جاري تحميل الباقات...",
       empty: "لا توجد باقات متاحة حاليًا.",
-      noOffer: "لا يوجد عرض",
+      noOffer: "بدون عرض",
       free: "مجانًا",
       pay: "تدفع",
       specialOffer: "عرض خاص",
       agencies: "الجهات المشمولة",
       monthlyLimit: "الحد الشهري المشمول",
-      fairUse: "استخدام عادل",
-      fairUseLine:
-        "عند تجاوز الحد الشهري، تُطبق رسوم الطباعة وVAT تلقائيًا، أو يمكنك الترقية أو شراء إضافة معاملات. الرسوم الحكومية ورسوم Stripe تُحتسب دائمًا.",
-      scenario: "مثال سريع",
-      scenarioLine1: "8 معاملات: بدون رسوم طباعة + بدون VAT (مع احتساب Stripe)",
-      scenarioLine2: "المعاملة 11: تُطبق رسوم الطباعة وVAT تلقائيًا (مع احتساب Stripe)",
-      instantSetup: "تفعيل سريع",
-      clarity: "وضوح التكلفة",
-      addOnsTitle: "إضافات معاملات",
-      addOnsLoading: "جارٍ تحميل الإضافات...",
-      addOnsEmpty: "لا توجد إضافات متاحة حاليًا.",
-      addOnUnits: "معاملات إضافية",
-      addOnCovers: "تغطي: الطباعة + VAT فقط",
-      stripeAlways: "Stripe يُحتسب دائمًا",
-      govAlways: "الرسوم الحكومية على العميل",
-      buyAddOn: "شراء إضافة",
+      policyTitle: "سياسة الاستخدام العادل",
+      policyLine:
+        "عند تجاوز الحد الشهري، تُطبّق رسوم الطباعة وضريبة القيمة المضافة تلقائيًا، أو يمكن الترقية أو شراء إضافة معاملات. الرسوم الحكومية ورسوم Stripe تُحتسب دائمًا.",
+      scenario: "مثال توضيحي",
+      scenarioLine1: "إنجاز 8 معاملات: دون رسوم طباعة وضريبة (مع احتساب Stripe).",
+      scenarioLine2: "عند المعاملة 11: تُعاد رسوم الطباعة والضريبة تلقائيًا (مع احتساب Stripe).",
+      // ✅ Add-ons
+      addonsTitle: "إضافة معاملات (Add-On)",
+      addonsSub: "تحكم مرن عند الحاجة — دون إيقاف أو مفاجآت.",
+      addonsUniversal: "مناسبة لجميع الباقات",
+      addonsCoversLine: "تغطي: الطباعة + VAT + المعالجة الإدارية — لا تشمل الرسوم الحكومية أو Stripe.",
+      addonsStripeNote: "ملاحظة: رسوم Stripe تُحتسب دائمًا.",
+      addonsBuy: "شراء الإضافة",
+      addonsBundle: "الحزمة",
+      addonsFootnote:
+        "الإضافات تُستخدم فقط لتغطية (الطباعة + VAT + المعالجة). الرسوم الحكومية ورسوم Stripe لا تدخل ضمن الاشتراك أو الإضافة.",
+      mostPopular: "الأكثر طلبًا",
     };
 
     const en = {
@@ -517,41 +475,45 @@ export default function CompanySubscriptionsPage() {
       duration: "Duration",
       aed: "AED",
       finalPrice: "Final price",
-      perks: "Perks",
+      perks: "Benefits",
       select: "Selected",
       langBtn: "AR",
-      loading: "Loading plans...",
-      empty: "No plans available right now.",
+      loading: "Loading packages...",
+      empty: "No packages available right now.",
       noOffer: "No offer",
       free: "free",
       pay: "Pay",
       specialOffer: "Special Offer",
       agencies: "Included entities",
       monthlyLimit: "Monthly included limit",
-      fairUse: "Fair use",
-      fairUseLine:
-        "After the monthly limit, printing & VAT apply automatically, or you can upgrade or purchase an add-on. Government fees and Stripe fees always apply.",
-      scenario: "Quick example",
-      scenarioLine1: "8 transactions: no printing fees + no VAT (Stripe applies)",
-      scenarioLine2: "11th: printing fees + VAT apply automatically (Stripe applies)",
-      instantSetup: "Fast activation",
-      clarity: "Cost clarity",
-      addOnsTitle: "Transaction Add-Ons",
-      addOnsLoading: "Loading add-ons...",
-      addOnsEmpty: "No add-ons available right now.",
-      addOnUnits: "Extra transactions",
-      addOnCovers: "Covers: printing + VAT only",
-      stripeAlways: "Stripe always applies",
-      govAlways: "Government fees are paid by client",
-      buyAddOn: "Buy Add-On",
+      policyTitle: "Fair-Use Policy",
+      policyLine:
+        "When the monthly limit is exceeded, printing & VAT apply automatically, or you can upgrade / purchase an add-on. Government fees and Stripe fees always apply.",
+      scenario: "Example",
+      scenarioLine1: "8 transactions: no printing + no VAT (Stripe applies).",
+      scenarioLine2: "11th: printing + VAT apply automatically (Stripe applies).",
+      // ✅ Add-ons
+      addonsTitle: "Transaction Add-Ons",
+      addonsSub: "Flexible control when you need it—no blocks, no surprises.",
+      addonsUniversal: "Works with any plan",
+      addonsCoversLine: "Covers: printing + VAT + admin processing — excludes government & Stripe fees.",
+      addonsStripeNote: "Note: Stripe fee always applies.",
+      addonsBuy: "Buy Add-On",
+      addonsBundle: "Bundle",
+      addonsFootnote:
+        "Add-ons are only for (printing + VAT + admin processing). Government & Stripe fees are never included in plans or add-ons.",
+      mostPopular: "Most popular",
     };
 
     return isArabic ? ar : en;
   }, [isArabic]);
 
-  // ✅ Plans from Firestore
+  // ✅ Packages from Firestore
   const [packages, setPackages] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // ✅ Add-ons from Firestore
+  const [addons, setAddons] = useState([]);
 
   const [activePackage, setActivePackage] = useState(pkgFromUrl);
 
@@ -561,10 +523,6 @@ export default function CompanySubscriptionsPage() {
     scale: "yearly",
     enterprise: "yearly",
   });
-
-  // ✅ Add-ons from Firestore
-  const [addOns, setAddOns] = useState([]);
-  const [addOnsLoading, setAddOnsLoading] = useState(true);
 
   useEffect(() => {
     if (pkgFromUrl) setActivePackage(pkgFromUrl);
@@ -577,15 +535,14 @@ export default function CompanySubscriptionsPage() {
       try {
         setLoading(true);
 
+        // ✅ Plans
         const snap = await getDocs(collection(firestore, "companySubscriptionPlans"));
-
         const rowsRaw = snap.docs.map((docSnap) => {
           const data = docSnap.data() || {};
           const key = docSnap.id;
 
           const Icon = ICONS_BY_KEY[key] || Sparkles;
           const brand = DEFAULT_BRAND[key] || DEFAULT_BRAND.starter;
-
           const isActive = data.isActive !== false;
 
           const rawPricing = data.pricing || {};
@@ -602,7 +559,6 @@ export default function CompanySubscriptionsPage() {
 
               const hasOffer = isOfferDuration(durKey) && bonus > 0 && paidMonths > 0;
               const offerLine = hasOffer ? offerText({ paidMonths, bonus }, isArabic, t) : "";
-
               const title = DUR_LABELS?.[durKey]?.[isArabic ? "ar" : "en"] || durKey;
 
               return { key: durKey, title, paidMonths, bonus, price, offerLine, hasOffer };
@@ -632,10 +588,44 @@ export default function CompanySubscriptionsPage() {
           .filter((p) => safeArray(p.durations).length > 0)
           .sort((a, b) => (PACKAGE_ORDER[a.key] || 99) - (PACKAGE_ORDER[b.key] || 99));
 
+        // ✅ Add-ons Catalog
+        const aSnap = await getDocs(collection(firestore, "companyAddonsCatalog"));
+        const aRows = aSnap.docs
+          .map((d) => {
+            const data = d.data() || {};
+            const addonKey = d.id;
+            const isActive = data.isActive !== false;
+            return {
+              addonKey,
+              title: data.title,
+              qty: Number(data.qty || 0),
+              price: Number(data.price || 0),
+              priceMin: Number(data.priceMin || 0),
+              priceMax: Number(data.priceMax || 0),
+              currency: String(data.currency || "AED"),
+              perTxn: Number(data.perTxn || 0),
+              popular: !!data.popular,
+              type: String(data.type || "bundle"),
+              covers: data.covers || {},
+              stripe: data.stripe || {},
+              isActive,
+              sortIndex: Number(data.sortIndex || 999),
+            };
+          })
+          .filter((x) => x.isActive)
+          .sort((a, b) => {
+            // popular first, then sortIndex, then qty asc
+            if (!!b.popular !== !!a.popular) return b.popular ? 1 : -1;
+            if ((a.sortIndex || 999) !== (b.sortIndex || 999)) return (a.sortIndex || 999) - (b.sortIndex || 999);
+            return (a.qty || 0) - (b.qty || 0);
+          });
+
         if (!mounted) return;
 
         setPackages(rows);
+        setAddons(aRows);
 
+        // ✅ fix defaults
         setSelectedDurationByPkg((prev) => {
           const next = { ...prev };
           for (const p of rows) {
@@ -657,8 +647,11 @@ export default function CompanySubscriptionsPage() {
         const stillExists = rows.some((p) => p.key === (pkgFromUrl || activePackage));
         if (!stillExists && rows[0]?.key) setActivePackage(rows[0].key);
       } catch (e) {
-        console.error("Failed to load companySubscriptionPlans:", e);
-        if (mounted) setPackages([]);
+        console.error("Failed to load plans/addons:", e);
+        if (mounted) {
+          setPackages([]);
+          setAddons([]);
+        }
       } finally {
         if (mounted) setLoading(false);
       }
@@ -670,58 +663,9 @@ export default function CompanySubscriptionsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isArabic, t]);
 
-  useEffect(() => {
-    let mounted = true;
-
-    (async () => {
-      try {
-        setAddOnsLoading(true);
-
-        // ✅ Collection: companySubscriptionAddOns
-        // Suggested doc fields:
-        // - isActive: boolean
-        // - name: { ar, en } or string
-        // - qty: number (e.g., 5, 10)
-        // - price: number (covers printing + VAT only)
-        // - note: { ar, en } optional
-        const snap = await getDocs(collection(firestore, "companySubscriptionAddOns"));
-
-        const rows = snap.docs
-          .map((d) => {
-            const data = d.data() || {};
-            const isActive = data.isActive !== false;
-            return {
-              id: d.id,
-              isActive,
-              name: localized(data.name, isArabic ? "ar" : "en", ""),
-              qty: Number(data.qty || 0),
-              price: Number(data.price || 0),
-              note: localized(data.note, isArabic ? "ar" : "en", ""),
-              sort: Number(data.sort || 0),
-            };
-          })
-          .filter((x) => x.isActive)
-          .filter((x) => x.qty > 0 && x.price >= 0)
-          .sort((a, b) => (a.sort || 0) - (b.sort || 0) || a.qty - b.qty);
-
-        if (!mounted) return;
-        setAddOns(rows);
-      } catch (e) {
-        console.error("Failed to load companySubscriptionAddOns:", e);
-        if (mounted) setAddOns([]);
-      } finally {
-        if (mounted) setAddOnsLoading(false);
-      }
-    })();
-
-    return () => {
-      mounted = false;
-    };
-  }, [isArabic]);
-
   const PACKAGES = packages;
-  const pkgObj = PACKAGES.find((p) => p.key === activePackage) || PACKAGES[0];
 
+  const pkgObj = PACKAGES.find((p) => p.key === activePackage) || PACKAGES[0];
   const selectedDurationKey =
     selectedDurationByPkg?.[activePackage] || pickDefaultDurationKey(pkgObj?.durations || []);
 
@@ -729,21 +673,25 @@ export default function CompanySubscriptionsPage() {
     pkgObj?.durations?.find((d) => d.key === selectedDurationKey) ||
     pkgObj?.durations?.[pkgObj?.durations?.length - 1];
 
+  const meta = PLAN_META?.[pkgObj?.key] || PLAN_META.starter;
+
   const setDurationFor = (pkgKey, durationKey) => {
     setSelectedDurationByPkg((prev) => ({ ...prev, [pkgKey]: durationKey }));
     setActivePackage(pkgKey);
   };
 
-  // ✅ subscribe redirect
+  // ✅ redirect to login (subscription intent)
   const goSubscribe = () => {
     if (!pkgObj || !durationObj) return;
 
     const qs = new URLSearchParams();
     qs.set("lang", lang);
     qs.set("intent", "company_subscription");
+
     qs.set("planKey", pkgObj.key);
     qs.set("planName", asText(pkgObj.name, ""));
     qs.set("package", pkgObj.key);
+
     qs.set("duration", durationObj.key);
     qs.set("price", String(Number(durationObj.price || 0)));
     qs.set("paidMonths", String(Number(durationObj.paidMonths || 0)));
@@ -755,17 +703,29 @@ export default function CompanySubscriptionsPage() {
     router.push(`/login?${qs.toString()}`);
   };
 
-  // ✅ add-on purchase redirect (keeps same payment flow style)
-  const buyAddOn = (addOn) => {
-    if (!addOn) return;
+  // ✅ Add-on buy (go to login with addon intent)
+  const goBuyAddon = (addon) => {
+    if (!addon?.addonKey) return;
 
     const qs = new URLSearchParams();
     qs.set("lang", lang);
     qs.set("intent", "company_addon");
-    qs.set("addOnId", String(addOn.id));
-    qs.set("addOnName", asText(addOn.name, ""));
-    qs.set("qty", String(Number(addOn.qty || 0)));
-    qs.set("price", String(Number(addOn.price || 0)));
+
+    qs.set("addonKey", String(addon.addonKey));
+    qs.set("addonTitle", asText(addon.title, ""));
+
+    qs.set("type", String(addon.type || "bundle"));
+    qs.set("qty", String(Number(addon.qty || 0)));
+
+    // price or range
+    if (addon.type === "emergency") {
+      qs.set("priceMin", String(Number(addon.priceMin || 0)));
+      qs.set("priceMax", String(Number(addon.priceMax || 0)));
+    } else {
+      qs.set("price", String(Number(addon.price || 0)));
+    }
+
+    qs.set("currency", String(addon.currency || "AED"));
 
     router.push(`/login?${qs.toString()}`);
   };
@@ -779,7 +739,7 @@ export default function CompanySubscriptionsPage() {
 
   return (
     <section className="min-h-screen bg-gradient-to-b from-[#0b131e] via-[#0f1a26] to-[#070b12]">
-      {/* Background orbs */}
+      {/* Subtle background orbs */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div className="absolute -top-40 -left-40 w-[520px] h-[520px] rounded-full bg-emerald-500/10 blur-3xl" />
         <div className="absolute top-1/3 -right-40 w-[560px] h-[560px] rounded-full bg-sky-500/10 blur-3xl" />
@@ -828,7 +788,7 @@ export default function CompanySubscriptionsPage() {
             <div className="min-w-0">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-white/10 bg-black/20 text-white/80 text-[11px] font-extrabold">
                 <Sparkle className="w-4 h-4" />
-                {isArabic ? "تشغيل مؤسسي — استخدام عادل — شفافية كاملة" : "Enterprise-ready — Fair use — Full transparency"}
+                {isArabic ? "GovOps للشركات — شفافية — استخدام عادل" : "Company GovOps — Transparency — Fair use"}
               </div>
 
               <h1 className="mt-3 text-2xl sm:text-3xl md:text-4xl font-extrabold text-white leading-tight">
@@ -837,21 +797,21 @@ export default function CompanySubscriptionsPage() {
 
               <p className="mt-2 text-white/70 font-semibold text-sm sm:text-base leading-relaxed max-w-3xl">
                 {isArabic
-                  ? "صُمّمت اشتراكات تأهيل للشركات لتبسيط إدارة المعاملات عبر سياسة تسعير واضحة: يغطي الاشتراك رسوم الطباعة وVAT ضمن حد شهري مشمول، بينما تظل الرسوم الحكومية ورسوم Stripe محسوبة دائمًا."
-                  : "TAHEEL subscriptions are built for operational clarity: printing & VAT are covered within a monthly included limit, while government fees and Stripe fees always apply."}
+                  ? "نموذج اشتراك مؤسسي واضح: الاشتراك يغطي الطباعة وVAT ضمن حد شهري مشمول، بينما الرسوم الحكومية ورسوم Stripe تُحتسب دائمًا. عند الحاجة، يمكنك الترقية أو شراء إضافة معاملات دون تعطيل."
+                  : "A clear enterprise subscription model: plans cover printing & VAT within a monthly included limit, while government and Stripe fees always apply. Upgrade or buy an add-on anytime—without disruption."}
               </p>
             </div>
 
             <div className="hidden md:flex items-center gap-3">
               <StatPill
                 icon={Globe}
-                label={isArabic ? "نطاق الخدمة" : "Scope"}
-                value={isArabic ? "داخل الإمارات" : "UAE"}
+                label={isArabic ? "تشغيل داخل الإمارات" : "UAE operations"}
+                value={isArabic ? "GovOps منظم" : "Structured GovOps"}
               />
               <StatPill
                 icon={TrendingUp}
-                label={isArabic ? "تحكم بالتكلفة" : "Cost control"}
-                value={isArabic ? "حدود واضحة" : "Clear limits"}
+                label={isArabic ? "تحكم في التكاليف" : "Cost control"}
+                value={isArabic ? "ضمن الحد الشهري" : "Within monthly limit"}
               />
             </div>
           </div>
@@ -861,10 +821,9 @@ export default function CompanySubscriptionsPage() {
           </div>
         </div>
 
-        {/* ✅ One official policy block (replaces repeated lines everywhere) */}
-        <PricingPolicyBlock isArabic={isArabic} />
+        {/* ✅ Add-ons strip (brand-consistent) */}
+        <AddonsStrip isArabic={isArabic} t={t} addons={addons} onBuy={goBuyAddon} />
 
-        {/* Plans */}
         {loading ? (
           <div className={cn("text-white/70 font-extrabold", isArabic && "text-right")}>{t.loading}</div>
         ) : !PACKAGES?.length ? (
@@ -880,7 +839,7 @@ export default function CompanySubscriptionsPage() {
               const selectedDur =
                 p.durations.find((d) => d.key === selectedKey) || p.durations[p.durations.length - 1];
 
-              const isFixedDuration = p.durations.length === 1; // Starter only
+              const isFixedDuration = p.durations.length === 1; // ✅ Starter
 
               return (
                 <motion.div
@@ -959,11 +918,7 @@ export default function CompanySubscriptionsPage() {
                                   : "Custom"
                               }
                             />
-                            <StatPill
-                              icon={Shield}
-                              label={t.fairUse}
-                              value={isArabic ? "تطبيق تلقائي" : "Auto applied"}
-                            />
+                            <StatPill icon={Shield} label={t.policyTitle} value={isArabic ? "مفعّل تلقائيًا" : "Auto applied"} />
                           </div>
 
                           {p.fit ? (
@@ -989,7 +944,7 @@ export default function CompanySubscriptionsPage() {
                           className="px-5 sm:px-6 pb-6"
                         >
                           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-                            {/* Left */}
+                            {/* Left (Policy + Example) */}
                             <div className="lg:col-span-5">
                               <div className="rounded-3xl bg-black/25 border border-white/10 p-5">
                                 <div className={cn("flex items-start justify-between gap-3", isArabic && "flex-row-reverse")}>
@@ -1006,46 +961,23 @@ export default function CompanySubscriptionsPage() {
                                   </div>
                                 </div>
 
+                                {/* ✅ Single policy block (official + non-repetitive) */}
                                 <div className="mt-4 rounded-2xl bg-white/6 border border-white/10 p-4">
                                   <div className={cn("flex items-center gap-2", isArabic && "flex-row-reverse")}>
                                     <AlertTriangle className="w-4 h-4 text-amber-200" />
                                     <div className={cn("text-white font-extrabold text-sm", isArabic && "text-right")}>
-                                      {t.fairUse}
+                                      {t.policyTitle}
                                     </div>
                                   </div>
                                   <div className={cn("mt-2 text-white/70 text-[12px] font-semibold leading-relaxed", isArabic && "text-right")}>
-                                    {t.fairUseLine}
-                                  </div>
-                                </div>
-
-                                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                  <div className="rounded-2xl border border-white/10 bg-white/6 p-4">
-                                    <div className={cn("flex items-center gap-2", isArabic && "flex-row-reverse")}>
-                                      <Zap className="w-4 h-4 text-emerald-200" />
-                                      <div className={cn("text-white font-extrabold text-sm", isArabic && "text-right")}>
-                                        {t.instantSetup}
-                                      </div>
-                                    </div>
-                                    <div className={cn("mt-1 text-white/65 text-[12px] font-semibold", isArabic && "text-right")}>
-                                      {isArabic ? "تفعيل فوري دون خطوات مطولة." : "Instant activation with no long setup."}
-                                    </div>
-                                  </div>
-
-                                  <div className="rounded-2xl border border-white/10 bg-white/6 p-4">
-                                    <div className={cn("flex items-center gap-2", isArabic && "flex-row-reverse")}>
-                                      <Shield className="w-4 h-4 text-sky-200" />
-                                      <div className={cn("text-white font-extrabold text-sm", isArabic && "text-right")}>
-                                        {t.clarity}
-                                      </div>
-                                    </div>
-                                    <div className={cn("mt-1 text-white/65 text-[12px] font-semibold", isArabic && "text-right")}>
-                                      {isArabic ? "تكلفة متوقعة وواضحة قبل الدفع." : "Clear cost visibility before paying."}
-                                    </div>
+                                    {t.policyLine}
                                   </div>
                                 </div>
 
                                 <div className="mt-4 rounded-2xl border border-white/10 bg-white/6 p-4">
-                                  <div className={cn("text-white font-extrabold", isArabic && "text-right")}>{t.scenario}</div>
+                                  <div className={cn("flex items-center justify-between", isArabic && "flex-row-reverse")}>
+                                    <div className={cn("text-white font-extrabold", isArabic && "text-right")}>{t.scenario}</div>
+                                  </div>
                                   <div className={cn("mt-2 space-y-2 text-[12px] font-semibold text-white/75", isArabic && "text-right")}>
                                     <div className={cn("flex items-start gap-2", isArabic && "flex-row-reverse")}>
                                       <Check className="w-4 h-4 text-emerald-300 mt-[2px] shrink-0" />
@@ -1060,7 +992,7 @@ export default function CompanySubscriptionsPage() {
                               </div>
                             </div>
 
-                            {/* Right */}
+                            {/* Right (Durations + Summary) */}
                             <div className="lg:col-span-7">
                               <div className={cn("flex items-center justify-between mb-3", isArabic && "flex-row-reverse")}>
                                 <div className="text-white font-extrabold">
@@ -1098,11 +1030,11 @@ export default function CompanySubscriptionsPage() {
                                             <div className="mt-1 text-[12px] text-white/65 font-semibold">
                                               {isFixedDuration
                                                 ? isArabic
-                                                  ? "اشتراك سنوي إلزامي كبداية تشغيلية"
-                                                  : "Required yearly entry plan"
+                                                  ? "اشتراك تأسيسي سنوي (إلزامي)"
+                                                  : "Yearly starter entry (mandatory)"
                                                 : isArabic
-                                                ? "اختر المدة الأنسب لإدارتك المالية"
-                                                : "Choose the duration that fits your budgeting"}
+                                                ? "اختر الأنسب لدورتك التشغيلية"
+                                                : "Choose what fits your operating cycle"}
                                             </div>
                                           </div>
                                           <div className="w-10 h-10 rounded-2xl bg-black/25 border border-white/10 flex items-center justify-center shrink-0">
@@ -1202,84 +1134,6 @@ export default function CompanySubscriptionsPage() {
             })}
           </div>
         )}
-
-        {/* ✅ Add-ons section (below plans) */}
-        <div className={cn("rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-5 sm:p-6", isArabic && "text-right")}>
-          <div className={cn("flex items-start justify-between gap-4", isArabic && "flex-row-reverse")}>
-            <div className="min-w-0">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-white/10 bg-black/20 text-white/80 text-[11px] font-extrabold">
-                <PlusCircle className="w-4 h-4" />
-                {t.addOnsTitle}
-              </div>
-
-              <h2 className="mt-3 text-xl sm:text-2xl font-extrabold text-white leading-tight">
-                {isArabic ? "معاملات إضافية عند الحاجة — دون تعطيل" : "Extra capacity when needed—no disruption"}
-              </h2>
-
-              <p className="mt-2 text-white/70 font-semibold text-sm sm:text-base leading-relaxed max-w-3xl">
-                {isArabic
-                  ? "تم تصميم الإضافات لتجنّب أي توقف مفاجئ بعد الحد الشهري. الإضافة تغطي رسوم الطباعة وVAT فقط، بينما تظل الرسوم الحكومية ورسوم Stripe محسوبة دائمًا."
-                  : "Add-ons prevent surprises after your monthly limit. They cover printing & VAT only, while government and Stripe fees always apply."}
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <StatPill icon={Receipt} label={t.addOnCovers} value={isArabic ? "مشمولة" : "Included"} />
-            <StatPill icon={AlertTriangle} label={t.stripeAlways} value={isArabic ? "دائمًا" : "Always"} />
-            <StatPill icon={BadgeCheck} label={t.govAlways} value={isArabic ? "دائمًا" : "Always"} />
-          </div>
-
-          {addOnsLoading ? (
-            <div className={cn("mt-4 text-white/70 font-extrabold", isArabic && "text-right")}>{t.addOnsLoading}</div>
-          ) : !addOns?.length ? (
-            <div className={cn("mt-4 text-white/60 font-extrabold", isArabic && "text-right")}>{t.addOnsEmpty}</div>
-          ) : (
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-              {addOns.map((a) => (
-                <div
-                  key={a.id}
-                  className={cn(
-                    "rounded-3xl border border-white/10 bg-black/20 p-4 flex items-center justify-between gap-3",
-                    isArabic && "flex-row-reverse"
-                  )}
-                >
-                  <div className={cn("min-w-0", isArabic && "text-right")}>
-                    <div className="text-white font-extrabold text-base">
-                      {a.name || (isArabic ? "إضافة معاملات" : "Add-On")}
-                    </div>
-                    <div className="mt-1 text-white/65 text-[12px] font-semibold">
-                      {isArabic ? `${a.qty} ${t.addOnUnits}` : `${a.qty} ${t.addOnUnits}`}
-                    </div>
-                    {a.note ? (
-                      <div className="mt-1 text-white/55 text-[12px] font-semibold line-clamp-2">{a.note}</div>
-                    ) : null}
-                  </div>
-
-                  <div className={cn("flex items-center gap-3 shrink-0", isArabic && "flex-row-reverse")}>
-                    <div className={cn("text-right", !isArabic && "text-left")}>
-                      <div className="text-white/55 text-xs">{t.finalPrice}</div>
-                      <div className="text-white font-extrabold text-xl leading-none">
-                        {Number(a.price || 0).toLocaleString()}{" "}
-                        <span className="text-xs text-white/55 font-semibold">{t.aed}</span>
-                      </div>
-                    </div>
-
-                    <ButtonGlow radius="rounded-full">
-                      <button
-                        type="button"
-                        onClick={() => buyAddOn(a)}
-                        className="cursor-pointer px-4 py-2 rounded-full font-extrabold text-white shadow-lg transition hover:scale-[1.02] active:scale-[0.99] bg-gradient-to-r from-sky-700 via-sky-500 to-blue-700"
-                      >
-                        {t.buyAddOn}
-                      </button>
-                    </ButtonGlow>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Sticky Bottom Bar */}
