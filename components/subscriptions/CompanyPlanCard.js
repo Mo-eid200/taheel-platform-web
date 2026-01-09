@@ -95,6 +95,12 @@ function pickText(v, lang) {
 
 /** pricing entries — keep stable order: monthly -> quarterly -> semiannual -> yearly */
 const DUR_ORDER = ["monthly", "quarterly", "semiannual", "yearly"];
+// ✅ Allowed durations rule (as requested)
+function allowedDurationKeys(planKey) {
+  if (planKey === "starter") return new Set(["yearly"]);
+  return new Set(["semiannual", "yearly"]);
+}
+
 function pricingEntries(pricing) {
   if (!isPlainObject(pricing)) return [];
   const list = Object.entries(pricing)
@@ -197,16 +203,24 @@ export default function CompanyPlanCard({ plan, lang = "ar", darkMode = true, on
   const chipTheme = PLAN_CHIP[planKey] || PLAN_CHIP.starter;
   const planChipText = planKey.toUpperCase();
 
-  const pricingList = useMemo(() => pricingEntries(plan?.pricing), [plan?.pricing]);
+  const pricingList = useMemo(() => {
+  const list = pricingEntries(plan?.pricing);
+  const allow = allowedDurationKeys(planKey);
+  return list.filter((x) => allow.has(x.key));
+}, [plan?.pricing, planKey]);
+
 
   // ✅ default: "most" OR best OR yearly OR last
-  const defaultKey =
-    pricingList.find((x) => isMost(x) && x.key === "yearly")?.key ||
-    pricingList.find((x) => x?.best)?.key ||
-    pricingList.find((x) => x?.key === "yearly")?.key ||
-    pricingList[pricingList.length - 1]?.key ||
-    pricingList[0]?.key ||
-    "";
+const defaultKey =
+  (planKey === "starter" ? "yearly" : "") ||
+  pricingList.find((x) => isMost(x) && x.key === "yearly")?.key ||
+  pricingList.find((x) => x?.best)?.key ||
+  pricingList.find((x) => x?.key === "yearly")?.key ||
+  pricingList.find((x) => x?.key === "semiannual")?.key ||
+  pricingList[pricingList.length - 1]?.key ||
+  pricingList[0]?.key ||
+  "";
+
 
   const [selectedKey, setSelectedKey] = useState(defaultKey);
 
