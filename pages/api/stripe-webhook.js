@@ -32,7 +32,7 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2022-11-15" });
 
-// helpers
+// ----------------- helpers -----------------
 function safeNum(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -72,7 +72,182 @@ async function getRawBody(req) {
   return Buffer.concat(chunks);
 }
 
-// service reader
+// --------- month helpers (monthlyTxCredits) ----------
+function monthKeyOf(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+function nextMonthKeyOf(d = new Date()) {
+  const x = new Date(d);
+  x.setMonth(x.getMonth() + 1);
+  return monthKeyOf(x);
+}
+function isInLast7DaysOfMonth(d = new Date()) {
+  const end = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
+  const diffDays = Math.floor((end.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
+  return diffDays <= 6; // 0..6 => آخر 7 أيام
+}
+function computeAddonExpiresMonthKey(purchasedAtDate) {
+  return isInLast7DaysOfMonth(purchasedAtDate) ? nextMonthKeyOf(purchasedAtDate) : monthKeyOf(purchasedAtDate);
+}
+function normalizeBucketsForMonth(buckets, currentMonthKey) {
+  const arr = Array.isArray(buckets) ? buckets : [];
+  const keep = arr.filter(
+    (b) => String(b?.expiresMonthKey || "") === currentMonthKey && Number(b?.qtyRemaining || 0) > 0
+  );
+  const sum = keep.reduce((acc, b) => acc + Number(b.qtyRemaining || 0), 0);
+  return { keep, sum };
+}
+
+/**
+ * ✅ Lazy reset monthlyTxCredits on month change
+ * - resets baseRemaining to baseLimit
+ * - usedThisMonth = 0
+ * - addonsRemaining recalculated from buckets that expire in current month
+ * - keeps buckets for next month (carry-over last 7 days) but they won't count until their monthKey
+ */
+async function lazyResetMonthlyCreditsIfNeeded(tx, userRef) {
+  const userSnap = await tx.get(userRef);
+  if (!userSnap.exists) throw new Error("USER_NOT_FOUND");
+
+  const u = userSnap.data() || {};
+  const mtc = u.monthlyTxCredits || {};
+
+  const now = new Date();
+  const currentMonthKey = monthKeyOf(now);
+
+  // if not initialized
+  if (!mtc.monthKey) {
+    const baseLimit = Number(mtc.baseLimit || 0);
+    const allBuckets = Array.isArray(mtc.addonBuckets) ? mtc.addonBuckets : [];
+    const { keep, sum } = normalizeBucketsForMonth(allBuckets, currentMonthKey);
+
+    tx.set(
+      userRef,
+      {
+        monthlyTxCredits: {
+          monthKey: currentMonthKey,
+          baseLimit,
+          baseRemaining: baseLimit,
+          usedThisMonth: 0,
+          addonBuckets: allBuckets, // store all (current+next) for carry logic
+          addonsRemaining: sum,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+      },
+      { merge: true }
+    );
+
+    return { didReset: true, monthKey: currentMonthKey };
+  }
+
+  // same month -> optional repair addonsRemaining
+  if (String(mtc.monthKey || "") === currentMonthKey) {
+    const allBuckets = Array.isArray(mtc.addonBuckets) ? mtc.addonBuckets : [];
+    const { sum } = normalizeBucketsForMonth(allBuckets, currentMonthKey);
+    if (Number(mtc.addonsRemaining || 0) !== sum) {
+      tx.update(userRef, {
+        "monthlyTxCredits.addonsRemaining": sum,
+        "monthlyTxCredits.updatedAt": admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+    return { didReset: false, monthKey: currentMonthKey };
+  }
+
+  // new month
+  const baseLimit = Number(mtc.baseLimit || 0);
+  const allBuckets = Array.isArray(mtc.addonBuckets) ? mtc.addonBuckets : [];
+  const { sum } = normalizeBucketsForMonth(allBuckets, currentMonthKey);
+
+  tx.update(userRef, {
+    "monthlyTxCredits.monthKey": currentMonthKey,
+    "monthlyTxCredits.baseRemaining": baseLimit,
+    "monthlyTxCredits.usedThisMonth": 0,
+    "monthlyTxCredits.addonsRemaining": sum,
+    "monthlyTxCredits.updatedAt": admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return { didReset: true, monthKey: currentMonthKey };
+}
+
+/**
+ * ✅ Apply Add-on to monthlyTxCredits with carry-over last 7 days
+ * - creates a bucket with expiresMonthKey:
+ *   - current month normally
+ *   - next month if bought in last 7 days
+ * - recalculates addonsRemaining for current month only
+ */
+async function applyAddonCreditTx(tx, userRef, { paymentIntentId, addonKey, addonQty, purchasedAt }) {
+  await lazyResetMonthlyCreditsIfNeeded(tx, userRef);
+
+  const userSnap = await tx.get(userRef);
+  if (!userSnap.exists) throw new Error("USER_NOT_FOUND");
+
+  const u = userSnap.data() || {};
+  const mtc = u.monthlyTxCredits || {};
+  const now = new Date();
+  const currentMonthKey = String(mtc.monthKey || monthKeyOf(now));
+
+  const qty = Number(addonQty || 0);
+  if (!(qty > 0)) return { added: 0, expiresMonthKey: "" };
+
+  const allBuckets = Array.isArray(mtc.addonBuckets) ? [...mtc.addonBuckets] : [];
+  const expiresMonthKey = computeAddonExpiresMonthKey(purchasedAt);
+
+  allBuckets.push({
+    id: String(paymentIntentId),
+    addonKey: String(addonKey || ""),
+    qtyRemaining: qty,
+    purchasedAt: admin.firestore.Timestamp.fromDate(purchasedAt),
+    expiresMonthKey,
+  });
+
+  const { sum } = normalizeBucketsForMonth(allBuckets, currentMonthKey);
+
+  tx.update(userRef, {
+    "monthlyTxCredits.addonBuckets": allBuckets, // store all months buckets
+    "monthlyTxCredits.addonsRemaining": sum, // available only for current month
+    "monthlyTxCredits.updatedAt": admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return { added: qty, expiresMonthKey };
+}
+
+/**
+ * ✅ Apply subscription base limit for current month
+ * - sets baseLimit to plan monthlyIncludedTxLimit
+ * - resets baseRemaining to baseLimit
+ * - usedThisMonth = 0
+ * - keeps addon buckets (including next-month carry) untouched
+ */
+async function applySubscriptionBaseLimitTx(tx, userRef, baseLimit) {
+  await lazyResetMonthlyCreditsIfNeeded(tx, userRef);
+
+  const userSnap = await tx.get(userRef);
+  if (!userSnap.exists) throw new Error("USER_NOT_FOUND");
+
+  const u = userSnap.data() || {};
+  const mtc = u.monthlyTxCredits || {};
+
+  const now = new Date();
+  const currentMonthKey = String(mtc.monthKey || monthKeyOf(now));
+
+  // Recompute addonsRemaining for current month from existing buckets
+  const allBuckets = Array.isArray(mtc.addonBuckets) ? mtc.addonBuckets : [];
+  const { sum } = normalizeBucketsForMonth(allBuckets, currentMonthKey);
+
+  const lim = Number(baseLimit || 0);
+
+  tx.update(userRef, {
+    "monthlyTxCredits.monthKey": currentMonthKey,
+    "monthlyTxCredits.baseLimit": lim,
+    "monthlyTxCredits.baseRemaining": lim,
+    "monthlyTxCredits.usedThisMonth": 0,
+    "monthlyTxCredits.addonsRemaining": sum,
+    "monthlyTxCredits.updatedAt": admin.firestore.FieldValue.serverTimestamp(),
+  });
+}
+
+// ---------------- service reader ----------------
 async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFallback = "") {
   const clientTypesToTry = clientType ? [clientType] : ["company", "resident", "nonresident", "other"];
 
@@ -107,7 +282,7 @@ async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFa
   return null;
 }
 
-// Expo push
+// ---------------- Expo push ----------------
 async function sendExpoPushToUser(userRef, title, body, data = {}) {
   try {
     const userSnap = await userRef.get();
@@ -163,9 +338,9 @@ export default async function handler(req, res) {
     const reqIdFromMeta = md.requestId || md.orderNumber || null;
 
     const requestTypeMeta = normLower(
-      md.requestType ||
-        (md.serviceName && normLower(md.serviceName).includes("wallet") ? "wallet_recharge" : "service")
+      md.requestType || (md.serviceName && normLower(md.serviceName).includes("wallet") ? "wallet_recharge" : "service")
     );
+
     const clientTypeMeta = normLower(md.clientType || md.client_type || md.serviceClientType || "");
 
     const coinsGiven = safeNum(md.coinsGiven ?? md.cashbackCoins ?? md.coins ?? 0);
@@ -179,6 +354,16 @@ export default async function handler(req, res) {
 
     const assignedToMeta = safeStr(md.assignedTo || md.assigned_to || "");
     const assignedToNameMeta = safeStr(md.assignedToName || md.assigned_to_name || "");
+
+    // -------- ADDON META --------
+    const addonKey = safeStr(md.addonKey || md.addon_id || md.addonId || "").trim();
+    const addonTypeMeta = normLower(md.addonType || md.addon_type || "");
+    const addonQtyMeta = safeNum(md.addonQty || md.addon_qty || 0);
+    const isAddon =
+      requestTypeMeta === "addon" ||
+      addonKey.length > 0 ||
+      normLower(serviceId).startsWith("addon_") ||
+      normLower(serviceNameFromMeta).includes("add-on");
 
     // subscription
     const planKey = safeStr(md.planKey || "").trim();
@@ -194,6 +379,10 @@ export default async function handler(req, res) {
     const bonus = safeNum(md.bonus || 0);
 
     const isSubscription = requestTypeMeta === "subscription" || planKey.length > 0;
+
+    // IMPORTANT: monthlyIncludedTxLimit from metadata if your create-payment-intent sends it
+    // If not sent, we will fallback to reading from companySubscriptionPlans/<planKey>
+    const planMonthlyLimitMeta = safeNum(md.monthlyIncludedTxLimit || md.monthlyTxLimit || md.monthlyLimit || 0);
 
     // attachments
     let attachmentsMeta = {};
@@ -272,15 +461,40 @@ export default async function handler(req, res) {
 
       const udata = uDoc.data() || {};
       const userIsCompany = normLower(udata.accountType || udata.type || "") === "company";
-      const isCompany =
-        clientTypeMeta === "company" ||
-        customerIdMeta.startsWith("COM-") ||
-        userIsCompany;
+      const isCompany = clientTypeMeta === "company" || customerIdMeta.startsWith("COM-") || userIsCompany;
 
       const rDoc = requestRef ? await tx.get(requestRef) : null;
 
       const subRef = db.collection("companySubscriptions").doc(customerIdMeta);
       const subSnap = isSubscription && isCompany ? await tx.get(subRef) : null;
+
+      // addon catalog doc (ONLY if addon)
+      let addonCatalog = null;
+      let resolvedAddonQty = addonQtyMeta;
+
+      if (isAddon && addonKey) {
+        const addonRef = db.collection("companyAddonsCatalog").doc(addonKey);
+        const addonSnap = await tx.get(addonRef);
+        if (addonSnap.exists) {
+          addonCatalog = addonSnap.data() || {};
+          if (!resolvedAddonQty || resolvedAddonQty <= 0) {
+            const q = Number(addonCatalog.qty || 0);
+            resolvedAddonQty = Number.isFinite(q) ? q : 0;
+          }
+        }
+      }
+
+      // plan doc (ONLY if subscription) -> to resolve monthlyIncludedTxLimit
+      let planMonthlyLimitResolved = planMonthlyLimitMeta;
+      if (isSubscription && planKey && !(planMonthlyLimitResolved > 0)) {
+        const planRef = db.collection("companySubscriptionPlans").doc(planKey);
+        const planSnap = await tx.get(planRef);
+        if (planSnap.exists) {
+          const pdata = planSnap.data() || {};
+          const lim = Number(pdata.monthlyIncludedTxLimit || 0);
+          if (Number.isFinite(lim) && lim > 0) planMonthlyLimitResolved = lim;
+        }
+      }
 
       // writes
       let finalRequestId = reqId || null;
@@ -343,6 +557,23 @@ export default async function handler(req, res) {
           updates.requiredDocuments = svc.requiredDocuments;
         }
 
+        if (isAddon) {
+          updates.requestType = "addon";
+          updates.addon = {
+            addonKey,
+            addonType: addonTypeMeta || normLower(addonCatalog?.type || ""),
+            addonQty: resolvedAddonQty || 0,
+            catalog: addonCatalog
+              ? {
+                  addonKey: safeStr(addonCatalog.addonKey || addonKey),
+                  type: safeStr(addonCatalog.type || ""),
+                  qty: safeNum(addonCatalog.qty || 0),
+                  popular: !!addonCatalog.popular,
+                }
+              : null,
+          };
+        }
+
         tx.update(requestRef, updates);
       } else {
         if (!finalRequestId) {
@@ -358,7 +589,7 @@ export default async function handler(req, res) {
 
           serviceId: serviceId || "",
           serviceName: serviceNameFromMeta || "",
-          requestType: requestTypeMeta,
+          requestType: isAddon ? "addon" : requestTypeMeta,
 
           paidAmount: amountAED,
           printingFee: printingFeeFromMeta ?? 0,
@@ -381,6 +612,24 @@ export default async function handler(req, res) {
 
           assignedTo: assignedToMeta || "",
           assignedToName: assignedToNameMeta || "",
+
+          ...(isAddon
+            ? {
+                addon: {
+                  addonKey,
+                  addonType: addonTypeMeta || normLower(addonCatalog?.type || ""),
+                  addonQty: resolvedAddonQty || 0,
+                  catalog: addonCatalog
+                    ? {
+                        addonKey: safeStr(addonCatalog.addonKey || addonKey),
+                        type: safeStr(addonCatalog.type || ""),
+                        qty: safeNum(addonCatalog.qty || 0),
+                        popular: !!addonCatalog.popular,
+                      }
+                    : null,
+                },
+              }
+            : {}),
         });
 
         requestRef = newReqRef;
@@ -402,6 +651,53 @@ export default async function handler(req, res) {
         }
       }
 
+      // ✅ B2) ADDON → monthlyTxCredits buckets + carry-over last 7 days
+      if (isAddon && isCompany) {
+        const qtyToAdd = Number(resolvedAddonQty || 0);
+        if (qtyToAdd > 0) {
+          const purchasedAt = new Date(); // وقت الويبهوك
+          const r = await applyAddonCreditTx(tx, userRef, {
+            paymentIntentId,
+            addonKey: addonKey || (addonCatalog?.addonKey || ""),
+            addonQty: qtyToAdd,
+            purchasedAt,
+          });
+
+          // optional history record
+          const histRef = userRef.collection("monthlyTxCreditsHistory").doc(paymentIntentId);
+          tx.set(histRef, {
+            type: "addon_topup",
+            paymentIntentId,
+            requestId: finalRequestId,
+            addonKey: addonKey || "",
+            addonQtyAdded: qtyToAdd,
+            expiresMonthKey: r.expiresMonthKey,
+            amountAED,
+            purchasedAtISO: purchasedAt.toISOString(),
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+      }
+
+      // ✅ B3) SUBSCRIPTION → set baseLimit/baseRemaining monthly + reset usedThisMonth
+      if (isSubscription && isCompany) {
+        const lim = Number(planMonthlyLimitResolved || 0);
+        await applySubscriptionBaseLimitTx(tx, userRef, lim);
+
+        // optional history
+        const histRef = userRef.collection("monthlyTxCreditsHistory").doc(`${paymentIntentId}_sub`);
+        tx.set(histRef, {
+          type: "subscription_reset",
+          paymentIntentId,
+          requestId: finalRequestId,
+          planKey,
+          pricingKey,
+          baseLimit: lim,
+          amountAED,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
       // C) transactions log
       const txRef = db.collection("transactions").doc();
       tx.set(txRef, {
@@ -413,19 +709,37 @@ export default async function handler(req, res) {
         status: "succeeded",
         paymentIntentId,
         coinsAdded: coinsGiven,
+        ...(isAddon ? { addonKey: addonKey || "", addonQty: Number(resolvedAddonQty || 0) } : {}),
+        ...(isSubscription ? { planKey, pricingKey } : {}),
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
       // D) notification doc
       const notifRef = db.collection("notifications").doc();
-      const notifTitle = langIsEn ? (isSubscription ? "Subscription Confirmed" : "Payment Confirmed") : (isSubscription ? "تم تفعيل الاشتراك" : "تم تأكيد الدفع");
+
+      const notifTitle = langIsEn
+        ? isSubscription
+          ? "Subscription Confirmed"
+          : isAddon
+          ? "Add-on Activated"
+          : "Payment Confirmed"
+        : isSubscription
+        ? "تم تفعيل الاشتراك"
+        : isAddon
+        ? "تم تفعيل الإضافة"
+        : "تم تأكيد الدفع";
+
       const notifBody = langIsEn
-        ? (isSubscription
-            ? `Your subscription is now active. Plan: ${planKey || "N/A"} • Order: ${finalRequestId}`
-            : `Your payment of ${amountAED.toFixed(2)} AED was received. Order: ${finalRequestId}`)
-        : (isSubscription
-            ? `تم تفعيل اشتراكك بنجاح. الخطة: ${planKey || "—"} • رقم الطلب: ${finalRequestId}`
-            : `تم استلام دفعتك بقيمة ${amountAED.toFixed(2)} د.إ الآن. رقم الطلب: ${finalRequestId}`);
+        ? isSubscription
+          ? `Your subscription is now active. Plan: ${planKey || "N/A"} • Order: ${finalRequestId}`
+          : isAddon
+          ? `Your add-on is active. +${Number(resolvedAddonQty || 0)} tx • Order: ${finalRequestId}`
+          : `Your payment of ${amountAED.toFixed(2)} AED was received. Order: ${finalRequestId}`
+        : isSubscription
+        ? `تم تفعيل اشتراكك بنجاح. الخطة: ${planKey || "—"} • رقم الطلب: ${finalRequestId}`
+        : isAddon
+        ? `تم تفعيل الإضافة بنجاح. تمت إضافة +${Number(resolvedAddonQty || 0)} معاملات لرصيدك • رقم الطلب: ${finalRequestId}`
+        : `تم استلام دفعتك بقيمة ${amountAED.toFixed(2)} د.إ الآن. رقم الطلب: ${finalRequestId}`;
 
       tx.set(notifRef, {
         targetId: userRef.id,
@@ -433,10 +747,15 @@ export default async function handler(req, res) {
         body: notifBody,
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
         isRead: false,
-        metadata: { orderId: finalRequestId, paymentIntentId, ...(isSubscription ? { type: "subscription", planKey, planName, pricingKey, subscriptionDays: daysToApply } : {}) },
+        metadata: {
+          orderId: finalRequestId,
+          paymentIntentId,
+          ...(isSubscription ? { type: "subscription", planKey, planName, pricingKey, subscriptionDays: daysToApply } : {}),
+          ...(isAddon ? { type: "addon", addonKey: addonKey || "", addonQty: Number(resolvedAddonQty || 0) } : {}),
+        },
       });
 
-      // D2) subscription
+      // D2) subscription document
       if (isSubscription && isCompany) {
         const now = new Date();
         let startDate = now;
@@ -538,9 +857,14 @@ export default async function handler(req, res) {
           planKey,
           pricingKey,
           isSubscription,
+          isAddon,
+          addonKey,
+          addonQtyMeta,
+          resolvedAddonQty,
           isCompany,
           userIsCompany,
           daysToApply,
+          planMonthlyLimitResolved,
         },
       });
 
@@ -548,7 +872,13 @@ export default async function handler(req, res) {
       finalRequestIdAfterTx = finalRequestId;
       notifyTitleAfterTx = notifTitle;
       notifyBodyAfterTx = notifBody;
-      notifyDataAfterTx = { type: "payment_success", orderId: finalRequestId, paymentIntentId };
+      notifyDataAfterTx = {
+        type: "payment_success",
+        orderId: finalRequestId,
+        paymentIntentId,
+        ...(isAddon ? { requestType: "addon", addonKey: addonKey || "", addonQty: Number(resolvedAddonQty || 0) } : {}),
+        ...(isSubscription ? { requestType: "subscription", planKey, pricingKey, monthlyIncludedTxLimit: Number(planMonthlyLimitResolved || 0) } : {}),
+      };
     });
 
     // push after tx

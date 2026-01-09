@@ -8,7 +8,8 @@ import admin from "firebase-admin";
  *
  * ✅ Rules:
  * - Keep requests flow intact
- * - Subscription info stays in metadata ONLY; webhook/confirmPayment writes companySubscriptions
+ * - Subscription info stays in metadata ONLY; webhook writes companySubscriptions + monthlyTxCredits
+ * - Add-on purchases: store addonKey/addonQty in metadata so webhook can top-up monthlyTxCredits (with carry-over last 7 days)
  */
 
 if (!admin.apps.length) {
@@ -53,6 +54,11 @@ function generateOrderNumber() {
   const part2 = Math.floor(1000 + Math.random() * 9000);
   return `REQ-${part1}-${part2}`;
 }
+function getMonthKey(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
 
 // Read service definition from servicesByClientType
 async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFallback = "") {
@@ -66,9 +72,7 @@ async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFa
 
       const all = snap.data() || {};
 
-      if (serviceId && Object.prototype.hasOwnProperty.call(all, serviceId)) {
-        return all[serviceId];
-      }
+      if (serviceId && Object.prototype.hasOwnProperty.call(all, serviceId)) return all[serviceId];
 
       for (const k of Object.keys(all)) {
         const s = all[k];
@@ -85,8 +89,23 @@ async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFa
       console.warn("fetchServiceFromByClientType error for", ct, e?.message || e);
     }
   }
-
   return null;
+}
+
+// ✅ Read addon catalog doc (companyAddonsCatalog/<addonKey>)
+async function fetchAddonFromCatalog(addonKey) {
+  if (!addonKey) return null;
+  try {
+    const ref = db.collection("companyAddonsCatalog").doc(String(addonKey));
+    const snap = await ref.get();
+    if (!snap.exists) return null;
+    const d = snap.data() || {};
+    if (d.isActive === false) return null;
+    return { id: snap.id, ...d };
+  } catch (e) {
+    console.warn("fetchAddonFromCatalog error:", e?.message || e);
+    return null;
+  }
 }
 
 /**
@@ -107,25 +126,21 @@ export default async function handler(req, res) {
   try {
     const body = req.body || {};
 
-    // REQUIRED
     const customerId = safeStr(body.customerId || body.userId).trim();
     const lang = safeStr(body.lang || "ar").trim();
 
-    // context
-    const requestType = safeStr(body.requestType || "service").trim(); // service | wallet_recharge | subscription
+    const requestType = safeStr(body.requestType || "service").trim(); // service | wallet_recharge | subscription | addon
     const clientType = safeStr(body.clientType || body.client_type || "").trim();
     const serviceId = safeStr(body.serviceId || "").trim();
     const serviceName = safeStr(body.serviceName || "").trim();
 
-    // assignment
     const assignedTo = safeStr(body.assignedTo || "").trim();
     const assignedToName = safeStr(body.assignedToName || "").trim();
 
-    // coins
     const coinsUsed = safeNum(body.coinsUsed || 0);
     const coinsGiven = safeNum(body.coinsGiven || 0);
 
-    // subscription metadata
+    // subscription meta
     const planKey = safeStr(body.planKey || "").trim();
     const planName = safeStr(body.planName || body.subscriptionName || "").trim() || planKey;
     const pricingKey = safeStr(body.pricingKey || "").trim();
@@ -138,20 +153,45 @@ export default async function handler(req, res) {
     const paidMonths = safeNum(body.paidMonths || 0);
     const bonus = safeNum(body.bonus || 0);
 
+    // ✅ optional: pass plan monthly limit in metadata (webhook can still fallback to plans collection)
+    const monthlyIncludedTxLimit = safeNum(body.monthlyIncludedTxLimit || 0);
+
+    // addon meta
+    const addonKeyFromBody = safeStr(body.addonKey || body.addonId || "").trim();
+    const addonQtyFromBody = safeNum(body.addonQty || body.addonTransactions || body.qty || 0);
+
     if (!customerId) return res.status(400).json({ ok: false, error: "Missing customerId" });
 
-    // user must exist
     const userRef = db.collection("users").doc(customerId);
     const userSnap = await userRef.get();
     if (!userSnap.exists) return res.status(400).json({ ok: false, error: "User not found" });
 
-    // amount calc
+    // --------------------------------
+    // Amount calc
+    // --------------------------------
     let baseAmountAED = safeNum(body.amountAED || body.amount || 0);
     let printingFeeAED = safeNum(body.printingFee || 0);
 
-    // For service: if amount not sent, load from servicesByClientType
     let serviceDoc = null;
-    if (!baseAmountAED && requestType !== "wallet_recharge" && requestType !== "subscription") {
+    let addonDoc = null;
+    let resolvedAddonQty = addonQtyFromBody;
+
+    if (requestType === "addon") {
+      if (!addonKeyFromBody) return res.status(400).json({ ok: false, error: "Missing addonKey" });
+
+      addonDoc = await fetchAddonFromCatalog(addonKeyFromBody);
+      if (!addonDoc) return res.status(400).json({ ok: false, error: "Addon not found or inactive" });
+
+      baseAmountAED = safeNum(addonDoc.price || 0);
+      printingFeeAED = 0;
+
+      resolvedAddonQty = safeNum(addonDoc.qty || resolvedAddonQty || 0);
+
+      if (baseAmountAED <= 0) return res.status(400).json({ ok: false, error: "Invalid addon price" });
+      if (resolvedAddonQty <= 0) return res.status(400).json({ ok: false, error: "Invalid addon qty" });
+    }
+
+    if (!baseAmountAED && requestType === "service") {
       serviceDoc = await fetchServiceFromByClientType(serviceId, clientType, serviceName);
       if (serviceDoc) {
         baseAmountAED = safeNum(serviceDoc.clientPrice ?? serviceDoc.price ?? 0);
@@ -159,34 +199,23 @@ export default async function handler(req, res) {
       }
     }
 
-    // For subscription: printingFee should be 0 (subscription covers printing/vat/admin by your logic)
     if (requestType === "subscription") {
       printingFeeAED = 0;
-      if (baseAmountAED <= 0) {
-        return res.status(400).json({ ok: false, error: "Missing/invalid amount for subscription" });
-      }
+      if (baseAmountAED <= 0) return res.status(400).json({ ok: false, error: "Missing/invalid amount for subscription" });
     }
 
-    // Wallet recharge must provide amount
     if (requestType === "wallet_recharge" && baseAmountAED <= 0) {
       return res.status(400).json({ ok: false, error: "Missing/invalid amount for wallet recharge" });
     }
 
-    if (baseAmountAED <= 0) {
-      return res.status(400).json({ ok: false, error: "Invalid amount (0)" });
-    }
+    if (baseAmountAED <= 0) return res.status(400).json({ ok: false, error: "Invalid amount (0)" });
 
-    // processing fee on server
     const processingFeeAED = calcProcessingFeeAED(baseAmountAED + printingFeeAED);
-
-    // total
     const totalAED = Number((baseAmountAED + printingFeeAED + processingFeeAED).toFixed(2));
     const amountSmallest = Math.round(totalAED * 100);
 
-    // request id
     const orderNumber = safeStr(body.requestId || body.orderNumber || generateOrderNumber()).trim();
 
-    // attachments
     const attachments = body.attachments || null;
     let attachmentsJson = "";
     if (attachments) {
@@ -197,7 +226,8 @@ export default async function handler(req, res) {
       }
     }
 
-    // Create PaymentIntent
+    const monthKey = getMonthKey(new Date());
+
     const pi = await stripe.paymentIntents.create({
       amount: amountSmallest,
       currency: "aed",
@@ -205,6 +235,7 @@ export default async function handler(req, res) {
       metadata: {
         customerId,
         lang,
+        monthKey,
 
         requestId: orderNumber,
         requestType,
@@ -230,16 +261,27 @@ export default async function handler(req, res) {
         subscriptionDays: String(subscriptionDays),
         giftDays: String(giftDays),
         totalSubscriptionDays: String(totalSubDays),
-
         monthsShown: String(monthsShown),
         paidMonths: String(paidMonths),
         bonus: String(bonus),
+        monthlyIncludedTxLimit: String(monthlyIncludedTxLimit || 0),
+
+        // addon
+        ...(requestType === "addon"
+          ? {
+              isAddon: "1",
+              addonKey: addonKeyFromBody,
+              addonQty: String(resolvedAddonQty),
+              addonType: safeStr(addonDoc?.type || ""),
+              addonTitleAr: safeStr(addonDoc?.title?.ar || ""),
+              addonTitleEn: safeStr(addonDoc?.title?.en || ""),
+            }
+          : {}),
 
         ...(attachmentsJson ? { attachments: attachmentsJson } : {}),
       },
     });
 
-    // Create/merge request doc (keep your flow)
     await db.collection("requests").doc(orderNumber).set(
       {
         requestId: orderNumber,
@@ -268,6 +310,17 @@ export default async function handler(req, res) {
         assignedTo,
         assignedToName,
 
+        ...(requestType === "addon"
+          ? {
+              addon: {
+                addonKey: addonKeyFromBody,
+                qty: resolvedAddonQty,
+                type: safeStr(addonDoc?.type || ""),
+                title: addonDoc?.title || null,
+              },
+            }
+          : {}),
+
         metadata: pi.metadata || {},
         ...(attachments ? { attachments } : {}),
       },
@@ -282,9 +335,10 @@ export default async function handler(req, res) {
       processingFee: processingFeeAED,
       finalPrice: totalAED,
       breakdown: { baseAmountAED, printingFeeAED, processingFeeAED },
+      addon: requestType === "addon" ? { addonKey: addonKeyFromBody, qty: resolvedAddonQty, title: addonDoc?.title || null } : null,
       subscription:
         requestType === "subscription"
-          ? { planKey, planName, pricingKey, subscriptionDays, giftDays, totalSubscriptionDays: totalSubDays }
+          ? { planKey, planName, pricingKey, subscriptionDays, giftDays, totalSubscriptionDays: totalSubDays, monthlyIncludedTxLimit }
           : null,
     });
   } catch (e) {

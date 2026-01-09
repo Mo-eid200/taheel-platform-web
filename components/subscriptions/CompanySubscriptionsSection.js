@@ -70,7 +70,7 @@ export default function CompanySubscriptionsSection({
   const [addons, setAddons] = useState([]);
   const [addonsLoading, setAddonsLoading] = useState(true);
 
-  // ✅ Load Addons Catalog
+  // ✅ Load Addons Catalog (fix sorting + safe)
   useEffect(() => {
     let alive = true;
 
@@ -82,7 +82,9 @@ export default function CompanySubscriptionsSection({
 
         const filtered = arr
           .filter((a) => a?.isActive !== false)
-          .sort((a, b) => (b?.popular === true ? 1 : 0) - (a?.popular === true ? 1 : 0));
+          // ✅ popular first (TRUE should come first)
+          .sort((a, b) => (b?.popular === true ? 1 : 0) - (a?.popular === true ? 1 : 0))
+          .reverse();
 
         if (alive) setAddons(filtered);
       } catch (e) {
@@ -197,15 +199,9 @@ export default function CompanySubscriptionsSection({
           return;
         }
 
-        // ✅ لازم يكون عندنا COM-... (مش UID)
         let finalClientDocId = (clientDocId || "").trim();
-
-        // fallback لحظة الاشتراك (لو اليوزر اتأخر في التحميل)
         if (!finalClientDocId) {
-          finalClientDocId = await resolveClientDocId({
-            searchParams,
-            uid: user.uid,
-          });
+          finalClientDocId = await resolveClientDocId({ searchParams, uid: user.uid });
         }
 
         if (!finalClientDocId) {
@@ -217,35 +213,28 @@ export default function CompanySubscriptionsSection({
           return;
         }
 
-        // ✅ سعر آمن
         const basePrice = toNumberSafe(price);
         if (!Number.isFinite(basePrice) || basePrice <= 0) {
           alert(lang === "ar" ? "السعر غير صالح" : "Invalid price");
           return;
         }
 
-        // ✅ أيام آمنة
         const days = calcDays(subscriptionDays, monthsShown);
 
         const subName =
-          subscriptionName?.trim?.() ||
-          (lang === "ar" ? `اشتراك ${planKey}` : `Subscription ${planKey}`);
+          subscriptionName?.trim?.() || (lang === "ar" ? `اشتراك ${planKey}` : `Subscription ${planKey}`);
 
-        // ✅ amount حسب نظام السيرفر
-        const amountForServer = SEND_AMOUNT_IN_SMALLEST_UNIT
-          ? Math.round(basePrice * 100)
-          : basePrice;
+        const amountForServer = SEND_AMOUNT_IN_SMALLEST_UNIT ? Math.round(basePrice * 100) : basePrice;
 
         const payload = {
           amount: amountForServer,
           serviceId: `subscription_${planKey}`,
           serviceName: subName,
 
-          // ✅ أهم سطر: لازم docId بتاع users (COM-...)
           customerId: finalClientDocId,
-
           userEmail: user.email,
           clientType: "company",
+
           attachments: {},
           providers: [],
           requestType: "subscription",
@@ -280,23 +269,15 @@ export default function CompanySubscriptionsSection({
         });
 
         const data = await r.json().catch(() => ({}));
-        if (!r.ok || !data?.ok) {
-          throw new Error(data?.error || "Failed to create payment intent");
-        }
+        if (!r.ok || !data?.ok) throw new Error(data?.error || "Failed to create payment intent");
 
-        // ✅ رسوم Stripe + final
         const processingFeeFromServer = toNumberSafe(data?.processingFee ?? 0);
         const finalFromServer = toNumberSafe(data?.finalPrice);
 
-        const processingFeeSafe = Number.isFinite(processingFeeFromServer)
-          ? processingFeeFromServer
-          : 0;
+        const processingFeeSafe = Number.isFinite(processingFeeFromServer) ? processingFeeFromServer : 0;
 
-        // هنا العرض في الواجهة بالدرهم دائمًا
         const totalBefore = basePrice;
-        const final = Number.isFinite(finalFromServer)
-          ? finalFromServer
-          : totalBefore + processingFeeSafe;
+        const final = Number.isFinite(finalFromServer) ? finalFromServer : totalBefore + processingFeeSafe;
 
         const paymentDataForUI = {
           lang,
@@ -337,7 +318,7 @@ export default function CompanySubscriptionsSection({
   );
 
   // =========================
-  // ✅ Buy Addon (Add-ons)
+  // ✅ Buy Addon (Fix to match your DB shape)
   // =========================
   const handleBuyAddon = useCallback(
     async (addon) => {
@@ -355,10 +336,7 @@ export default function CompanySubscriptionsSection({
         // ✅ Resolve COM-...
         let finalClientDocId = (clientDocId || "").trim();
         if (!finalClientDocId) {
-          finalClientDocId = await resolveClientDocId({
-            searchParams,
-            uid: user.uid,
-          });
+          finalClientDocId = await resolveClientDocId({ searchParams, uid: user.uid });
         }
         if (!finalClientDocId) {
           alert(
@@ -369,33 +347,47 @@ export default function CompanySubscriptionsSection({
           return;
         }
 
-        // ✅ price from addon
-        const basePrice = toNumberSafe(addon?.price);
+        const addonKey = String(addon?.addonKey || addon?.id || "").trim();
+        if (!addonKey) {
+          alert(lang === "ar" ? "Addon غير صالح" : "Invalid addon");
+          return;
+        }
+
+        const type = String(addon?.type || "bundle").toLowerCase().trim(); // bundle | emergency
+        const qty = Number(addon?.qty || 0) || 0;
+
+        // ✅ Price: bundle uses price, emergency uses priceMin (for now)
+        let basePrice =
+          type === "emergency"
+            ? toNumberSafe(addon?.priceMin ?? addon?.price ?? 0)
+            : toNumberSafe(addon?.price ?? 0);
+
         if (!Number.isFinite(basePrice) || basePrice <= 0) {
           alert(lang === "ar" ? "سعر الإضافة غير صالح" : "Invalid addon price");
           return;
         }
 
-        const addonId = String(addon?.id || addon?.key || "addon").trim();
+        const titleAr = addon?.title?.ar;
+        const titleEn = addon?.title?.en;
+
         const addonName =
-          (addon?.title?.[lang === "ar" ? "ar" : "en"] ||
-            addon?.name?.[lang === "ar" ? "ar" : "en"] ||
-            addon?.name ||
-            addon?.title ||
-            (lang === "ar" ? "إضافة" : "Addon")) + "";
+          (lang === "ar" ? titleAr : titleEn) ||
+          titleAr ||
+          titleEn ||
+          (lang === "ar" ? "إضافة معاملات" : "Transaction Add-on");
 
-        const amountForServer = SEND_AMOUNT_IN_SMALLEST_UNIT
-          ? Math.round(basePrice * 100)
-          : basePrice;
+        const amountForServer = SEND_AMOUNT_IN_SMALLEST_UNIT ? Math.round(basePrice * 100) : basePrice;
 
+        // ✅ IMPORTANT: keep payload small + stable for webhook
         const payload = {
           amount: amountForServer,
-          serviceId: `addon_${addonId}`,
-          serviceName: addonName,
+          serviceId: `addon_${addonKey}`,
+          serviceName: String(addonName),
 
           customerId: finalClientDocId,
           userEmail: user.email,
           clientType: "company",
+
           attachments: {},
           providers: [],
           requestType: "addon",
@@ -411,11 +403,14 @@ export default function CompanySubscriptionsSection({
           status: "pending",
           employeeData: {},
 
-          // ✅ Addon metadata
-          addonId,
-          addonKey: addon?.key || addonId,
-          addonQty: addon?.qty ?? addon?.transactions ?? addon?.count ?? null,
-          addonMeta: addon || {},
+          // ✅ Add-on metadata (for credit)
+          addonKey,
+          addonType: type,
+          addonQty: qty,
+
+          // ✅ Emergency range (optional helpful)
+          priceMin: Number(addon?.priceMin || 0) || 0,
+          priceMax: Number(addon?.priceMax || 0) || 0,
 
           lang,
         };
@@ -427,21 +422,15 @@ export default function CompanySubscriptionsSection({
         });
 
         const data = await r.json().catch(() => ({}));
-        if (!r.ok || !data?.ok) {
-          throw new Error(data?.error || "Failed to create payment intent");
-        }
+        if (!r.ok || !data?.ok) throw new Error(data?.error || "Failed to create payment intent");
 
         const processingFeeFromServer = toNumberSafe(data?.processingFee ?? 0);
         const finalFromServer = toNumberSafe(data?.finalPrice);
 
-        const processingFeeSafe = Number.isFinite(processingFeeFromServer)
-          ? processingFeeFromServer
-          : 0;
+        const processingFeeSafe = Number.isFinite(processingFeeFromServer) ? processingFeeFromServer : 0;
 
         const totalBefore = basePrice;
-        const final = Number.isFinite(finalFromServer)
-          ? finalFromServer
-          : totalBefore + processingFeeSafe;
+        const final = Number.isFinite(finalFromServer) ? finalFromServer : totalBefore + processingFeeSafe;
 
         const paymentDataForUI = {
           lang,
@@ -450,9 +439,12 @@ export default function CompanySubscriptionsSection({
           clientSecret: data.clientSecret,
           orderNumber: data.orderNumber,
 
-          serviceId: `addon_${addonId}`,
-          serviceName: addonName,
-          addonId,
+          serviceId: `addon_${addonKey}`,
+          serviceName: String(addonName),
+
+          addonKey,
+          addonType: type,
+          addonQty: qty,
 
           price: totalBefore,
           totalPrice: totalBefore,
