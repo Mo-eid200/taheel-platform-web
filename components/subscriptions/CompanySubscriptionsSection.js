@@ -5,6 +5,8 @@ import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 import { firestore, auth } from "@/lib/firebase.client";
 import { useRouter, useSearchParams } from "next/navigation";
 import CompanyPlanCard from "./CompanyPlanCard";
+import AddonsBottomStrip from "./AddonsBottomStrip";
+
 
 // ✅ لو Stripe API عندك بيتوقع amount بالـ fils/cents (AED * 100) خليها true
 const SEND_AMOUNT_IN_SMALLEST_UNIT = false;
@@ -64,8 +66,39 @@ export default function CompanySubscriptionsSection({
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false); // ✅ منع دبل كليك
   const [clientDocId, setClientDocId] = useState(""); // ✅ COM-...
+  const [addons, setAddons] = useState([]);
+  const [addonsLoading, setAddonsLoading] = useState(true);
+
 
   // ✅ Resolve clientDocId once (URL first, then usersByUid mapping)
+
+  useEffect(() => {
+  let alive = true;
+
+  async function loadAddons() {
+    setAddonsLoading(true);
+    try {
+      const snap = await getDocs(collection(firestore, "companyAddonsCatalog"));
+      const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+      const filtered = arr
+        .filter((a) => a?.isActive !== false)
+        .sort((a, b) => (b?.popular === true ? 1 : 0) - (a?.popular === true ? 1 : 0));
+
+      if (alive) setAddons(filtered);
+    } catch (e) {
+      console.error("load addons failed:", e);
+      if (alive) setAddons([]);
+    } finally {
+      if (alive) setAddonsLoading(false);
+    }
+  }
+
+  loadAddons();
+  return () => { alive = false; };
+}, []);
+
+
   useEffect(() => {
     let alive = true;
 
@@ -330,6 +363,19 @@ export default function CompanySubscriptionsSection({
           />
         ))}
       </div>
-    </div>
-  );
+          {/* ✅ Add-ons Bottom Strip */}
+    <AddonsBottomStrip
+      lang={lang}
+      darkMode={darkMode}
+      addons={addons}
+      loading={addonsLoading}
+      disabled={submitting}
+      onBuyAddon={async (addon) => {
+        // هنا نفس منطق الدفع بتاع الاشتراك بس requestType="addon"
+        // (هتستعمل نفس resolveClientDocId + /api/create-payment-intent)
+        console.log("BUY ADDON", addon);
+      }}
+    />
+  </div>
+);
 }

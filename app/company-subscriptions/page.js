@@ -617,7 +617,6 @@ export default function CompanySubscriptionsPage() {
       // ✅ Emergency (last section)
       emergencyTitle: "طلبات الطوارئ",
       emergencySub: "عند الحاجة لإنجاز عاجل — خيار منفصل وواضح.",
-      emergencyBadge: "آخر الصفحة",
       emergencyRibbon: "EMERGENCY",
       emergencyNote: "سعر تقديري حسب نوع المعاملة ودرجة الاستعجال.",
       estimatedPrice: "السعر التقديري",
