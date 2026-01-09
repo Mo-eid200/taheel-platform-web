@@ -7,7 +7,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import CompanyPlanCard from "./CompanyPlanCard";
 import AddonsBottomStrip from "./AddonsBottomStrip";
 
-
 // ✅ لو Stripe API عندك بيتوقع amount بالـ fils/cents (AED * 100) خليها true
 const SEND_AMOUNT_IN_SMALLEST_UNIT = false;
 
@@ -64,41 +63,43 @@ export default function CompanySubscriptionsSection({
 
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
+
   const [submitting, setSubmitting] = useState(false); // ✅ منع دبل كليك
   const [clientDocId, setClientDocId] = useState(""); // ✅ COM-...
+
   const [addons, setAddons] = useState([]);
   const [addonsLoading, setAddonsLoading] = useState(true);
 
+  // ✅ Load Addons Catalog
+  useEffect(() => {
+    let alive = true;
+
+    async function loadAddons() {
+      setAddonsLoading(true);
+      try {
+        const snap = await getDocs(collection(firestore, "companyAddonsCatalog"));
+        const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+        const filtered = arr
+          .filter((a) => a?.isActive !== false)
+          .sort((a, b) => (b?.popular === true ? 1 : 0) - (a?.popular === true ? 1 : 0));
+
+        if (alive) setAddons(filtered);
+      } catch (e) {
+        console.error("load addons failed:", e);
+        if (alive) setAddons([]);
+      } finally {
+        if (alive) setAddonsLoading(false);
+      }
+    }
+
+    loadAddons();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // ✅ Resolve clientDocId once (URL first, then usersByUid mapping)
-
-  useEffect(() => {
-  let alive = true;
-
-  async function loadAddons() {
-    setAddonsLoading(true);
-    try {
-      const snap = await getDocs(collection(firestore, "companyAddonsCatalog"));
-      const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-
-      const filtered = arr
-        .filter((a) => a?.isActive !== false)
-        .sort((a, b) => (b?.popular === true ? 1 : 0) - (a?.popular === true ? 1 : 0));
-
-      if (alive) setAddons(filtered);
-    } catch (e) {
-      console.error("load addons failed:", e);
-      if (alive) setAddons([]);
-    } finally {
-      if (alive) setAddonsLoading(false);
-    }
-  }
-
-  loadAddons();
-  return () => { alive = false; };
-}, []);
-
-
   useEffect(() => {
     let alive = true;
 
@@ -153,6 +154,9 @@ export default function CompanySubscriptionsSection({
     };
   }, []);
 
+  // =========================
+  // ✅ Subscribe (Plans)
+  // =========================
   const handleSubscribe = useCallback(
     async ({
       planKey,
@@ -332,6 +336,148 @@ export default function CompanySubscriptionsSection({
     [onSubscribe, lang, router, submitting, clientDocId, searchParams]
   );
 
+  // =========================
+  // ✅ Buy Addon (Add-ons)
+  // =========================
+  const handleBuyAddon = useCallback(
+    async (addon) => {
+      if (submitting) return;
+      setSubmitting(true);
+
+      try {
+        const user = auth.currentUser;
+        if (!user) {
+          alert(lang === "ar" ? "لازم تسجل دخول الأول" : "Please login first");
+          router.push("/login");
+          return;
+        }
+
+        // ✅ Resolve COM-...
+        let finalClientDocId = (clientDocId || "").trim();
+        if (!finalClientDocId) {
+          finalClientDocId = await resolveClientDocId({
+            searchParams,
+            uid: user.uid,
+          });
+        }
+        if (!finalClientDocId) {
+          alert(
+            lang === "ar"
+              ? "تعذر تحديد رقم العميل (COM-...). افتح الداشبورد بالرابط الصحيح أو تأكد من usersByUid."
+              : "Unable to resolve client id (COM-...). Ensure URL has ?userId=COM-... or usersByUid mapping exists."
+          );
+          return;
+        }
+
+        // ✅ price from addon
+        const basePrice = toNumberSafe(addon?.price);
+        if (!Number.isFinite(basePrice) || basePrice <= 0) {
+          alert(lang === "ar" ? "سعر الإضافة غير صالح" : "Invalid addon price");
+          return;
+        }
+
+        const addonId = String(addon?.id || addon?.key || "addon").trim();
+        const addonName =
+          (addon?.title?.[lang === "ar" ? "ar" : "en"] ||
+            addon?.name?.[lang === "ar" ? "ar" : "en"] ||
+            addon?.name ||
+            addon?.title ||
+            (lang === "ar" ? "إضافة" : "Addon")) + "";
+
+        const amountForServer = SEND_AMOUNT_IN_SMALLEST_UNIT
+          ? Math.round(basePrice * 100)
+          : basePrice;
+
+        const payload = {
+          amount: amountForServer,
+          serviceId: `addon_${addonId}`,
+          serviceName: addonName,
+
+          customerId: finalClientDocId,
+          userEmail: user.email,
+          clientType: "company",
+          attachments: {},
+          providers: [],
+          requestType: "addon",
+
+          coinsUsed: 0,
+          coinsGiven: 0,
+          printingFee: 0,
+          vat: 0,
+          processingFee: 0,
+
+          assignedTo: "",
+          assignedToName: "",
+          status: "pending",
+          employeeData: {},
+
+          // ✅ Addon metadata
+          addonId,
+          addonKey: addon?.key || addonId,
+          addonQty: addon?.qty ?? addon?.transactions ?? addon?.count ?? null,
+          addonMeta: addon || {},
+
+          lang,
+        };
+
+        const r = await fetch("/api/create-payment-intent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || !data?.ok) {
+          throw new Error(data?.error || "Failed to create payment intent");
+        }
+
+        const processingFeeFromServer = toNumberSafe(data?.processingFee ?? 0);
+        const finalFromServer = toNumberSafe(data?.finalPrice);
+
+        const processingFeeSafe = Number.isFinite(processingFeeFromServer)
+          ? processingFeeFromServer
+          : 0;
+
+        const totalBefore = basePrice;
+        const final = Number.isFinite(finalFromServer)
+          ? finalFromServer
+          : totalBefore + processingFeeSafe;
+
+        const paymentDataForUI = {
+          lang,
+          requestType: "addon",
+
+          clientSecret: data.clientSecret,
+          orderNumber: data.orderNumber,
+
+          serviceId: `addon_${addonId}`,
+          serviceName: addonName,
+          addonId,
+
+          price: totalBefore,
+          totalPrice: totalBefore,
+          finalPrice: final,
+
+          printingFee: 0,
+          vat: 0,
+          coinDiscount: 0,
+          processingFee: processingFeeSafe,
+
+          userEmail: user.email,
+        };
+
+        localStorage.setItem(PAYMENT_STORAGE_KEY, JSON.stringify(paymentDataForUI));
+        router.push("/payment/service");
+      } catch (e) {
+        console.error("buy addon failed:", e);
+        alert(lang === "ar" ? "حصل خطأ أثناء بدء الدفع" : "Failed to start payment");
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [lang, router, submitting, clientDocId, searchParams]
+  );
+
   const emptyText = useMemo(
     () => (lang === "ar" ? "لا توجد باقات متاحة حالياً." : "No plans available right now."),
     [lang]
@@ -363,19 +509,16 @@ export default function CompanySubscriptionsSection({
           />
         ))}
       </div>
-          {/* ✅ Add-ons Bottom Strip */}
-    <AddonsBottomStrip
-      lang={lang}
-      darkMode={darkMode}
-      addons={addons}
-      loading={addonsLoading}
-      disabled={submitting}
-      onBuyAddon={async (addon) => {
-        // هنا نفس منطق الدفع بتاع الاشتراك بس requestType="addon"
-        // (هتستعمل نفس resolveClientDocId + /api/create-payment-intent)
-        console.log("BUY ADDON", addon);
-      }}
-    />
-  </div>
-);
+
+      {/* ✅ Add-ons Bottom Strip */}
+      <AddonsBottomStrip
+        lang={lang}
+        darkMode={darkMode}
+        addons={addons}
+        loading={addonsLoading}
+        disabled={submitting}
+        onBuyAddon={handleBuyAddon}
+      />
+    </div>
+  );
 }
