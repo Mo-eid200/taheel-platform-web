@@ -5,7 +5,23 @@ import Link from "next/link";
 import Image from "next/image";
 import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Check, Shield, Zap, Crown, Sparkles, ChevronDown, ArrowLeft } from "lucide-react";
+import {
+  Check,
+  Shield,
+  Zap,
+  Crown,
+  Sparkles,
+  ChevronDown,
+  ArrowLeft,
+  Building2,
+  BadgeCheck,
+  Receipt,
+  Lock,
+  TrendingUp,
+  AlertTriangle,
+  Globe,
+  Sparkle,
+} from "lucide-react";
 
 // ✅ Firestore
 import { collection, getDocs } from "firebase/firestore";
@@ -142,11 +158,11 @@ function pickDefaultDurationKey(durations = []) {
 }
 
 /**
- * ✅ FINAL RULES (User final decision):
+ * ✅ FINAL RULES:
  * - Starter: yearly only
  * - Growth: semiannual or yearly
  * - Scale: semiannual or yearly
- * - Enterprise: semiannual or yearly (contract special later, not here)
+ * - Enterprise: semiannual or yearly
  */
 function allowedDurationsForPackage(pkgKey) {
   if (pkgKey === "starter") return new Set(["yearly"]);
@@ -156,13 +172,123 @@ function allowedDurationsForPackage(pkgKey) {
   return new Set(["semiannual", "yearly"]);
 }
 
-/**
- * ✅ Fixed labels (we do NOT need vv.title / monthsShown anymore)
- */
+/** ✅ Fixed duration labels */
 const DUR_LABELS = {
   semiannual: { ar: "نصف سنوي", en: "Semiannual" },
   yearly: { ar: "سنوي", en: "Yearly" },
 };
+
+/* =========================
+   ✅ Visual + Psychological copy meta (Front-only)
+   (You can later move these to Firestore if you want)
+========================= */
+const PLAN_META = {
+  starter: {
+    agenciesAr: ["تسهيل", "آمر"],
+    agenciesEn: ["Tasheel", "Amer"],
+    monthlyLimit: 10,
+    vibeAr: "للشركات الصغيرة (1–5)",
+    vibeEn: "For small teams (1–5)",
+    headlineAr: "ابدأ صح… وخلّي معاملات شركتك تمشي بدون صداع.",
+    headlineEn: "Start clean. Keep your company running without friction.",
+    subAr:
+      "الاشتراك يشيل عنك رسوم الطباعة والضريبة ضمن حد شهري واضح — وتفضل دايمًا عارف إنت بتدفع إيه وليه.",
+    subEn:
+      "Your subscription covers printing & VAT within a clear monthly limit—so you always know what you pay and why.",
+  },
+  growth: {
+    agenciesAr: ["تسهيل", "آمر", "المحاكم"],
+    agenciesEn: ["Tasheel", "Amer", "Courts"],
+    monthlyLimit: 20,
+    vibeAr: "لنشاط متوسع",
+    vibeEn: "For growing operations",
+    headlineAr: "نظّم عملياتك… وخلّي السرعة تبقى معيار.",
+    headlineEn: "Organize operations—make speed your standard.",
+    subAr:
+      "مناسب للشركات اللي معاملاتُها بتزيد شهريًا، مع نفس سياسة الاستخدام العادل ووضوح التكلفة.",
+    subEn:
+      "Perfect when your monthly volume grows—same fair-use policy, same cost clarity.",
+  },
+  scale: {
+    agenciesAr: ["تسهيل", "آمر", "المحاكم", "جهة إضافية"],
+    agenciesEn: ["Tasheel", "Amer", "Courts", "Extra entity"],
+    monthlyLimit: 30,
+    vibeAr: "للشركات عالية الحركة",
+    vibeEn: "For high-velocity teams",
+    headlineAr: "أنجز أكثر… بتكلفة محسوبة ووقت أقل.",
+    headlineEn: "Do more—with controlled cost and less time.",
+    subAr:
+      "لمعاملات كثيفة مع دعم أقوى، وتخطيط واضح قبل ما توصل للحد الشهري.",
+    subEn:
+      "For heavier workflows with stronger support and clear limits planning.",
+  },
+  enterprise: {
+    agenciesAr: ["كل الجهات"],
+    agenciesEn: ["All entities"],
+    monthlyLimit: "مخصص",
+    vibeAr: "للشركات الكبيرة",
+    vibeEn: "For enterprise teams",
+    headlineAr: "حل مؤسسي… مرونة + سقف أعلى + مميزات إضافية.",
+    headlineEn: "Enterprise grade—flexible, higher limits, extra benefits.",
+    subAr:
+      "للشركات اللي عندها حجم كبير وتحتاج تنظيم داخلي ووقت استجابة أعلى (وممكن عقد خاص لاحقًا).",
+    subEn:
+      "For large volume teams needing tighter ops and higher responsiveness (custom contracts later).",
+  },
+};
+
+function StatPill({ icon: Icon, label, value, tone = "border-white/10 bg-white/6" }) {
+  return (
+    <div className={cn("flex items-center gap-2 rounded-2xl border px-3 py-2", tone)}>
+      <div className="w-8 h-8 rounded-xl bg-black/25 border border-white/10 flex items-center justify-center">
+        <Icon className="w-4 h-4 text-white/80" />
+      </div>
+      <div className="min-w-0">
+        <div className="text-[11px] text-white/55 font-bold truncate">{label}</div>
+        <div className="text-white font-extrabold text-sm truncate">{value}</div>
+      </div>
+    </div>
+  );
+}
+
+function TrustStrip({ isArabic }) {
+  const items = isArabic
+    ? [
+        { icon: BadgeCheck, t: "منصة موثوقة ومعتمدة" },
+        { icon: Receipt, t: "وضوح كامل في التسعير" },
+        { icon: Lock, t: "حماية بيانات الشركة" },
+        { icon: AlertTriangle, t: "Stripe يُحسب دائمًا" },
+      ]
+    : [
+        { icon: BadgeCheck, t: "Trusted platform" },
+        { icon: Receipt, t: "Transparent pricing" },
+        { icon: Lock, t: "Company data protection" },
+        { icon: AlertTriangle, t: "Stripe fee always applies" },
+      ];
+
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-4 sm:p-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {items.map(({ icon: Icon, t }, i) => (
+          <div
+            key={i}
+            className={cn(
+              "rounded-2xl border border-white/10 bg-black/20 px-3 py-3 flex items-center gap-2",
+              isArabic && "flex-row-reverse"
+            )}
+          >
+            <div className="w-9 h-9 rounded-xl bg-white/6 border border-white/10 flex items-center justify-center">
+              <Icon className="w-4 h-4 text-white/80" />
+            </div>
+            <div className={cn("text-white/85 font-extrabold text-[12px] leading-snug", isArabic && "text-right")}>
+              {t}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function CompanySubscriptionsPage() {
   const sp = useSearchParams();
@@ -177,6 +303,7 @@ export default function CompanySubscriptionsPage() {
       back: "رجوع",
       pageTitle: "اشتراكات الشركات",
       chooseDuration: "اختر المدة",
+      fixedDuration: "المدة ثابتة",
       months: "أشهر",
       month: "شهر",
       total: "الإجمالي",
@@ -195,12 +322,25 @@ export default function CompanySubscriptionsPage() {
       free: "مجانًا",
       pay: "تدفع",
       specialOffer: "عرض خاص",
+      agencies: "الجهات المشمولة",
+      monthlyLimit: "حد شهري مشمول",
+      fairUse: "استخدام عادل",
+      fairUseLine:
+        "بعد الليمت ترجع رسوم الطباعة والضريبة تلقائيًا — أو ترقية/إضافة معاملات. الرسوم الحكومية دائمًا على العميل، وStripe دائمًا يُحسب.",
+      why: "لماذا هذه الباقة؟",
+      scenario: "سيناريو سريع",
+      scenarioLine1: "لو نفذت 8 معاملات: بدون طباعة + بدون ضريبة (Stripe موجود)",
+      scenarioLine2: "لو وصلت 11: ترجع الطباعة + الضريبة تلقائيًا (Stripe موجود)",
+      instantSetup: "تفعيل سريع",
+      prioritySupport: "دعم مباشر",
+      clarity: "وضوح التكلفة",
     };
 
     const en = {
       back: "Back",
       pageTitle: "Company Subscriptions",
       chooseDuration: "Choose duration",
+      fixedDuration: "Fixed duration",
       months: "Months",
       month: "Month",
       total: "Total",
@@ -219,6 +359,18 @@ export default function CompanySubscriptionsPage() {
       free: "free",
       pay: "Pay",
       specialOffer: "Special Offer",
+      agencies: "Included entities",
+      monthlyLimit: "Monthly included limit",
+      fairUse: "Fair use",
+      fairUseLine:
+        "After limit, printing & VAT automatically apply — or upgrade / add-on. Government fees are always paid by client, and Stripe always applies.",
+      why: "Why this plan?",
+      scenario: "Quick scenario",
+      scenarioLine1: "8 transactions: no printing + no VAT (Stripe applies)",
+      scenarioLine2: "11th: printing + VAT apply automatically (Stripe applies)",
+      instantSetup: "Fast activation",
+      prioritySupport: "Direct support",
+      clarity: "Cost clarity",
     };
 
     return isArabic ? ar : en;
@@ -257,7 +409,7 @@ export default function CompanySubscriptionsPage() {
 
           const Icon = ICONS_BY_KEY[key] || Sparkles;
 
-          // ✅ Final: brand is fixed by key, not from firestore
+          // ✅ brand fixed by key
           const brand = DEFAULT_BRAND[key] || DEFAULT_BRAND.starter;
 
           // ✅ Only isActive
@@ -272,7 +424,6 @@ export default function CompanySubscriptionsPage() {
               if (!allow.has(durKey)) return null;
 
               const vv = v || {};
-
               const paidMonths = Number(vv.paidMonths || (durKey === "semiannual" ? 6 : 12));
               const bonus = Number(vv.bonus || 0);
               const price = Number(vv.price || 0);
@@ -282,15 +433,7 @@ export default function CompanySubscriptionsPage() {
 
               const title = DUR_LABELS?.[durKey]?.[isArabic ? "ar" : "en"] || durKey;
 
-              return {
-                key: durKey,
-                title,
-                paidMonths,
-                bonus,
-                price,
-                offerLine,
-                hasOffer,
-              };
+              return { key: durKey, title, paidMonths, bonus, price, offerLine, hasOffer };
             })
             .filter(Boolean)
             .sort((a, b) => (a.key === "semiannual" ? 1 : 2) - (b.key === "semiannual" ? 1 : 2));
@@ -313,7 +456,6 @@ export default function CompanySubscriptionsPage() {
           };
         });
 
-        // ✅ remove inactive / empty durations
         const rows = rowsRaw
           .filter((p) => p.isActive)
           .filter((p) => safeArray(p.durations).length > 0)
@@ -323,7 +465,7 @@ export default function CompanySubscriptionsPage() {
 
         setPackages(rows);
 
-        // ✅ after load: fix defaults per package if missing (starter => yearly only)
+        // ✅ fix defaults
         setSelectedDurationByPkg((prev) => {
           const next = { ...prev };
           for (const p of rows) {
@@ -342,7 +484,6 @@ export default function CompanySubscriptionsPage() {
           return next;
         });
 
-        // ✅ active package fallback if not found
         const stillExists = rows.some((p) => p.key === (pkgFromUrl || activePackage));
         if (!stillExists && rows[0]?.key) setActivePackage(rows[0].key);
       } catch (e) {
@@ -369,30 +510,28 @@ export default function CompanySubscriptionsPage() {
     pkgObj?.durations?.find((d) => d.key === selectedDurationKey) ||
     pkgObj?.durations?.[pkgObj?.durations?.length - 1];
 
+  const meta = PLAN_META?.[pkgObj?.key] || PLAN_META.starter;
+
   const setDurationFor = (pkgKey, durationKey) => {
     setSelectedDurationByPkg((prev) => ({ ...prev, [pkgKey]: durationKey }));
     setActivePackage(pkgKey);
   };
 
-  // ✅ unified redirect to login with full metadata
+  // ✅ redirect to login
   const goSubscribe = () => {
     if (!pkgObj || !durationObj) return;
 
     const qs = new URLSearchParams();
     qs.set("lang", lang);
 
-    // intent
     qs.set("intent", "company_subscription");
 
-    // plan identity
     qs.set("planKey", pkgObj.key);
     qs.set("planName", asText(pkgObj.name, ""));
     qs.set("package", pkgObj.key);
 
-    // duration identity
     qs.set("duration", durationObj.key);
 
-    // price & months
     qs.set("price", String(Number(durationObj.price || 0)));
     qs.set("paidMonths", String(Number(durationObj.paidMonths || 0)));
     qs.set("bonus", String(Number(durationObj.bonus || 0)));
@@ -412,6 +551,13 @@ export default function CompanySubscriptionsPage() {
 
   return (
     <section className="min-h-screen bg-gradient-to-b from-[#0b131e] via-[#0f1a26] to-[#070b12]">
+      {/* Subtle background orbs */}
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute -top-40 -left-40 w-[520px] h-[520px] rounded-full bg-emerald-500/10 blur-3xl" />
+        <div className="absolute top-1/3 -right-40 w-[560px] h-[560px] rounded-full bg-sky-500/10 blur-3xl" />
+        <div className="absolute bottom-[-180px] left-1/3 w-[520px] h-[520px] rounded-full bg-purple-500/10 blur-3xl" />
+      </div>
+
       {/* Sticky Header */}
       <div className="sticky top-0 z-50 backdrop-blur-xl bg-[#08101a]/70 border-b border-white/10">
         <div className="max-w-6xl mx-auto px-3 sm:px-4 py-3">
@@ -447,9 +593,44 @@ export default function CompanySubscriptionsPage() {
       </div>
 
       {/* Content */}
-      <div className="max-w-6xl mx-auto px-3 sm:px-4 py-8 sm:py-10">
-        <div className={cn("mb-5", isArabic && "text-right")}>
-          <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white">{t.pageTitle}</h1>
+      <div className="relative max-w-6xl mx-auto px-3 sm:px-4 py-8 sm:py-10 space-y-5">
+        {/* Hero copy (stronger psychological / brand) */}
+        <div className={cn("rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-5 sm:p-6", isArabic && "text-right")}>
+          <div className={cn("flex items-start justify-between gap-4", isArabic && "flex-row-reverse")}>
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-white/10 bg-black/20 text-white/80 text-[11px] font-extrabold">
+                <Sparkle className="w-4 h-4" />
+                {isArabic ? "اشتراك ذكي — استخدام عادل — وضوح كامل" : "Smart subscription — Fair use — Full clarity"}
+              </div>
+
+              <h1 className="mt-3 text-2xl sm:text-3xl md:text-4xl font-extrabold text-white leading-tight">
+                {t.pageTitle}
+              </h1>
+
+              <p className="mt-2 text-white/70 font-semibold text-sm sm:text-base leading-relaxed max-w-3xl">
+                {isArabic
+                  ? "وفر وقت فريقك وخلي معاملات شركتك تمشي بنظام واضح. الاشتراك يشيل رسوم الطباعة والضريبة ضمن حد شهري، بينما الرسوم الحكومية ورسوم Stripe تظل محسوبة دائمًا."
+                  : "Save time and keep operations clean. Subscription covers printing & VAT within a monthly limit, while government fees and Stripe fees always apply."}
+              </p>
+            </div>
+
+            <div className="hidden md:flex items-center gap-3">
+              <StatPill
+                icon={Globe}
+                label={isArabic ? "للشركات داخل الإمارات" : "UAE operations"}
+                value={isArabic ? "نظام معاملات ذكي" : "Smart GovOps"}
+              />
+              <StatPill
+                icon={TrendingUp}
+                label={isArabic ? "تقليل تكاليف" : "Cost control"}
+                value={isArabic ? "ضمن الليمت" : "Within limit"}
+              />
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <TrustStrip isArabic={isArabic} />
+          </div>
         </div>
 
         {loading ? (
@@ -461,10 +642,13 @@ export default function CompanySubscriptionsPage() {
             {PACKAGES.map((p, idx) => {
               const Icon = p.icon;
               const isOpen = p.key === activePackage;
+              const localMeta = PLAN_META?.[p.key] || PLAN_META.starter;
 
               const selectedKey = selectedDurationByPkg[p.key] || pickDefaultDurationKey(p.durations);
               const selectedDur =
                 p.durations.find((d) => d.key === selectedKey) || p.durations[p.durations.length - 1];
+
+              const isFixedDuration = p.durations.length === 1; // ✅ Starter
 
               return (
                 <motion.div
@@ -517,10 +701,45 @@ export default function CompanySubscriptionsPage() {
                               <span className={cn("w-2 h-2 rounded-full", p.brand?.dot || "bg-white/40")} />
                               {packageLabel(p.key)}
                             </span>
+
+                            <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-[11px] font-extrabold border border-white/10 bg-black/20 text-white/75">
+                              <Building2 className="w-4 h-4" />
+                              {isArabic ? localMeta.vibeAr : localMeta.vibeEn}
+                            </span>
+                          </div>
+
+                          <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <StatPill
+                              icon={BadgeCheck}
+                              label={t.agencies}
+                              value={
+                                isArabic
+                                  ? localMeta.agenciesAr.join(" • ")
+                                  : localMeta.agenciesEn.join(" • ")
+                              }
+                            />
+                            <StatPill
+                              icon={Receipt}
+                              label={t.monthlyLimit}
+                              value={
+                                typeof localMeta.monthlyLimit === "number"
+                                  ? isArabic
+                                    ? `${localMeta.monthlyLimit} معاملة / شهر`
+                                    : `${localMeta.monthlyLimit} / month`
+                                  : isArabic
+                                  ? "مخصص"
+                                  : "Custom"
+                              }
+                            />
+                            <StatPill
+                              icon={Shield}
+                              label={t.fairUse}
+                              value={isArabic ? "مفعّل تلقائيًا" : "Auto applied"}
+                            />
                           </div>
 
                           {p.fit ? (
-                            <div className="mt-1 text-[12px] text-white/60 font-semibold line-clamp-2">
+                            <div className="mt-2 text-[12px] text-white/60 font-semibold line-clamp-2">
                               {asText(p.fit, "")}
                             </div>
                           ) : null}
@@ -542,13 +761,90 @@ export default function CompanySubscriptionsPage() {
                           className="px-5 sm:px-6 pb-6"
                         >
                           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-                            {/* Durations */}
+                            {/* Left (Value / Story) */}
+                            <div className="lg:col-span-5">
+                              <div className="rounded-3xl bg-black/25 border border-white/10 p-5">
+                                <div className={cn("flex items-start justify-between gap-3", isArabic && "flex-row-reverse")}>
+                                  <div className={cn("min-w-0", isArabic && "text-right")}>
+                                    <div className="text-white font-extrabold text-lg">
+                                      {isArabic ? localMeta.headlineAr : localMeta.headlineEn}
+                                    </div>
+                                    <div className="mt-2 text-white/70 text-sm font-semibold leading-relaxed">
+                                      {isArabic ? localMeta.subAr : localMeta.subEn}
+                                    </div>
+                                  </div>
+                                  <div className="w-12 h-12 rounded-2xl bg-white/6 border border-white/10 flex items-center justify-center shrink-0">
+                                    <Sparkles className="w-5 h-5 text-white/80" />
+                                  </div>
+                                </div>
+
+                                <div className="mt-4 rounded-2xl bg-white/6 border border-white/10 p-4">
+                                  <div className={cn("flex items-center gap-2", isArabic && "flex-row-reverse")}>
+                                    <AlertTriangle className="w-4 h-4 text-amber-200" />
+                                    <div className={cn("text-white font-extrabold text-sm", isArabic && "text-right")}>
+                                      {t.fairUse}
+                                    </div>
+                                  </div>
+                                  <div className={cn("mt-2 text-white/70 text-[12px] font-semibold leading-relaxed", isArabic && "text-right")}>
+                                    {t.fairUseLine}
+                                  </div>
+                                </div>
+
+                                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  <div className="rounded-2xl border border-white/10 bg-white/6 p-4">
+                                    <div className={cn("flex items-center gap-2", isArabic && "flex-row-reverse")}>
+                                      <Zap className="w-4 h-4 text-emerald-200" />
+                                      <div className={cn("text-white font-extrabold text-sm", isArabic && "text-right")}>
+                                        {t.instantSetup}
+                                      </div>
+                                    </div>
+                                    <div className={cn("mt-1 text-white/65 text-[12px] font-semibold", isArabic && "text-right")}>
+                                      {isArabic ? "ابدأ فورًا… بدون تعقيد أو خطوات طويلة." : "Start instantly—no long setup."}
+                                    </div>
+                                  </div>
+
+                                  <div className="rounded-2xl border border-white/10 bg-white/6 p-4">
+                                    <div className={cn("flex items-center gap-2", isArabic && "flex-row-reverse")}>
+                                      <Shield className="w-4 h-4 text-sky-200" />
+                                      <div className={cn("text-white font-extrabold text-sm", isArabic && "text-right")}>
+                                        {t.clarity}
+                                      </div>
+                                    </div>
+                                    <div className={cn("mt-1 text-white/65 text-[12px] font-semibold", isArabic && "text-right")}>
+                                      {isArabic ? "تعرف اللي عليك قبل ما تدفع… دايمًا." : "Know the cost before you pay—always."}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="mt-4 rounded-2xl border border-white/10 bg-white/6 p-4">
+                                  <div className={cn("flex items-center justify-between", isArabic && "flex-row-reverse")}>
+                                    <div className={cn("text-white font-extrabold", isArabic && "text-right")}>{t.scenario}</div>
+                                  </div>
+                                  <div className={cn("mt-2 space-y-2 text-[12px] font-semibold text-white/75", isArabic && "text-right")}>
+                                    <div className={cn("flex items-start gap-2", isArabic && "flex-row-reverse")}>
+                                      <Check className="w-4 h-4 text-emerald-300 mt-[2px] shrink-0" />
+                                      <span>{t.scenarioLine1}</span>
+                                    </div>
+                                    <div className={cn("flex items-start gap-2", isArabic && "flex-row-reverse")}>
+                                      <Check className="w-4 h-4 text-emerald-300 mt-[2px] shrink-0" />
+                                      <span>{t.scenarioLine2}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Right (Durations + Summary) */}
                             <div className="lg:col-span-7">
+                              {/* Durations title (hide for Starter fixed duration) */}
                               <div className={cn("flex items-center justify-between mb-3", isArabic && "flex-row-reverse")}>
-                                <div className="text-white font-extrabold">{t.chooseDuration}</div>
+                                <div className="text-white font-extrabold">
+                                  {isFixedDuration ? t.fixedDuration : t.chooseDuration}
+                                </div>
                               </div>
 
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              {/* Durations */}
+                              <div className={cn("grid gap-3", isFixedDuration ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2")}>
                                 {p.durations.map((d) => {
                                   const active = d.key === selectedKey;
 
@@ -572,13 +868,27 @@ export default function CompanySubscriptionsPage() {
                                           </div>
                                         ) : null}
 
-                                        <div className="text-white font-extrabold text-base">{asText(d.title, d.key)}</div>
+                                        <div className={cn("flex items-start justify-between gap-3", isArabic && "flex-row-reverse text-right")}>
+                                          <div className="min-w-0">
+                                            <div className="text-white font-extrabold text-base">{asText(d.title, d.key)}</div>
+                                            <div className="mt-1 text-[12px] text-white/65 font-semibold">
+                                              {isFixedDuration
+                                                ? isArabic
+                                                  ? "دفع مرة واحدة — باقة إلزامية كبداية"
+                                                  : "One-time payment — required starter entry"
+                                                : isArabic
+                                                ? "اختر الأنسب لميزانيتك"
+                                                : "Pick what fits your budget"}
+                                            </div>
+                                          </div>
+                                          <div className="w-10 h-10 rounded-2xl bg-black/25 border border-white/10 flex items-center justify-center shrink-0">
+                                            <Receipt className="w-4 h-4 text-white/80" />
+                                          </div>
+                                        </div>
 
                                         {d.hasOffer ? (
-                                          <div className="mt-1 text-[12px] font-extrabold text-amber-200">{d.offerLine}</div>
-                                        ) : (
-                                          <div className="mt-1 text-[12px] text-white/45 font-semibold">{t.noOffer}</div>
-                                        )}
+                                          <div className="mt-2 text-[12px] font-extrabold text-amber-200">{d.offerLine}</div>
+                                        ) : null}
 
                                         <div className="mt-3">
                                           <div className="text-white/55 text-xs">{t.finalPrice}</div>
@@ -589,7 +899,7 @@ export default function CompanySubscriptionsPage() {
                                         </div>
 
                                         {active ? (
-                                          <div className="mt-3 inline-flex items-center gap-2 text-emerald-200 text-xs font-extrabold">
+                                          <div className={cn("mt-3 inline-flex items-center gap-2 text-emerald-200 text-xs font-extrabold", isArabic && "flex-row-reverse")}>
                                             <Check className="w-4 h-4" />
                                             {t.select}
                                           </div>
@@ -599,11 +909,9 @@ export default function CompanySubscriptionsPage() {
                                   );
                                 })}
                               </div>
-                            </div>
 
-                            {/* Summary */}
-                            <div className="lg:col-span-5">
-                              <div className="rounded-3xl bg-black/25 border border-white/10 p-5">
+                              {/* Summary */}
+                              <div className="mt-4 rounded-3xl bg-black/25 border border-white/10 p-5">
                                 <div className={cn("flex items-center justify-between", isArabic && "flex-row-reverse")}>
                                   <div className="text-white font-extrabold">{t.summary}</div>
                                   <div className="text-[11px] text-white/55 font-bold truncate max-w-[52%]">
