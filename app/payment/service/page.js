@@ -26,7 +26,7 @@ const LANG = {
     success: "Payment successful!",
     error: "Payment failed.",
     service: "Service",
-    amount: "Amount",
+    amount: "Service Fee",
     vat: "VAT",
     print: "Printing Fee",
     coinDiscount: "Coins Discount",
@@ -48,7 +48,7 @@ const LANG = {
     success: "تم الدفع بنجاح!",
     error: "فشل الدفع.",
     service: "الخدمة",
-    amount: "المبلغ",
+    amount: "رسوم الخدمة",
     vat: "ضريبة القيمة المضافة",
     print: "رسوم الطباعة",
     coinDiscount: "خصم الكوينات",
@@ -80,9 +80,16 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
     paymentData?.serviceName ||
     "اسم غير متوفر";
 
-  const servicePrice = Number(
-    paymentData?.service?.price ?? paymentData?.price ?? 0
-  );
+const servicePrice = Number(
+  paymentData?.breakdown?.baseAmountAED ??
+  paymentData?.baseAmountAED ??
+  paymentData?.metadata?.baseAmountAED ??   // احتياطي لو مخزّن metadata
+  paymentData?.service?.clientPrice ??      // احتياطي
+  paymentData?.service?.price ??            // احتياطي
+  paymentData?.price ??                     // قديم
+  0
+);
+
 
   const printingFee = Number(
     paymentData?.service?.printingFee ??
