@@ -356,8 +356,13 @@ export default async function handler(req, res) {
     const coinsGiven = safeNum(md.coinsGiven ?? md.cashbackCoins ?? md.coins ?? 0);
     const coinsUsed = safeNum(md.coinsUsed ?? 0);
 
-    const printingFeeFromMeta = safeNum(md.printingFee ?? 0);
-    const processingFeeMeta = safeNum(md.processingFee ?? md.processing_fee ?? md.processing_fee_value ?? 0);
+const printingFeeFromMeta = safeNum(md.printingFee ?? 0);
+const processingFeeMeta = safeNum(md.processingFee ?? md.processing_fee ?? md.processing_fee_value ?? 0);
+
+// ✅ MUST be present for UI breakdown
+const baseAmountFromMeta = safeNum(md.baseAmountAED ?? md.baseAmount ?? 0);
+const totalAEDFromMeta = safeNum(md.totalAED ?? 0);
+
 
     const serviceId = safeStr(md.serviceId || "");
     const serviceNameFromMeta = safeStr(md.serviceName || "");
@@ -478,6 +483,26 @@ export default async function handler(req, res) {
 const subRef = db.collection("companySubscriptions").doc(customerIdMeta);
 const subSnap = isCompany ? await tx.get(subRef) : null;
 
+// ✅ Decide printingFee visibility for SERVICE only
+const addonsRemainingNow = safeNum(udata?.monthlyTxCredits?.addonsRemaining || 0);
+
+let subActiveNow = false;
+if (isCompany && subSnap && subSnap.exists) {
+  const sub = subSnap.data() || {};
+  const status = normLower(sub.status || "");
+  const endAt = toDateSafe(sub.endAt) || (sub.endAtISO ? new Date(sub.endAtISO) : null);
+  subActiveNow =
+    (sub.isActive === true || status === "active" || status === "trial") &&
+    !!endAt &&
+    endAt.getTime() > Date.now();
+}
+
+const shouldHidePrintingFee =
+  isCompany &&
+  requestTypeMeta === "service" &&
+  !isAddon &&
+  !isSubscription &&
+  (subActiveNow || addonsRemainingNow > 0);
 
       // addon catalog doc (ONLY if addon)
       let addonCatalog = null;
@@ -518,17 +543,23 @@ const subSnap = isCompany ? await tx.get(subRef) : null;
         const history = Array.isArray(rdata.statusHistory) ? [...rdata.statusHistory] : [];
         history.push({ status: "paid", timestamp: nowISO(), updatedBy: "stripe-webhook" });
 
-        const updates = {
-          lastUpdated: nowISO(),
-          status: "paid",
-          paidAmount: amountAED,
-          paymentIntentId,
-          statusHistory: history,
-          paidAt: nowISO(),
-          processingFee: typeof rdata.processingFee !== "undefined" ? rdata.processingFee : processingFeeMeta || 0,
-          assignedTo: rdata.assignedTo || assignedToMeta || "",
-          assignedToName: rdata.assignedToName || assignedToNameMeta || "",
-        };
+const updates = {
+  lastUpdated: nowISO(),
+  status: "paid",
+  paidAmount: amountAED,
+  paymentIntentId,
+  statusHistory: history,
+  paidAt: nowISO(),
+
+  // ✅ always persist breakdown for UI
+  baseAmountAED: baseAmountFromMeta || safeNum(rdata.baseAmountAED || 0),
+  processingFee: typeof rdata.processingFee !== "undefined" ? rdata.processingFee : processingFeeMeta || 0,
+  totalAED: totalAEDFromMeta || amountAED,
+
+  assignedTo: rdata.assignedTo || assignedToMeta || "",
+  assignedToName: rdata.assignedToName || assignedToNameMeta || "",
+};
+
 
         if (rdata.attachments) updates.attachments = rdata.attachments;
         else if (attachmentsMeta && Object.keys(attachmentsMeta).length) updates.attachments = attachmentsMeta;
@@ -560,11 +591,15 @@ const subSnap = isCompany ? await tx.get(subRef) : null;
             requireUpload: typeof serviceDoc.requireUpload === "boolean" ? serviceDoc.requireUpload : false,
           };
 
+          if (!updates.baseAmountAED) updates.baseAmountAED = baseAmountFromMeta || safeNum(md.baseAmountAED || 0);
+          if (!updates.totalAED) updates.totalAED = totalAEDFromMeta || amountAED;
+
+
           updates.service = svc;
           updates.serviceName = svc.name;
           updates.serviceId = svc.serviceId;
           updates.providers = svc.providers;
-          updates.printingFee = rdata.printingFee ?? svc.printingFee ?? printingFeeFromMeta ?? 0;
+          updates.printingFee = shouldHidePrintingFee ? 0 : (rdata.printingFee ?? svc.printingFee ?? printingFeeFromMeta ?? 0);
           updates.requiredDocuments = svc.requiredDocuments;
         }
 
@@ -602,9 +637,14 @@ const subSnap = isCompany ? await tx.get(subRef) : null;
           serviceName: serviceNameFromMeta || "",
           requestType: isAddon ? "addon" : requestTypeMeta,
 
-          paidAmount: amountAED,
-          printingFee: printingFeeFromMeta ?? 0,
-          processingFee: processingFeeMeta ?? 0,
+paidAmount: amountAED,
+
+// ✅ breakdown always stored
+baseAmountAED: baseAmountFromMeta || 0,
+printingFee: shouldHidePrintingFee ? 0 : (printingFeeFromMeta ?? 0),
+processingFee: processingFeeMeta ?? 0,
+totalAED: totalAEDFromMeta || amountAED,
+
 
           coinsGiven,
           coinsUsed,
