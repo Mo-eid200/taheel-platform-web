@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   FaWallet,
   FaCreditCard,
@@ -31,7 +31,7 @@ import calcStripeFees from "@/utils/calcStripeFees";
  * ✅ FINAL TAX/PRINTING RULES (AGREED):
  * - VAT = 5% ONLY on Printing Fee.
  * - Printing Fee + VAT are waived ONLY for companies when freePrinting=true (subscriptionActive).
- * - If printingFee is 0 => VAT is 0 automatically.
+ * - If printingFee/printingTotal is 0 => VAT is 0 automatically.
  */
 
 // --------------------
@@ -60,10 +60,15 @@ async function saveRequestToFirestore({
   serviceId = "",
   providers = [],
   paidAmount = 0,
-  printingFee = 0,
-  vat = 0,
-  coinsUsed = 0,
-  coinsGiven = 0,
+
+  // ✅ totals
+  serviceBase = 0,
+  printingTotal = 0,
+  printingFeePerUnit = 0,
+  vatTotal = 0,
+
+  coinsUsed = 0,   // AED value
+  coinsGiven = 0,  // points
   uploadedDocs = {},
   status = "completed",
   statusHistory = [],
@@ -76,9 +81,18 @@ async function saveRequestToFirestore({
     serviceName,
     serviceId,
     providers,
+
+    // ✅ paid
     paidAmount,
-    printingFee,
-    vat,
+
+    // ✅ keep old field names but store totals (best for reporting)
+    printingFee: printingTotal,
+    vat: vatTotal,
+
+    // ✅ extra safe fields (won't break existing reads)
+    serviceBase,
+    printingFeePerUnit,
+
     coinsUsed,
     coinsGiven,
     createdAt: new Date().toISOString(),
@@ -95,9 +109,14 @@ export default function ServicePayModal({
 
   serviceName,
   serviceId,
-  totalPrice,   // ✅ from card: (service + printing) WITHOUT VAT
-  printingFee,  // ✅ per unit printing
-  tax,          // optional override for VAT value
+
+  totalPrice,   // ✅ from card: (serviceBase + printingTotal) WITHOUT VAT
+  printingFee,  // ✅ per unit printing (optional)
+
+  // ✅ NEW (exact totals from card)
+  serviceBase,
+  printingTotal,
+  vatTotal,
 
   coinsBalance,
   cashbackCoins,
@@ -121,7 +140,7 @@ export default function ServicePayModal({
   provider,
 }) {
   const [useCoins, setUseCoins] = useState(false);
-  const [payMethod, setPayMethod] = useState("wallet");
+  const [payMethod, setPayMethod] = useState("wallet"); // wallet | gateway
   const [isPaying, setIsPaying] = useState(false);
   const [payMsg, setPayMsg] = useState("");
   const [msgSuccess, setMsgSuccess] = useState(false);
@@ -131,68 +150,75 @@ export default function ServicePayModal({
   const isCompany = String(clientType || "").toLowerCase().includes("company");
   const hasActiveSubscription = isCompany && Boolean(freePrinting);
 
-  // ✅ Printing
-  const rawPrintingPerUnit = toNumberSafe(printingFee, 0);
-  const effectivePrintingPerUnit = hasActiveSubscription ? 0 : rawPrintingPerUnit;
+  // --------------------
+  // ✅ Source of truth totals
+  // - Prefer explicit totals from card (serviceBase/printingTotal/vatTotal)
+  // - Fallback safely to older props (totalPrice + printingFee single-unit)
+  // --------------------
+  const totals = useMemo(() => {
+    const serviceBaseN = toNumberSafe(serviceBase, NaN);
+    const printingTotalN = toNumberSafe(printingTotal, NaN);
+    const vatTotalN = toNumberSafe(vatTotal, NaN);
 
-  // We need the number of papers to compute accurate totals.
-  // But modal currently receives totalPrice already aggregated from card.
-  // We'll compute printingTotal by difference:
-  // card totalPrice = serviceBase + printingTotal
-  // So "effectiveTotalBeforeVat" is just: replace raw printing with effective printing
-  const rawTotalBeforeVat = toNumberSafe(totalPrice, 0);
+    // ✅ best path: card sent everything
+    if (Number.isFinite(serviceBaseN) && Number.isFinite(printingTotalN) && Number.isFinite(vatTotalN)) {
+      const beforeVat = +(serviceBaseN + printingTotalN).toFixed(2);
+      const withVat = +(beforeVat + vatTotalN).toFixed(2);
+      return {
+        serviceBase: +serviceBaseN.toFixed(2),
+        printingTotal: +printingTotalN.toFixed(2),
+        vatTotal: +vatTotalN.toFixed(2),
+        totalBeforeVat: beforeVat,
+        totalWithVat: withVat,
+      };
+    }
 
-  // We can't know paperCount here reliably unless passed.
-  // So we treat effective printing total as:
-  // if subscription: remove raw printing total from totalPrice
-  // else keep it as is.
-  // This is EXACT and safe because card already computed it.
-  const effectiveTotalBeforeVat = hasActiveSubscription
-    ? +(rawTotalBeforeVat - (rawTotalBeforeVat > 0 ? (rawPrintingPerUnit ? (rawTotalBeforeVat - (rawTotalBeforeVat - 0)) : 0) : 0)).toFixed(2)
-    : rawTotalBeforeVat;
+    // ✅ fallback: use totalPrice as beforeVat, compute VAT from printingFee (single unit only)
+    const beforeVat = +toNumberSafe(totalPrice, 0).toFixed(2);
+    const perUnit = hasActiveSubscription ? 0 : +toNumberSafe(printingFee, 0).toFixed(2);
+    // fallback printing total unknown => assume perUnit as "total" (only safe if paperCount=1)
+    const pTotal = +perUnit.toFixed(2);
+    const vTotal = hasActiveSubscription ? 0 : (pTotal > 0 ? +(pTotal * 0.05).toFixed(2) : 0);
+    const withVat = +(beforeVat + vTotal).toFixed(2);
 
-  // ✅ VAT:
-  // - Only if company
-  // - Only if printing exists (and not waived)
-  // - Optional override via `tax` (value expected already computed by card if provided)
-  const vatValue = (() => {
-    if (!isCompany) return 0;
-    if (hasActiveSubscription) return 0;
+    return {
+      serviceBase: Math.max(0, +(beforeVat - pTotal).toFixed(2)),
+      printingTotal: pTotal,
+      vatTotal: vTotal,
+      totalBeforeVat: beforeVat,
+      totalWithVat: withVat,
+    };
+  }, [serviceBase, printingTotal, vatTotal, totalPrice, printingFee, hasActiveSubscription]);
 
-    // If card passed a tax override (already computed total VAT), use it.
-    // Otherwise compute VAT as 5% of printing total inside rawTotalBeforeVat.
-    if (typeof tax !== "undefined") return +toNumberSafe(tax, 0).toFixed(2);
+  // ✅ If subscription active => enforce printing/vat zero (even if someone passes wrong numbers)
+  const effectivePrintingTotal = hasActiveSubscription ? 0 : totals.printingTotal;
+  const effectiveVatTotal = hasActiveSubscription ? 0 : (effectivePrintingTotal > 0 ? +(effectivePrintingTotal * 0.05).toFixed(2) : 0);
 
-    // We can safely compute VAT from printingTotal only if we know printingTotal.
-    // But totalPrice includes printing, so we need printingTotal explicitly.
-    // ✅ So we compute VAT using effectivePrintingPerUnit * 0.05 ONLY when printingPerUnit is used as a single paper.
-    // Better approach: receive `vat` from card, but since we agreed VAT is based on printing:
-    // We'll compute VAT on effectivePrintingPerUnit (single unit) and show it as "VAT on Printing",
-    // and card should pass the aggregated VAT via `tax` if paperCount affects it.
-    // To keep it 100% correct, we will compute VAT only when printingFee is single-paper:
-    if (effectivePrintingPerUnit <= 0) return 0;
-    return +(effectivePrintingPerUnit * 0.05).toFixed(2);
-  })();
+  const totalWithVat = +( (hasActiveSubscription ? (totals.totalBeforeVat - totals.printingTotal) : totals.totalBeforeVat) + effectiveVatTotal ).toFixed(2);
 
-  // ✅ Total including VAT (for final payment)
-  const effectiveTotalWithVat = +(effectiveTotalBeforeVat + vatValue).toFixed(2);
+  // --------------------
+  // ✅ Coins: max 10% of PRINTING TOTAL (points: 100 = 1 AED)
+  // --------------------
+  const maxCoinDiscountPoints = Math.floor(effectivePrintingTotal * 0.1 * 100);
+  const coinDiscountPoints = useCoins ? Math.min(coinsBalance || 0, maxCoinDiscountPoints) : 0;
+  const coinDiscountValueAed = coinDiscountPoints / 100;
 
-  // ✅ coins (max 10% of printing fee) => coins stored as "points" (100 = 1 AED)
-  const maxCoinDiscount = Math.floor(effectivePrintingPerUnit * 0.1 * 100);
-  const coinDiscount = useCoins ? Math.min(coinsBalance || 0, maxCoinDiscount) : 0;
-  const coinDiscountValue = coinDiscount / 100;
-
-  const finalPrice = Math.max(0, +(effectiveTotalWithVat - coinDiscountValue).toFixed(2));
+  const finalPriceNoGateway = Math.max(0, +(totalWithVat - coinDiscountValueAed).toFixed(2));
   const willGetCashback = !useCoins;
 
-  // Stripe fees (only if gateway)
-  const stripeFeesResult = calcStripeFees(finalPrice, {
+  // --------------------
+  // ✅ Stripe fees (only if gateway)
+  // --------------------
+  const stripeFeesResult = calcStripeFees(finalPriceNoGateway, {
     isInternational: false,
     isCurrencyConversion: false,
   });
 
-  const finalPriceWithFees = payMethod === "gateway" ? stripeFeesResult.totalAmount : finalPrice;
-  const stripeFeeValue = payMethod === "gateway" ? stripeFeesResult.stripeFee : 0;
+  const finalPriceWithFees =
+    payMethod === "gateway" ? +stripeFeesResult.totalAmount.toFixed(2) : finalPriceNoGateway;
+
+  const stripeFeeValue =
+    payMethod === "gateway" ? +stripeFeesResult.stripeFee.toFixed(2) : 0;
 
   // Fetch service data (optional enrichment)
   async function getServiceData() {
@@ -220,7 +246,7 @@ export default function ServicePayModal({
         return;
       }
 
-      if ((Number(userWallet) || 0) < finalPrice) {
+      if ((Number(userWallet) || 0) < finalPriceNoGateway) {
         setPayMsg(lang === "ar" ? "رصيد المحفظة غير كافي." : "Insufficient wallet balance.");
         return;
       }
@@ -228,11 +254,11 @@ export default function ServicePayModal({
       const userRef = doc(firestore, "users", customerId);
 
       // update wallet
-      await updateDoc(userRef, { walletBalance: (Number(userWallet) || 0) - finalPrice });
+      await updateDoc(userRef, { walletBalance: (Number(userWallet) || 0) - finalPriceNoGateway });
 
       // coins usage
-      if (useCoins && coinDiscount > 0) {
-        await updateDoc(userRef, { coins: increment(-coinDiscount) });
+      if (useCoins && coinDiscountPoints > 0) {
+        await updateDoc(userRef, { coins: increment(-coinDiscountPoints) });
       }
 
       // cashback (only if not using coins)
@@ -261,6 +287,10 @@ export default function ServicePayModal({
         { status: "completed", timestamp: new Date().toISOString(), updatedBy: assignedToName || "System" },
       ];
 
+      // ✅ derive correct service base when subscription enforced
+      const cleanBeforeVat = hasActiveSubscription ? +(totals.totalBeforeVat - totals.printingTotal).toFixed(2) : totals.totalBeforeVat;
+      const cleanServiceBase = Math.max(0, +(cleanBeforeVat - effectivePrintingTotal).toFixed(2));
+
       await saveRequestToFirestore({
         orderNumber,
         customerId,
@@ -269,10 +299,15 @@ export default function ServicePayModal({
         serviceName: finalServiceName,
         serviceId: finalServiceId,
         providers,
-        paidAmount: finalPrice,
-        printingFee: effectivePrintingPerUnit,
-        vat: vatValue,
-        coinsUsed: useCoins ? coinDiscountValue : 0,
+
+        paidAmount: finalPriceNoGateway,
+
+        serviceBase: cleanServiceBase,
+        printingTotal: effectivePrintingTotal,
+        printingFeePerUnit: toNumberSafe(printingFee, 0),
+        vatTotal: effectiveVatTotal,
+
+        coinsUsed: useCoins ? coinDiscountValueAed : 0,
         coinsGiven: willGetCashback ? Number(cashbackCoins) || 0 : 0,
         uploadedDocs,
         status: "completed",
@@ -285,11 +320,11 @@ export default function ServicePayModal({
         title: lang === "ar" ? "تم الدفع" : "Payment Successful",
         body:
           lang === "ar"
-            ? `دفعت لخدمة ${finalServiceName} بقيمة ${finalPrice.toFixed(2)} د.إ${
-                useCoins ? ` واستخدمت خصم الكوينات (${coinDiscountValue.toFixed(2)} د.إ)` : ""
+            ? `دفعت لخدمة ${finalServiceName} بقيمة ${finalPriceNoGateway.toFixed(2)} د.إ${
+                useCoins ? ` واستخدمت خصم الكوينات (${coinDiscountValueAed.toFixed(2)} د.إ)` : ""
               }.\nرقم التتبع: ${orderNumber}`
-            : `You paid for ${finalServiceName} (${finalPrice.toFixed(2)} AED${
-                useCoins ? `, using coins discount (${coinDiscountValue.toFixed(2)} AED)` : ""
+            : `You paid for ${finalServiceName} (${finalPriceNoGateway.toFixed(2)} AED${
+                useCoins ? `, using coins discount (${coinDiscountValueAed.toFixed(2)} AED)` : ""
               }).\nTracking No.: ${orderNumber}`,
         timestamp: new Date().toISOString(),
         isRead: false,
@@ -303,11 +338,14 @@ export default function ServicePayModal({
           to: userEmail,
           orderNumber,
           serviceName: finalServiceName,
-          price: finalPrice.toFixed(2),
-          printingFee: effectivePrintingPerUnit,
-          vat: vatValue,
+          price: finalPriceNoGateway.toFixed(2),
+
+          // ✅ totals
+          printingFee: effectivePrintingTotal,
+          vat: effectiveVatTotal,
           processingFee: 0,
-          coinDiscount: useCoins ? coinDiscountValue : 0,
+
+          coinDiscount: useCoins ? coinDiscountValueAed : 0,
           paymentMethod: "wallet",
           lang,
         }),
@@ -349,8 +387,11 @@ export default function ServicePayModal({
           serviceName: uiServiceName,
           customerId,
           userEmail,
-          printingFee: effectivePrintingPerUnit,
-          vat: vatValue,
+
+          // ✅ totals sent to backend for logging/stripe metadata if needed
+          printingFee: effectivePrintingTotal,
+          vat: effectiveVatTotal,
+          processingFee: stripeFeeValue,
         }),
       });
 
@@ -368,14 +409,18 @@ export default function ServicePayModal({
           service: {
             name: uiServiceName,
             id: serviceId,
-            printingFee: effectivePrintingPerUnit,
-            vat: vatValue,
-            coinDiscount: useCoins ? coinDiscountValue : 0,
+            printingFee: effectivePrintingTotal,
+            vat: effectiveVatTotal,
+            coinDiscount: useCoins ? coinDiscountValueAed : 0,
             userEmail,
           },
-          totalPrice: effectiveTotalWithVat,
+
+          // ✅ correct totals
+          totalBeforeVat: hasActiveSubscription ? +(totals.totalBeforeVat - totals.printingTotal).toFixed(2) : totals.totalBeforeVat,
+          totalWithVat,
           finalPrice: finalPriceWithFees,
           processingFee: stripeFeeValue,
+
           customerId,
           lang,
           orderNumber: result.orderNumber,
@@ -439,21 +484,21 @@ export default function ServicePayModal({
           <table className="w-full text-xs text-gray-700 font-bold mb-2 border-separate border-spacing-y-1">
             <tbody>
               <tr>
-                <td>{lang === "ar" ? "الإجمالي قبل الخصم" : "Total Before Discount"}</td>
-                <td className="text-right">{effectiveTotalWithVat.toFixed(2)} د.إ</td>
+                <td>{lang === "ar" ? "الإجمالي قبل خصم الكوينات" : "Total Before Coins"}</td>
+                <td className="text-right">{totalWithVat.toFixed(2)} د.إ</td>
               </tr>
 
-              {effectivePrintingPerUnit > 0 && (
+              {effectivePrintingTotal > 0 && (
                 <tr>
-                  <td>{lang === "ar" ? "رسوم الطباعة" : "Printing Fee"}</td>
-                  <td className="text-right">{effectivePrintingPerUnit.toFixed(2)} د.إ</td>
+                  <td>{lang === "ar" ? "رسوم الطباعة (إجمالي)" : "Printing Total"}</td>
+                  <td className="text-right">{effectivePrintingTotal.toFixed(2)} د.إ</td>
                 </tr>
               )}
 
-              {isCompany && vatValue > 0 && (
+              {effectiveVatTotal > 0 && (
                 <tr>
-                  <td>{lang === "ar" ? "ضريبة القيمة المضافة 5%" : "VAT 5%"}</td>
-                  <td className="text-right">{vatValue.toFixed(2)} د.إ</td>
+                  <td>{lang === "ar" ? "ضريبة 5% على الطباعة" : "VAT 5% on Printing"}</td>
+                  <td className="text-right">{effectiveVatTotal.toFixed(2)} د.إ</td>
                 </tr>
               )}
 
@@ -463,7 +508,7 @@ export default function ServicePayModal({
                   {lang === "ar" ? "خصم الكوينات" : "Coins Discount"}
                 </td>
                 <td className="text-right text-yellow-700">
-                  {useCoins ? `-${coinDiscountValue.toFixed(2)} د.إ` : "0 د.إ"}
+                  {useCoins ? `-${coinDiscountValueAed.toFixed(2)} د.إ` : "0 د.إ"}
                 </td>
               </tr>
 
@@ -491,12 +536,15 @@ export default function ServicePayModal({
                 type="checkbox"
                 checked={useCoins}
                 onChange={(e) => setUseCoins(e.target.checked)}
-                disabled={(coinsBalance || 0) < 1}
+                disabled={(coinsBalance || 0) < 1 || maxCoinDiscountPoints <= 0}
                 className="accent-yellow-500 scale-90"
               />
               <FaCoins className="text-yellow-500" size={12} />
-              {lang === "ar" ? "استخدم الكوينات (خصم حتى 10%)" : "Use coins (up to 10%)"}
+              {lang === "ar"
+                ? `استخدم الكوينات (حتى 10% من الطباعة)`
+                : "Use coins (up to 10% of printing)"}
             </label>
+
             <span className="font-black text-yellow-700 text-xs">
               {lang === "ar" ? "رصيدك:" : "Your coins:"} {coinsBalance || 0}
             </span>
@@ -505,14 +553,14 @@ export default function ServicePayModal({
           <div className="w-full flex flex-row items-center justify-between mb-1">
             <label
               className={`flex items-center gap-1 font-bold text-emerald-800 text-xs cursor-pointer ${
-                (Number(userWallet) || 0) < finalPrice ? "opacity-60" : ""
+                (Number(userWallet) || 0) < finalPriceNoGateway ? "opacity-60" : ""
               }`}
             >
               <input
                 type="radio"
                 checked={payMethod === "wallet"}
                 onChange={() => setPayMethod("wallet")}
-                disabled={(Number(userWallet) || 0) < finalPrice}
+                disabled={(Number(userWallet) || 0) < finalPriceNoGateway}
                 className="accent-emerald-600 scale-90"
               />
               <FaWallet className="text-emerald-600" size={12} />
@@ -533,7 +581,7 @@ export default function ServicePayModal({
           </div>
 
           <div className="w-full mb-1 text-center">
-            {willGetCashback ? (
+            {!useCoins ? (
               <div className="flex flex-row items-center justify-center gap-1 text-yellow-700 font-bold text-xs">
                 <FaCoins className="text-yellow-500" size={12} />
                 {lang === "ar"

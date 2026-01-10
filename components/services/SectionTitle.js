@@ -7,6 +7,17 @@ import { firestore } from "@/lib/firebase.client";
 import SectionTitle from "@/components/services/SectionTitle";
 import ServiceProfileCard from "@/components/services/ServiceProfileCard";
 
+const EMPTY_SUB = {
+  loading: false,
+  active: false,
+  status: "none",
+  planKey: "",
+  planName: "",
+  startAt: null,
+  endAt: null,
+  usedDocId: "",
+};
+
 export default function ServiceSection({
   icon,
   color,
@@ -24,29 +35,17 @@ export default function ServiceSection({
     [services, filterService]
   );
 
-  const [subInfo, setSubInfo] = useState({
-    loading: false,
-    active: false,
-    status: "none",
-    planKey: "",
-    planName: "",
-    startAt: null,
-    endAt: null,
-    usedDocId: "",
-  });
-
   const isCompany = String(category || "").toLowerCase().includes("company");
 
-  // ✅ Try possible IDs (docId in companySubscriptions is usually customerId like COM-xxx)
   const candidateIds = useMemo(() => {
     const c = client || {};
     const arr = [
-      c.customerId,      // ✅ غالبًا ده هو COM-xxx
+      c.customerId, // غالبًا COM-xxx
       c.companyDocId,
+      c.companyId,
       c.userId,
       c.uid,
       c.id,
-      c.companyId,
       c.userUid,
       c.firebaseUid,
     ]
@@ -56,12 +55,20 @@ export default function ServiceSection({
     return Array.from(new Set(arr));
   }, [client]);
 
+  const candidateKey = useMemo(() => candidateIds.join("|"), [candidateIds]);
+
+  const [subInfo, setSubInfo] = useState(() => ({
+    ...EMPTY_SUB,
+    loading: isCompany,
+  }));
+
   useEffect(() => {
     let mounted = true;
 
     async function loadSubscription() {
+      // لو مش شركة أو مفيش IDs: صفّر كل حاجة
       if (!isCompany || candidateIds.length === 0) {
-        if (mounted) setSubInfo((p) => ({ ...p, loading: false, active: false, status: "none" }));
+        if (mounted) setSubInfo({ ...EMPTY_SUB, loading: false });
         return;
       }
 
@@ -82,18 +89,7 @@ export default function ServiceSection({
         }
 
         if (!found) {
-          if (mounted) {
-            setSubInfo({
-              loading: false,
-              active: false,
-              status: "none",
-              planKey: "",
-              planName: "",
-              startAt: null,
-              endAt: null,
-              usedDocId: "",
-            });
-          }
+          if (mounted) setSubInfo({ ...EMPTY_SUB, loading: false });
           return;
         }
 
@@ -101,19 +97,18 @@ export default function ServiceSection({
         const isActiveFlag = Boolean(found.isActive);
 
         const startMs =
-          found.startAt?.toMillis ? found.startAt.toMillis() :
-          found.startAt?.seconds ? found.startAt.seconds * 1000 :
-          found.startAtISO ? Date.parse(found.startAtISO) :
-          0;
+          found.startAt?.toMillis?.() ??
+          (found.startAt?.seconds ? found.startAt.seconds * 1000 : 0) ??
+          (found.startAtISO ? Date.parse(found.startAtISO) : 0);
 
         const endMs =
-          found.endAt?.toMillis ? found.endAt.toMillis() :
-          found.endAt?.seconds ? found.endAt.seconds * 1000 :
-          found.endAtISO ? Date.parse(found.endAtISO) :
-          0;
+          found.endAt?.toMillis?.() ??
+          (found.endAt?.seconds ? found.endAt.seconds * 1000 : 0) ??
+          (found.endAtISO ? Date.parse(found.endAtISO) : 0);
 
         const now = Date.now();
-        const withinWindow = (!startMs || now >= startMs) && (!endMs || now < endMs);
+        const withinWindow =
+          (!startMs || now >= startMs) && (!endMs || now < endMs);
 
         const active = (isActiveFlag || status === "active") && withinWindow;
 
@@ -129,19 +124,9 @@ export default function ServiceSection({
             usedDocId: foundId,
           });
         }
-      } catch {
-        if (mounted) {
-          setSubInfo({
-            loading: false,
-            active: false,
-            status: "error",
-            planKey: "",
-            planName: "",
-            startAt: null,
-            endAt: null,
-            usedDocId: "",
-          });
-        }
+      } catch (e) {
+        console.error("loadSubscription failed:", e);
+        if (mounted) setSubInfo({ ...EMPTY_SUB, loading: false, status: "error" });
       }
     }
 
@@ -149,7 +134,7 @@ export default function ServiceSection({
     return () => {
       mounted = false;
     };
-  }, [isCompany, candidateIds]);
+  }, [isCompany, candidateKey]); // ✅ أقوى من candidateIds كـ dependency
 
   const subscriptionActive = isCompany && Boolean(subInfo.active);
 
@@ -198,7 +183,7 @@ export default function ServiceSection({
             repeatable={srv.repeatable}
             allowPaperCount={srv.allowPaperCount}
             provider={srv.provider}
-            subscriptionActive={subscriptionActive} // ✅
+            subscriptionActive={subscriptionActive}
           />
         ))}
       </div>
