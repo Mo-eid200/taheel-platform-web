@@ -49,6 +49,7 @@ async function saveRequestToFirestore({
   providers = [],
   paidAmount = 0,
   printingFee = 0,
+  vat = 0,                 // ✅ ADDED
   coinsUsed = 0,
   coinsGiven = 0,
   uploadedDocs = {},
@@ -65,6 +66,7 @@ async function saveRequestToFirestore({
     providers,
     paidAmount,
     printingFee,
+    vat,                   // ✅ ADDED
     coinsUsed,
     coinsGiven,
     createdAt: new Date().toISOString(),
@@ -75,15 +77,20 @@ async function saveRequestToFirestore({
   });
 }
 
+function toNumberSafe(v, fallback = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 export default function ServicePayModal({
   open,
   onClose,
 
   serviceName,
   serviceId,
-  totalPrice,
+  totalPrice,     // ✅ القادم من الكارت (غالباً: service + printing)
   printingFee,
-  tax,
+  tax,            // optional (لكن إحنا هنحسب VAT من الطباعة)
 
   coinsBalance,
   cashbackCoins,
@@ -98,14 +105,12 @@ export default function ServicePayModal({
 
   clientType = "resident",
 
-  // ✅ subscription
+  // ✅ subscription/addon active => free printing => no VAT automatically
   freePrinting = false,
 
-  // assignment (optional)
   assignedTo,
   assignedToName,
 
-  // provider list
   provider,
 }) {
   const [useCoins, setUseCoins] = useState(false);
@@ -116,21 +121,36 @@ export default function ServicePayModal({
 
   const router = useRouter();
 
-  // ✅ effective printing fee
-  const effectivePrintingFee =
-    clientType === "company" && freePrinting ? 0 : Number(printingFee) || 0;
+  const isCompany = clientType === "company";
+  const hasActiveSubscriptionOrAddon = isCompany && !!freePrinting;
 
-  // totalPrice passed from card already includes printingFee,
-  // so replace it with effectivePrintingFee
-  const effectiveTotalPrice =
-    (Number(totalPrice) || 0) - (Number(printingFee) || 0) + effectivePrintingFee;
+  // ✅ effective printing fee
+  const rawPrintingFee = toNumberSafe(printingFee, 0);
+  const effectivePrintingFee = hasActiveSubscriptionOrAddon ? 0 : rawPrintingFee;
+
+  // ✅ derive service base from total (assume totalPrice includes original printingFee but NOT VAT)
+  // totalPrice passed from card already includes printingFee, so replace it with effectivePrintingFee
+  const rawTotalPrice = toNumberSafe(totalPrice, 0);
+  const effectiveTotalBeforeVat =
+    rawTotalPrice - rawPrintingFee + effectivePrintingFee;
+
+  // ✅ VAT rule (YOUR FINAL RULE):
+  // VAT only for companies, only on printing fee, and if no printing => VAT=0
+  const vatValue = (() => {
+    if (!isCompany) return 0;
+    if (effectivePrintingFee <= 0) return 0;         // no printing => no VAT
+    return +(effectivePrintingFee * 0.05).toFixed(2); // 5% of printing only
+  })();
+
+  // ✅ total shown (before coins) includes VAT
+  const effectiveTotalPrice = +(effectiveTotalBeforeVat + vatValue).toFixed(2);
 
   // coins (max 10% of printing fee) => coins stored as "points" (100 = 1 AED)
   const maxCoinDiscount = Math.floor(effectivePrintingFee * 0.1 * 100);
   const coinDiscount = useCoins ? Math.min(coinsBalance || 0, maxCoinDiscount) : 0;
   const coinDiscountValue = coinDiscount / 100;
 
-  const finalPrice = Math.max(0, effectiveTotalPrice - coinDiscountValue);
+  const finalPrice = Math.max(0, +(effectiveTotalPrice - coinDiscountValue).toFixed(2));
   const willGetCashback = !useCoins;
 
   // Stripe fees (only if gateway)
@@ -138,9 +158,12 @@ export default function ServicePayModal({
     isInternational: false,
     isCurrencyConversion: false,
   });
+
   const finalPriceWithFees =
     payMethod === "gateway" ? stripeFeesResult.totalAmount : finalPrice;
-  const stripeFeeValue = payMethod === "gateway" ? stripeFeesResult.stripeFee : 0;
+
+  const stripeFeeValue =
+    payMethod === "gateway" ? stripeFeesResult.stripeFee : 0;
 
   // Fetch service data (optional enrichment)
   async function getServiceData() {
@@ -231,6 +254,7 @@ export default function ServicePayModal({
         providers,
         paidAmount: finalPrice,
         printingFee: effectivePrintingFee,
+        vat: vatValue, // ✅ save VAT
         coinsUsed: useCoins ? coinDiscountValue : 0,
         coinsGiven: willGetCashback ? Number(cashbackCoins) || 0 : 0,
         uploadedDocs,
@@ -254,7 +278,7 @@ export default function ServicePayModal({
         isRead: false,
       });
 
-      // email
+      // email (basic)
       await fetch("/api/sendOrderEmail", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -263,6 +287,12 @@ export default function ServicePayModal({
           orderNumber,
           serviceName: finalServiceName,
           price: finalPrice.toFixed(2),
+          printingFee: effectivePrintingFee,
+          vat: vatValue,
+          processingFee: 0,
+          coinDiscount: useCoins ? coinDiscountValue : 0,
+          paymentMethod: "wallet",
+          lang,
         }),
       });
 
@@ -294,6 +324,7 @@ export default function ServicePayModal({
               fieldKey: `service:${serviceId || serviceName}:name:en`,
             });
 
+      // ✅ IMPORTANT: send VAT calculated (not 0)
       const res = await fetch("/api/create-payment-intent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -303,7 +334,7 @@ export default function ServicePayModal({
           customerId,
           userEmail,
           printingFee: effectivePrintingFee,
-          vat: 0,
+          vat: vatValue,
         }),
       });
 
@@ -314,6 +345,7 @@ export default function ServicePayModal({
         return;
       }
 
+      // ✅ Store full breakdown for CardPaymentPage
       localStorage.setItem(
         "paymentData",
         JSON.stringify({
@@ -322,10 +354,7 @@ export default function ServicePayModal({
             name: uiServiceName,
             id: serviceId,
             printingFee: effectivePrintingFee,
-            vat:
-              typeof tax !== "undefined"
-                ? Number(tax) || 0
-                : +(effectivePrintingFee * 0.05).toFixed(2),
+            vat: vatValue,
             coinDiscount: useCoins ? coinDiscountValue : 0,
             userEmail,
           },
@@ -399,25 +428,20 @@ export default function ServicePayModal({
                 <td className="text-right">{effectiveTotalPrice.toFixed(2)} د.إ</td>
               </tr>
 
-              {/* ✅ إظهار رسوم الطباعة والـVAT فقط لو مش Free Printing */}
-              {!(clientType === "company" && freePrinting) && (
-                <>
-                  <tr>
-                    <td>{lang === "ar" ? "رسوم الطباعة" : "Printing Fee"}</td>
-                    <td className="text-right">{effectivePrintingFee.toFixed(2)} د.إ</td>
-                  </tr>
-                  <tr>
-                    <td>{lang === "ar" ? "ضريبة القيمة المضافة 5%" : "VAT 5%"}</td>
-                    <td className="text-right">
-                      {(
-                        typeof tax !== "undefined"
-                          ? Number(tax) || 0
-                          : +(effectivePrintingFee * 0.05).toFixed(2)
-                      ).toFixed(2)}{" "}
-                      د.إ
-                    </td>
-                  </tr>
-                </>
+              {/* ✅ Printing always shown if > 0 */}
+              {effectivePrintingFee > 0 && (
+                <tr>
+                  <td>{lang === "ar" ? "رسوم الطباعة" : "Printing Fee"}</td>
+                  <td className="text-right">{effectivePrintingFee.toFixed(2)} د.إ</td>
+                </tr>
+              )}
+
+              {/* ✅ VAT only for companies AND only if printing exists */}
+              {isCompany && vatValue > 0 && (
+                <tr>
+                  <td>{lang === "ar" ? "ضريبة القيمة المضافة 5%" : "VAT 5%"}</td>
+                  <td className="text-right">{vatValue.toFixed(2)} د.إ</td>
+                </tr>
               )}
 
               <tr>

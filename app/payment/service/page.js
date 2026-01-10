@@ -2,19 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { loadStripe } from "@stripe/stripe-js";
-import {
-  Elements,
-  CardElement,
-  useStripe,
-  useElements,
-} from "@stripe/react-stripe-js";
+import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import PaymentSuccessPage from "../PaymentSuccess/page";
 
-const stripePromise = loadStripe(
-  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
-);
+const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
 
 // النصوص (عربي / إنجليزي)
 const LANG = {
@@ -80,73 +73,51 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
     paymentData?.serviceName ||
     "اسم غير متوفر";
 
-const servicePrice = Number(
-  paymentData?.breakdown?.baseAmountAED ??
-  paymentData?.baseAmountAED ??
-  paymentData?.metadata?.baseAmountAED ??   // احتياطي لو مخزّن metadata
-  paymentData?.service?.clientPrice ??      // احتياطي
-  paymentData?.service?.price ??            // احتياطي
-  paymentData?.price ??                     // قديم
-  0
-);
+  // ✅ basics
+  const printingFee = Number(paymentData?.service?.printingFee ?? paymentData?.printingFee ?? 0);
+  const vat = Number(paymentData?.service?.vat ?? paymentData?.vat ?? 0);
+  const coinDiscount = Number(paymentData?.service?.coinDiscount ?? paymentData?.coinDiscount ?? 0);
 
-
-  const printingFee = Number(
-    paymentData?.service?.printingFee ??
-      paymentData?.printingFee ??
-      0
-  );
-
-  const vat = Number(
-    paymentData?.service?.vat ?? paymentData?.vat ?? 0
-  );
-
-  const coinDiscount = Number(
-    paymentData?.service?.coinDiscount ??
-      paymentData?.coinDiscount ??
-      0
-  );
-
-  const totalPrice = Number(
-    paymentData?.totalPrice ?? paymentData?.price ?? 0
-  );
-
-  const finalPrice = Number(
-    paymentData?.finalPrice ?? paymentData?.price ?? 0
-  );
-
+  const totalPrice = Number(paymentData?.totalPrice ?? paymentData?.price ?? 0);
+  const finalPrice = Number(paymentData?.finalPrice ?? paymentData?.price ?? 0);
   const processingFee = Number(paymentData?.processingFee ?? 0);
 
   const orderNumber = paymentData?.orderNumber;
   const clientSecret = paymentData?.clientSecret;
 
-  const userEmail =
-    paymentData?.userEmail ||
-    paymentData?.service?.userEmail ||
-    "";
+  const userEmail = paymentData?.userEmail || paymentData?.service?.userEmail || "";
 
   const dir = lang === "ar" ? "rtl" : "ltr";
+
+  // ✅ Service Fee (robust + fallback derived from total)
+  let servicePrice = Number(
+    paymentData?.breakdown?.baseAmountAED ??
+      paymentData?.baseAmountAED ??
+      paymentData?.metadata?.baseAmountAED ??
+      paymentData?.service?.clientPrice ??
+      paymentData?.service?.price ??
+      // ⚠️ paymentData.price قديم وممكن يكون إجمالي مش “رسوم خدمة”
+      0
+  );
+
+  // ✅ fallback: derive from total (Total Before Discount - printing - vat)
+  if (!Number.isFinite(servicePrice) || servicePrice <= 0) {
+    servicePrice = Math.max(0, Number((totalPrice - printingFee - vat).toFixed(2)));
+  }
 
   // ✅ Detect subscription + fields
   const isSubscription =
     String(paymentData?.requestType || "").toLowerCase() === "subscription" ||
     !!paymentData?.planKey ||
     String(paymentData?.serviceId || "").startsWith("subscription-") ||
-    String(paymentData?.serviceId || "").startsWith("subscription_") || // ✅ ADD
+    String(paymentData?.serviceId || "").startsWith("subscription_") ||
     String(paymentData?.serviceName || "").includes("اشتراك") ||
     String(paymentData?.serviceName || "").toLowerCase().includes("subscription");
 
-  const planKey =
-    paymentData?.planKey ||
-    paymentData?.subscriptionName ||
-    "";
+  const planKey = paymentData?.planKey || paymentData?.subscriptionName || "";
 
   // مدة الاشتراك بالأيام (الأولوية: subscriptionDays)
-  const subscriptionDays = Number(
-    paymentData?.subscriptionDays ??
-      paymentData?.days ??
-      0
-  );
+  const subscriptionDays = Number(paymentData?.subscriptionDays ?? paymentData?.days ?? 0);
 
   // fallback: لو عندك monthsShown نعتبر الشهر 30 يوم
   const monthsShown = Number(paymentData?.monthsShown ?? 0);
@@ -166,26 +137,18 @@ const servicePrice = Number(
       return;
     }
     if (!clientSecret) {
-      setPayMsg(
-        lang === "ar" ? "بيانات الدفع ناقصة." : "Missing payment data."
-      );
+      setPayMsg(lang === "ar" ? "بيانات الدفع ناقصة." : "Missing payment data.");
       setLoading(false);
       return;
     }
 
     try {
-      const { error: stripeError, paymentIntent } =
-        await stripe.confirmCardPayment(clientSecret, {
-          payment_method: {
-            card: elements.getElement(CardElement),
-          },
-        });
+      const { error: stripeError, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
+        payment_method: { card: elements.getElement(CardElement) },
+      });
 
       if (stripeError) {
-        setPayMsg(
-          stripeError.message ||
-            (lang === "ar" ? "فشل الدفع." : "Payment failed.")
-        );
+        setPayMsg(stripeError.message || (lang === "ar" ? "فشل الدفع." : "Payment failed."));
         setLoading(false);
         return;
       }
@@ -202,20 +165,19 @@ const servicePrice = Number(
         return;
       }
 
-// 1) confirmPayment (IMPORTANT: await)
-try {
-  await fetch("/api/confirmPayment", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      paymentIntentId: paymentIntent.id,
-      requestId: orderNumber ?? null,
-    }),
-  });
-} catch (err) {
-  console.warn("confirmPayment call failed:", err);
-}
-
+      // 1) confirmPayment (await)
+      try {
+        await fetch("/api/confirmPayment", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            paymentIntentId: paymentIntent.id,
+            requestId: orderNumber ?? null,
+          }),
+        });
+      } catch (err) {
+        console.warn("confirmPayment call failed:", err);
+      }
 
       // 2) send email
       (async () => {
@@ -227,7 +189,7 @@ try {
               to: userEmail,
               orderNumber,
               serviceName,
-              price: servicePrice,
+              price: servicePrice, // ✅ هنا هتروح “رسوم الخدمة” صح
               printingFee,
               vat,
               coinDiscount,
@@ -256,7 +218,11 @@ try {
         const orderForRedirect = orderNumber || null;
 
         if (orderForRedirect) {
-          router.push(`/payment/PaymentSuccess?order=${encodeURIComponent(orderForRedirect)}&lang=${encodeURIComponent(lang)}`);
+          router.push(
+            `/payment/PaymentSuccess?order=${encodeURIComponent(orderForRedirect)}&lang=${encodeURIComponent(
+              lang
+            )}`
+          );
         } else {
           router.push(`/payment/PaymentSuccess?pi=${encodeURIComponent(paymentIntent.id)}`);
         }
@@ -280,8 +246,7 @@ try {
       onSubmit={handleSubmit}
       className="max-w-md mx-auto bg-white rounded-3xl shadow-2xl border border-emerald-200 p-7 flex flex-col items-center"
       style={{
-        background:
-          "linear-gradient(180deg,#0b131e 0%,#22304a 30%,#122024 60%,#1d4d40 100%)",
+        background: "linear-gradient(180deg,#0b131e 0%,#22304a 30%,#122024 60%,#1d4d40 100%)",
       }}
     >
       <Image
@@ -296,9 +261,7 @@ try {
         {isSubscription ? LANG[lang].subTitle : LANG[lang].title}
       </div>
 
-      <div className="text-gray-200 text-sm mb-4 text-center">
-        {LANG[lang].subtitle}
-      </div>
+      <div className="text-gray-200 text-sm mb-4 text-center">{LANG[lang].subtitle}</div>
 
       <div className="bg-[#22304a]/70 rounded-xl p-4 mb-3 w-full text-center shadow">
         <table className="w-full text-sm text-right mb-2 border-separate border-spacing-y-1">
@@ -317,9 +280,7 @@ try {
                 <tr>
                   <td className="text-gray-300">{LANG[lang].subDays}:</td>
                   <td className="text-white">
-                    {subDaysToShow > 0
-                      ? `${subDaysToShow} ${lang === "ar" ? "يوم" : "days"}`
-                      : "-"}
+                    {subDaysToShow > 0 ? `${subDaysToShow} ${lang === "ar" ? "يوم" : "days"}` : "-"}
                   </td>
                 </tr>
               </>
@@ -372,9 +333,7 @@ try {
       </div>
 
       <div className="w-full mb-3">
-        <label className="text-emerald-200 font-bold text-sm mb-1 block">
-          {LANG[lang].cardLabel}
-        </label>
+        <label className="text-emerald-200 font-bold text-sm mb-1 block">{LANG[lang].cardLabel}</label>
         <div className="bg-white rounded-lg shadow p-2 border border-emerald-200">
           <CardElement
             options={{
@@ -387,10 +346,7 @@ try {
                   letterSpacing: "0.8px",
                   "::placeholder": { color: "#94a3b8" },
                 },
-                invalid: {
-                  color: "#dc2626",
-                  iconColor: "#dc2626",
-                },
+                invalid: { color: "#dc2626", iconColor: "#dc2626" },
               },
             }}
           />
@@ -404,9 +360,7 @@ try {
           loading ? "opacity-40 cursor-not-allowed" : "cursor-pointer"
         }`}
       >
-        {loading
-          ? LANG[lang].processing
-          : `${LANG[lang].payBtn} (${finalPrice.toFixed(2)} د.إ)`}
+        {loading ? LANG[lang].processing : `${LANG[lang].payBtn} (${finalPrice.toFixed(2)} د.إ)`}
       </button>
 
       {payMsg && (
@@ -440,7 +394,7 @@ export default function CardPaymentPage() {
     try {
       const raw = localStorage.getItem("paymentData");
       if (raw) setPaymentData(JSON.parse(raw));
-    } catch (e) {
+    } catch {
       setPaymentData(null);
     }
   }, []);
@@ -481,14 +435,10 @@ export default function CardPaymentPage() {
       lang={paymentData.lang}
       className="min-h-screen flex flex-col items-center justify-center font-sans"
       style={{
-        background:
-          "linear-gradient(180deg, #0b131e 0%, #22304a 30%, #122024 60%, #1d4d40 100%)",
+        background: "linear-gradient(180deg, #0b131e 0%, #22304a 30%, #122024 60%, #1d4d40 100%)",
       }}
     >
-      <Elements
-        stripe={stripePromise}
-        options={{ clientSecret: paymentData.clientSecret }}
-      >
+      <Elements stripe={stripePromise} options={{ clientSecret: paymentData.clientSecret }}>
         <CardForm
           paymentData={paymentData}
           lang={paymentData.lang}
