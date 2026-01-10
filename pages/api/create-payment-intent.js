@@ -6,11 +6,19 @@ import admin from "firebase-admin";
 /**
  * Create Stripe PaymentIntent (server-side fee calc) + create/merge request doc.
  *
+ * ✅ Requirements (your rules):
+ * 1) processingFee ALWAYS visible for every payment type.
+ * 2) base amount (service/subscription/addon/wallet) ALWAYS present.
+ * 3) printingFee is the ONLY conditional line:
+ *    - HIDE (set to 0) ONLY when:
+ *        Company + (Active Subscription OR addonsRemaining > 0)
+ *    - Otherwise SHOW normal printingFee (from service)
+ *
  * ✅ Compatible with your Stripe webhook:
  * - requestType normalized: service | wallet_recharge | subscription | addon
  * - webhook will write: companySubscriptions + monthlyTxCredits
  * - addon purchases pass addonKey/addonQty (resolved from catalog)
- * - processingFee ALWAYS present in all cases
+ * - subscription passes monthlyIncludedTxLimit (resolved server-side if missing)
  */
 
 if (!admin.apps.length) {
@@ -66,8 +74,21 @@ function normType(v) {
   if (t === "sub" || t === "subs") return "subscription";
   if (t === "add-on" || t === "addon" || t === "add_on") return "addon";
   if (t === "service" || !t) return "service";
-  // fallback: keep but normalized
   return t;
+}
+function normLower(v) {
+  return safeStr(v).trim().toLowerCase();
+}
+function toDateSafe(v) {
+  try {
+    if (!v) return null;
+    if (v instanceof Date) return v;
+    if (typeof v?.toDate === "function") return v.toDate();
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? null : d;
+  } catch {
+    return null;
+  }
 }
 
 // Read service definition from servicesByClientType
@@ -135,6 +156,51 @@ async function fetchPlanMonthlyLimit(planKey) {
 }
 
 /**
+ * ✅ Determine if printing fee should be waived:
+ * - Company + (Active subscription OR addonsRemaining > 0)
+ *
+ * Notes:
+ * - Subscription activeness checked from companySubscriptions doc:
+ *    status/ isActive + endAt/endAtISO in the future
+ * - Addon credits checked from user.monthlyTxCredits.addonsRemaining
+ */
+async function shouldWaivePrintingFeeForCompany(customerId) {
+  try {
+    const userRef = db.collection("users").doc(String(customerId));
+    const userSnap = await userRef.get();
+    if (!userSnap.exists) return false;
+
+    const u = userSnap.data() || {};
+    const accountType = normLower(u.accountType || u.type || "");
+    if (accountType !== "company") return false;
+
+    const mtc = u.monthlyTxCredits || {};
+    const addonsRemaining = Number(mtc.addonsRemaining || 0);
+
+    let subValid = false;
+    try {
+      const subRef = db.collection("companySubscriptions").doc(String(customerId));
+      const subSnap = await subRef.get();
+      if (subSnap.exists) {
+        const sub = subSnap.data() || {};
+        const status = normLower(sub.status || "");
+        const isActive = !!sub.isActive || status === "active" || status === "trial";
+        const endAt = toDateSafe(sub.endAt) || toDateSafe(sub.expiresAt) || (sub.endAtISO ? new Date(sub.endAtISO) : null);
+        subValid = isActive && endAt && endAt.getTime() > Date.now();
+      }
+    } catch (e) {
+      // ignore and fallback to addonsRemaining only
+      console.warn("shouldWaivePrintingFeeForCompany subscription read error:", e?.message || e);
+    }
+
+    return subValid || addonsRemaining > 0;
+  } catch (e) {
+    console.warn("shouldWaivePrintingFeeForCompany error:", e?.message || e);
+    return false;
+  }
+}
+
+/**
  * ✅ Processing fee calc (editable via env)
  * - STRIPE_FEE_FIXED_AED = "1.00"
  * - STRIPE_FEE_PERCENT  = "0.029"
@@ -192,7 +258,10 @@ export default async function handler(req, res) {
     // --------------------------------
     // Amount calc
     // --------------------------------
+    // base amount MUST exist for all types; for service, can be resolved from catalog
     let baseAmountAED = safeNum(body.amountAED || body.amount || 0);
+
+    // printing fee will be resolved from service then optionally waived
     let printingFeeAED = safeNum(body.printingFee || 0);
 
     let serviceDoc = null;
@@ -220,12 +289,27 @@ export default async function handler(req, res) {
       if (resolvedAddonQty <= 0) return res.status(400).json({ ok: false, error: "Invalid addon qty" });
     }
 
-    // SERVICE: if amount not provided, read from catalog
-    if (!baseAmountAED && requestType === "service") {
-      serviceDoc = await fetchServiceFromByClientType(serviceId, clientType, serviceName);
-      if (serviceDoc) {
-        baseAmountAED = safeNum(serviceDoc.clientPrice ?? serviceDoc.price ?? 0);
-        printingFeeAED = safeNum(serviceDoc.printingFee ?? 0);
+    // SERVICE: resolve from service catalog if baseAmount not provided
+    if (requestType === "service") {
+      if (!baseAmountAED) {
+        serviceDoc = await fetchServiceFromByClientType(serviceId, clientType, serviceName);
+        if (serviceDoc) {
+          baseAmountAED = safeNum(serviceDoc.clientPrice ?? serviceDoc.price ?? 0);
+          printingFeeAED = safeNum(serviceDoc.printingFee ?? 0);
+        }
+      } else {
+        // base amount passed from client - still prefer catalog printingFee if service is known (optional)
+        serviceDoc = await fetchServiceFromByClientType(serviceId, clientType, serviceName);
+        if (serviceDoc) {
+          printingFeeAED = safeNum(serviceDoc.printingFee ?? printingFeeAED ?? 0);
+        }
+      }
+
+      // ✅ printingFee conditional rule (ONLY for service):
+      // hide (set 0) when Company + (active subscription OR addonsRemaining>0)
+      if (printingFeeAED > 0) {
+        const waivePrinting = await shouldWaivePrintingFeeForCompany(customerId);
+        if (waivePrinting) printingFeeAED = 0;
       }
     }
 
@@ -249,10 +333,13 @@ export default async function handler(req, res) {
       }
     }
 
-    if (baseAmountAED <= 0) return res.status(400).json({ ok: false, error: "Invalid amount (0)" });
+    // ✅ base amount must be > 0 for all payment types
+    if (baseAmountAED <= 0) return res.status(400).json({ ok: false, error: "Invalid base amount (0)" });
 
     // ✅ processingFee ALWAYS calculated & present
     const processingFeeAED = calcProcessingFeeAED(baseAmountAED + printingFeeAED);
+
+    // total includes base + (printing if any) + processing
     const totalAED = Number((baseAmountAED + printingFeeAED + processingFeeAED).toFixed(2));
     const amountSmallest = Math.round(totalAED * 100);
 
@@ -290,8 +377,9 @@ export default async function handler(req, res) {
         assignedTo,
         assignedToName,
 
+        // ✅ ALWAYS present for UI + webhook
         baseAmountAED: String(baseAmountAED.toFixed(2)),
-        printingFee: String(printingFeeAED.toFixed(2)),
+        printingFee: String(printingFeeAED.toFixed(2)), // 0 only when waived or not applicable
         processingFee: String(processingFeeAED.toFixed(2)),
         totalAED: String(totalAED.toFixed(2)),
 
@@ -341,13 +429,16 @@ export default async function handler(req, res) {
         serviceId,
         serviceName,
 
+        // ✅ persist breakdown for UI
+        baseAmountAED,
+        printingFee: printingFeeAED,
+        processingFee: processingFeeAED,
+        totalAED,
+
         paidAmount: 0,
         status: "pending_payment",
         createdAt: nowISO(),
         lastUpdated: nowISO(),
-
-        printingFee: printingFeeAED,
-        processingFee: processingFeeAED, // ✅ always present
 
         coinsUsed,
         coinsGiven,
@@ -366,7 +457,6 @@ export default async function handler(req, res) {
             }
           : {}),
 
-        // helpful to debug
         ...(requestType === "subscription"
           ? {
               subscriptionMeta: {
@@ -390,13 +480,19 @@ export default async function handler(req, res) {
       clientSecret: pi.client_secret,
       paymentIntentId: pi.id,
       orderNumber,
-      processingFee: processingFeeAED, // ✅ show always
+
+      // ✅ always show
+      processingFee: processingFeeAED,
       finalPrice: totalAED,
-      breakdown: { baseAmountAED, printingFeeAED, processingFeeAED },
+
+      // ✅ always present; UI decides to hide printing line if printingFeeAED === 0
+      breakdown: { baseAmountAED, printingFeeAED, processingFeeAED, totalAED },
+
       addon:
         requestType === "addon"
           ? { addonKey: addonKeyFromBody, qty: resolvedAddonQty, title: addonDoc?.title || null }
           : null,
+
       subscription:
         requestType === "subscription"
           ? {
