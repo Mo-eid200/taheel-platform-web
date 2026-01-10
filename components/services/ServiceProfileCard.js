@@ -615,35 +615,55 @@ export default function ServiceProfileCard({
         </button>
       </div>
 
-      {/* ✅ Pay Modal */}
-<ServicePayModal
-  open={showPayModal}
-  onClose={() => setShowPayModal(false)}
-  serviceName={name}
-  serviceId={serviceId}
 
-  // ✅ already used
-  totalPrice={+payTotalBeforeVat.toFixed(2)}
-  printingFee={payPrintingFee}
-  freePrinting={isSubscriptionActive}
+{/* ✅ Pay Modal */}
+{typeof window !== "undefined" &&
+  showPayModal &&
+  createPortal(
+    <ServicePayModal
+      open={showPayModal}
+      onClose={() => setShowPayModal(false)}
 
-  // ✅ NEW: pass exact totals (NO guessing in modal)
-  serviceBase={+baseDisplayService.toFixed(2)}
-  printingTotal={+printingTotal.toFixed(2)}
-  vatTotal={+vatTotal.toFixed(2)}
+      serviceName={name}
+      serviceId={serviceId}
 
-  clientType={category}
-  coinsBalance={coinsBalance}
-  cashbackCoins={coins}
-  userWallet={wallet}
-  lang={lang}
-  customerId={customerId}
-  userId={userId}
-  userEmail={userEmail}
-  uploadedDocs={uploadedDocs}
-  onPaid={handlePaid}
-  provider={Array.isArray(provider) ? provider : provider ? [provider] : []}
-/>
+      // ✅ Fallback only (مش هيتستخدم طالما بنبعت totals)
+      totalPrice={payTotalBeforeVat}
+      printingFee={rawPrintingPerUnit} // per unit الأصلي (المودال بيحفظه كـ printingFeePerUnit)
+
+      // ✅ SOURCE OF TRUTH TOTALS (لازم دول يتبعتوا)
+      serviceBase={serviceBase}
+      printingTotal={printingTotal}
+      vatTotal={vatTotal}
+
+      // ✅ company subscription => enforce printing/vat = 0 inside modal too
+      freePrinting={isSubscriptionActive}
+
+      clientType={category}
+
+      coinsBalance={coinsBalance}
+      cashbackCoins={coins} // نقاط المكافأة
+      userWallet={wallet}
+
+      // ✅ مهم جداً: خلي المودال يبدأ بنفس اختيار الكارت
+      initialPayMethod={payMethodPreview} // "wallet" | "gateway"
+
+      lang={lang}
+      customerId={customerId}
+      userId={userId}
+      userEmail={userEmail}
+      uploadedDocs={uploadedDocs}
+      onPaid={handlePaid}
+
+      assignedTo=""
+      assignedToName=""
+
+      provider={Array.isArray(provider) ? provider : provider ? [provider] : []}
+    />,
+    document.body
+  )}
+
+
 
 
       <div className="absolute -bottom-6 right-0 left-0 w-full h-8 bg-gradient-to-t from-emerald-100/60 via-white/20 to-transparent blur-2xl opacity-80 z-0 pointer-events-none" />

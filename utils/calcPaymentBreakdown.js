@@ -5,45 +5,46 @@ export function toMoney(n) {
 }
 
 /**
- * RULES:
- * - VAT = 5% on PRINTING ONLY.
- * - Company: printing+vat = 0 ONLY if waivePrinting=true (subscriptionActive OR addonsRemaining>0)
- * - Subscription: printing=0, vat=0 ALWAYS
- * - Processing fee: ALWAYS shown
+ * RULES (FINAL):
+ * - VAT = 5% on PRINTING ONLY (for ALL services).
+ * - Printing+VAT waived ONLY when waivePrinting=true.
+ * - Subscription: printing=0, vat=0 ALWAYS (because it's not a paper service)
+ * - Processing fee is ALWAYS shown:
  *   - wallet => 0
- *   - gateway => from calcStripeFees(finalSubtotal)
+ *   - gateway => from calcStripeFees(subtotalAfterDiscount)
  */
 export function calcPaymentBreakdown({
   requestType = "service", // service | subscription | addon | wallet_recharge
-  baseAmount = 0,          // service price OR subscription price OR addon price OR wallet recharge amount
+  baseAmount = 0,
   printingPerUnit = 0,
   paperCount = 1,
   waivePrinting = false,
   vatRate = 0.05,
   coinDiscount = 0,        // AED value (not points)
   payMethod = "wallet",    // wallet | gateway
-  calcStripeFees,          // function(amountAED) => { stripeFee, totalAmount }
+  calcStripeFees,          // (amountAED) => { stripeFee, totalAmount }
 }) {
   const base = toMoney(baseAmount);
 
-  const isSubscription = requestType === "subscription";
-  const isWallet = requestType === "wallet_recharge";
-  const isAddon = requestType === "addon";
+  const isService = requestType === "service";
+  const count = Math.max(1, Number(paperCount || 1));
+  const printingUnit = toMoney(printingPerUnit);
 
-  // printing only for SERVICE (حسب منطقك)
-  const printing =
-    (isSubscription || isWallet || isAddon) ? 0 :
+  // ✅ printing applies only for service requests
+  const printingTotal =
+    !isService ? 0 :
     waivePrinting ? 0 :
-    toMoney(toMoney(printingPerUnit) * Math.max(1, Number(paperCount || 1)));
+    toMoney(printingUnit * count);
 
-  const vat = (printing > 0) ? toMoney(printing * vatRate) : 0;
+  // ✅ VAT on printing only
+  const vatTotal = printingTotal > 0 ? toMoney(printingTotal * vatRate) : 0;
 
-  const totalBeforeDiscount = toMoney(base + printing + vat);
+  const totalBeforeDiscount = toMoney(base + printingTotal + vatTotal);
 
   const discount = toMoney(Math.max(0, coinDiscount));
   const subtotalAfterDiscount = toMoney(Math.max(0, totalBeforeDiscount - discount));
 
-  // processing fee ALWAYS visible
+  // ✅ processing fee always visible
   let processingFee = 0;
   let finalToPay = subtotalAfterDiscount;
 
@@ -59,8 +60,14 @@ export function calcPaymentBreakdown({
   return {
     requestType,
     baseAmount: base,
-    printingFee: printing,
-    vat,
+
+    // ✅ clearer naming
+    printingPerUnit: printingUnit,
+    paperCount: count,
+
+    printingTotal,
+    vatTotal,
+
     totalBeforeDiscount,
     coinDiscount: discount,
     subtotalAfterDiscount,
