@@ -188,7 +188,7 @@ async function applyAddonCreditTx(tx, userRef, { paymentIntentId, addonKey, addo
   const currentMonthKey = String(mtc.monthKey || monthKeyOf(now));
 
   const qty = Number(addonQty || 0);
-  if (!(qty > 0)) return { added: 0, expiresMonthKey: "" };
+  if (!(qty > 0)) return { added: 0, expiresMonthKey: "", monthKey: currentMonthKey, addonsRemaining: Number(mtc.addonsRemaining || 0) };
 
   const allBuckets = Array.isArray(mtc.addonBuckets) ? [...mtc.addonBuckets] : [];
   const expiresMonthKey = computeAddonExpiresMonthKey(purchasedAt);
@@ -204,13 +204,14 @@ async function applyAddonCreditTx(tx, userRef, { paymentIntentId, addonKey, addo
   const { sum } = normalizeBucketsForMonth(allBuckets, currentMonthKey);
 
   tx.update(userRef, {
-    "monthlyTxCredits.addonBuckets": allBuckets, // store all months buckets
-    "monthlyTxCredits.addonsRemaining": sum, // available only for current month
+    "monthlyTxCredits.addonBuckets": allBuckets,
+    "monthlyTxCredits.addonsRemaining": sum,
     "monthlyTxCredits.updatedAt": admin.firestore.FieldValue.serverTimestamp(),
   });
 
-  return { added: qty, expiresMonthKey };
+  return { added: qty, expiresMonthKey, monthKey: currentMonthKey, addonsRemaining: sum };
 }
+
 
 /**
  * ✅ Apply subscription base limit for current month
@@ -231,7 +232,6 @@ async function applySubscriptionBaseLimitTx(tx, userRef, baseLimit) {
   const now = new Date();
   const currentMonthKey = String(mtc.monthKey || monthKeyOf(now));
 
-  // Recompute addonsRemaining for current month from existing buckets
   const allBuckets = Array.isArray(mtc.addonBuckets) ? mtc.addonBuckets : [];
   const { sum } = normalizeBucketsForMonth(allBuckets, currentMonthKey);
 
@@ -245,7 +245,17 @@ async function applySubscriptionBaseLimitTx(tx, userRef, baseLimit) {
     "monthlyTxCredits.addonsRemaining": sum,
     "monthlyTxCredits.updatedAt": admin.firestore.FieldValue.serverTimestamp(),
   });
+
+  return {
+    monthKey: currentMonthKey,
+    baseLimit: lim,
+    baseRemaining: lim,
+    usedThisMonth: 0,
+    addonsRemaining: sum,
+    totalRemaining: lim + sum,
+  };
 }
+
 
 // ---------------- service reader ----------------
 async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFallback = "") {
@@ -465,8 +475,9 @@ export default async function handler(req, res) {
 
       const rDoc = requestRef ? await tx.get(requestRef) : null;
 
-      const subRef = db.collection("companySubscriptions").doc(customerIdMeta);
-      const subSnap = isSubscription && isCompany ? await tx.get(subRef) : null;
+const subRef = db.collection("companySubscriptions").doc(customerIdMeta);
+const subSnap = isCompany ? await tx.get(subRef) : null;
+
 
       // addon catalog doc (ONLY if addon)
       let addonCatalog = null;
@@ -652,51 +663,132 @@ export default async function handler(req, res) {
       }
 
       // ✅ B2) ADDON → monthlyTxCredits buckets + carry-over last 7 days
-      if (isAddon && isCompany) {
-        const qtyToAdd = Number(resolvedAddonQty || 0);
-        if (qtyToAdd > 0) {
-          const purchasedAt = new Date(); // وقت الويبهوك
-          const r = await applyAddonCreditTx(tx, userRef, {
-            paymentIntentId,
-            addonKey: addonKey || (addonCatalog?.addonKey || ""),
-            addonQty: qtyToAdd,
-            purchasedAt,
-          });
+// ✅ B2) ADDON → monthlyTxCredits buckets + carry-over last 7 days
+// ✅ B2) ADDON → monthlyTxCredits + mirror into companySubscriptions
+if (isAddon && isCompany) {
+  const qtyToAdd = Number(resolvedAddonQty || 0);
+  if (qtyToAdd > 0) {
+    const purchasedAt = new Date();
 
-          // optional history record
-          const histRef = userRef.collection("monthlyTxCreditsHistory").doc(paymentIntentId);
-          tx.set(histRef, {
-            type: "addon_topup",
-            paymentIntentId,
-            requestId: finalRequestId,
-            addonKey: addonKey || "",
-            addonQtyAdded: qtyToAdd,
-            expiresMonthKey: r.expiresMonthKey,
-            amountAED,
-            purchasedAtISO: purchasedAt.toISOString(),
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
-        }
-      }
+    const r = await applyAddonCreditTx(tx, userRef, {
+      paymentIntentId,
+      addonKey: addonKey || (addonCatalog?.addonKey || ""),
+      addonQty: qtyToAdd,
+      purchasedAt,
+    });
 
-      // ✅ B3) SUBSCRIPTION → set baseLimit/baseRemaining monthly + reset usedThisMonth
-      if (isSubscription && isCompany) {
-        const lim = Number(planMonthlyLimitResolved || 0);
-        await applySubscriptionBaseLimitTx(tx, userRef, lim);
+    // ✅ Mirror snapshot for UI (companySubscriptions)
+    const companyPublicId = safeStr(udata.companyId || udata.customerId || udata.userId || customerIdMeta);
+    const companyEmail = safeStr(udata.email || md.userEmail || "");
 
-        // optional history
-        const histRef = userRef.collection("monthlyTxCreditsHistory").doc(`${paymentIntentId}_sub`);
-        tx.set(histRef, {
-          type: "subscription_reset",
+    tx.set(
+      subRef,
+      {
+        companyDocId: customerIdMeta,
+        companyId: companyPublicId,
+        email: companyEmail,
+
+        // ✅ useful snapshot for UI
+        txCredits: {
+          monthKey: r.monthKey,
+          baseLimit: safeNum(udata?.monthlyTxCredits?.baseLimit || 0),
+          baseRemaining: safeNum(udata?.monthlyTxCredits?.baseRemaining || 0),
+          usedThisMonth: safeNum(udata?.monthlyTxCredits?.usedThisMonth || 0),
+          addonsRemaining: safeNum(r.addonsRemaining || 0),
+          totalRemaining:
+            safeNum(udata?.monthlyTxCredits?.baseRemaining || 0) + safeNum(r.addonsRemaining || 0),
+          updatedAtISO: nowISO(),
+        },
+
+        lastAddon: {
+          addonKey: addonKey || "",
+          addonQty: qtyToAdd,
+          expiresMonthKey: r.expiresMonthKey,
           paymentIntentId,
           requestId: finalRequestId,
-          planKey,
-          pricingKey,
-          baseLimit: lim,
           amountAED,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      }
+          purchasedAtISO: purchasedAt.toISOString(),
+        },
+
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        ...(subSnap && subSnap.exists ? {} : { createdAt: admin.firestore.FieldValue.serverTimestamp() }),
+      },
+      { merge: true }
+    );
+
+    // optional history (users)
+    const histRef = userRef.collection("monthlyTxCreditsHistory").doc(paymentIntentId);
+    tx.set(histRef, {
+      type: "addon_topup",
+      paymentIntentId,
+      requestId: finalRequestId,
+      addonKey: addonKey || "",
+      addonQtyAdded: qtyToAdd,
+      expiresMonthKey: r.expiresMonthKey,
+      amountAED,
+      purchasedAtISO: purchasedAt.toISOString(),
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+}
+
+
+      // ✅ B3) SUBSCRIPTION → set baseLimit/baseRemaining monthly + reset usedThisMonth
+if (isSubscription && isCompany) {
+  const lim = Number(planMonthlyLimitResolved || 0);
+
+  const snap = await applySubscriptionBaseLimitTx(tx, userRef, lim);
+
+  // ✅ Mirror snapshot for UI (companySubscriptions)
+  const companyPublicId = safeStr(udata.companyId || udata.customerId || udata.userId || customerIdMeta);
+  const companyEmail = safeStr(udata.email || md.userEmail || "");
+
+  tx.set(
+    subRef,
+    {
+      companyDocId: customerIdMeta,
+      companyId: companyPublicId,
+      email: companyEmail,
+
+      planKey,
+      planName,
+      pricingKey,
+
+      // ✅ number of transactions per plan (your main ask)
+      monthlyIncludedTxLimit: lim,
+
+      // ✅ snapshot
+      txCredits: {
+        monthKey: snap.monthKey,
+        baseLimit: snap.baseLimit,
+        baseRemaining: snap.baseRemaining,
+        usedThisMonth: snap.usedThisMonth,
+        addonsRemaining: snap.addonsRemaining,
+        totalRemaining: snap.totalRemaining,
+        updatedAtISO: nowISO(),
+      },
+
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      ...(subSnap && subSnap.exists ? {} : { createdAt: admin.firestore.FieldValue.serverTimestamp() }),
+    },
+    { merge: true }
+  );
+
+  // optional history
+  const histRef = userRef.collection("monthlyTxCreditsHistory").doc(`${paymentIntentId}_sub`);
+  tx.set(histRef, {
+    type: "subscription_reset",
+    paymentIntentId,
+    requestId: finalRequestId,
+    planKey,
+    pricingKey,
+    baseLimit: lim,
+    monthKey: snap.monthKey,
+    amountAED,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+}
+
 
       // C) transactions log
       const txRef = db.collection("transactions").doc();
