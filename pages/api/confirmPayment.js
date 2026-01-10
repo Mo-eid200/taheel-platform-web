@@ -107,7 +107,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // 5) Update request to paid (best-effort) — WITHOUT processed
+    // 5) Update request to paid (best-effort) — WITHOUT processed/subscriptions/monthlyTxCredits
     await db.runTransaction(async (tx) => {
       const r = await tx.get(requestRef);
       if (!r.exists) return;
@@ -118,6 +118,37 @@ export default async function handler(req, res) {
       const history = Array.isArray(rdata.statusHistory) ? [...rdata.statusHistory] : [];
       history.push({ status: "paid", timestamp: nowISO(), updatedBy: "server-confirmPayment" });
 
+      // ---- infer type fields from metadata (optional consistency only) ----
+      const requestTypeMeta = normLower(
+        md.requestType ||
+          (md.serviceName && normLower(md.serviceName).includes("wallet") ? "wallet_recharge" : "service")
+      );
+
+      const addonKey = safeStr(md.addonKey || md.addon_id || md.addonId || "").trim();
+      const addonQty = safeNum(md.addonQty || md.addon_qty || 0);
+      const planKey = safeStr(md.planKey || "").trim();
+      const pricingKey = safeStr(md.pricingKey || "").trim();
+
+      const isAddon = requestTypeMeta === "addon" || addonKey.length > 0;
+      const isSubscription = requestTypeMeta === "subscription" || planKey.length > 0;
+
+      const extra = {};
+      if (isAddon) {
+        extra.requestType = "addon";
+        extra.addon = {
+          ...(typeof rdata.addon === "object" && rdata.addon ? rdata.addon : {}),
+          addonKey,
+          addonQty,
+        };
+      } else if (isSubscription) {
+        extra.requestType = "subscription";
+        extra.planKey = planKey;
+        extra.pricingKey = pricingKey;
+      } else if (requestTypeMeta) {
+        // keep whatever metadata says, only if it exists
+        extra.requestType = requestTypeMeta;
+      }
+
       tx.update(requestRef, {
         lastUpdated: nowISO(),
         status: "paid",
@@ -126,6 +157,7 @@ export default async function handler(req, res) {
         paymentIntentId,
         processingFee: typeof rdata.processingFee !== "undefined" ? rdata.processingFee : processingFeeMeta || 0,
         statusHistory: history,
+        ...extra,
       });
     });
 

@@ -6,10 +6,11 @@ import admin from "firebase-admin";
 /**
  * Create Stripe PaymentIntent (server-side fee calc) + create/merge request doc.
  *
- * ✅ Rules:
- * - Keep requests flow intact
- * - Subscription info stays in metadata ONLY; webhook writes companySubscriptions + monthlyTxCredits
- * - Add-on purchases: store addonKey/addonQty in metadata so webhook can top-up monthlyTxCredits (with carry-over last 7 days)
+ * ✅ Compatible with your Stripe webhook:
+ * - requestType normalized: service | wallet_recharge | subscription | addon
+ * - webhook will write: companySubscriptions + monthlyTxCredits
+ * - addon purchases pass addonKey/addonQty (resolved from catalog)
+ * - processingFee ALWAYS present in all cases
  */
 
 if (!admin.apps.length) {
@@ -58,6 +59,15 @@ function getMonthKey(d = new Date()) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   return `${y}-${m}`;
+}
+function normType(v) {
+  const t = safeStr(v).trim().toLowerCase();
+  if (t === "wallet" || t === "walletrecharge" || t === "wallet-recharge") return "wallet_recharge";
+  if (t === "sub" || t === "subs") return "subscription";
+  if (t === "add-on" || t === "addon" || t === "add_on") return "addon";
+  if (t === "service" || !t) return "service";
+  // fallback: keep but normalized
+  return t;
 }
 
 // Read service definition from servicesByClientType
@@ -108,6 +118,22 @@ async function fetchAddonFromCatalog(addonKey) {
   }
 }
 
+// ✅ Read plan monthly limit (companySubscriptionPlans/<planKey>)
+async function fetchPlanMonthlyLimit(planKey) {
+  if (!planKey) return 0;
+  try {
+    const ref = db.collection("companySubscriptionPlans").doc(String(planKey));
+    const snap = await ref.get();
+    if (!snap.exists) return 0;
+    const d = snap.data() || {};
+    const lim = Number(d.monthlyIncludedTxLimit || 0);
+    return Number.isFinite(lim) ? lim : 0;
+  } catch (e) {
+    console.warn("fetchPlanMonthlyLimit error:", e?.message || e);
+    return 0;
+  }
+}
+
 /**
  * ✅ Processing fee calc (editable via env)
  * - STRIPE_FEE_FIXED_AED = "1.00"
@@ -129,7 +155,7 @@ export default async function handler(req, res) {
     const customerId = safeStr(body.customerId || body.userId).trim();
     const lang = safeStr(body.lang || "ar").trim();
 
-    const requestType = safeStr(body.requestType || "service").trim(); // service | wallet_recharge | subscription | addon
+    const requestType = normType(body.requestType || "service");
     const clientType = safeStr(body.clientType || body.client_type || "").trim();
     const serviceId = safeStr(body.serviceId || "").trim();
     const serviceName = safeStr(body.serviceName || "").trim();
@@ -153,9 +179,6 @@ export default async function handler(req, res) {
     const paidMonths = safeNum(body.paidMonths || 0);
     const bonus = safeNum(body.bonus || 0);
 
-    // ✅ optional: pass plan monthly limit in metadata (webhook can still fallback to plans collection)
-    const monthlyIncludedTxLimit = safeNum(body.monthlyIncludedTxLimit || 0);
-
     // addon meta
     const addonKeyFromBody = safeStr(body.addonKey || body.addonId || "").trim();
     const addonQtyFromBody = safeNum(body.addonQty || body.addonTransactions || body.qty || 0);
@@ -174,8 +197,14 @@ export default async function handler(req, res) {
 
     let serviceDoc = null;
     let addonDoc = null;
+
+    // ✅ resolvedQty used in metadata for webhook
     let resolvedAddonQty = addonQtyFromBody;
 
+    // ✅ resolved monthly limit used in metadata for webhook
+    let resolvedMonthlyIncludedTxLimit = safeNum(body.monthlyIncludedTxLimit || 0);
+
+    // ADDON: price + qty from catalog only
     if (requestType === "addon") {
       if (!addonKeyFromBody) return res.status(400).json({ ok: false, error: "Missing addonKey" });
 
@@ -191,6 +220,7 @@ export default async function handler(req, res) {
       if (resolvedAddonQty <= 0) return res.status(400).json({ ok: false, error: "Invalid addon qty" });
     }
 
+    // SERVICE: if amount not provided, read from catalog
     if (!baseAmountAED && requestType === "service") {
       serviceDoc = await fetchServiceFromByClientType(serviceId, clientType, serviceName);
       if (serviceDoc) {
@@ -199,17 +229,29 @@ export default async function handler(req, res) {
       }
     }
 
+    // SUBSCRIPTION: must have amount, resolve monthly limit if not provided
     if (requestType === "subscription") {
       printingFeeAED = 0;
+
+      if (!planKey) return res.status(400).json({ ok: false, error: "Missing planKey for subscription" });
       if (baseAmountAED <= 0) return res.status(400).json({ ok: false, error: "Missing/invalid amount for subscription" });
+
+      if (!(resolvedMonthlyIncludedTxLimit > 0)) {
+        resolvedMonthlyIncludedTxLimit = await fetchPlanMonthlyLimit(planKey);
+      }
     }
 
-    if (requestType === "wallet_recharge" && baseAmountAED <= 0) {
-      return res.status(400).json({ ok: false, error: "Missing/invalid amount for wallet recharge" });
+    // WALLET
+    if (requestType === "wallet_recharge") {
+      printingFeeAED = 0;
+      if (baseAmountAED <= 0) {
+        return res.status(400).json({ ok: false, error: "Missing/invalid amount for wallet recharge" });
+      }
     }
 
     if (baseAmountAED <= 0) return res.status(400).json({ ok: false, error: "Invalid amount (0)" });
 
+    // ✅ processingFee ALWAYS calculated & present
     const processingFeeAED = calcProcessingFeeAED(baseAmountAED + printingFeeAED);
     const totalAED = Number((baseAmountAED + printingFeeAED + processingFeeAED).toFixed(2));
     const amountSmallest = Math.round(totalAED * 100);
@@ -228,17 +270,19 @@ export default async function handler(req, res) {
 
     const monthKey = getMonthKey(new Date());
 
+    // ----------------- Create PaymentIntent -----------------
     const pi = await stripe.paymentIntents.create({
       amount: amountSmallest,
       currency: "aed",
       automatic_payment_methods: { enabled: true },
       metadata: {
+        // ✅ webhook uses these
         customerId,
         lang,
         monthKey,
 
         requestId: orderNumber,
-        requestType,
+        requestType, // normalized
         clientType,
         serviceId,
         serviceName,
@@ -254,7 +298,7 @@ export default async function handler(req, res) {
         coinsUsed: String(coinsUsed),
         coinsGiven: String(coinsGiven),
 
-        // subscription
+        // subscription (webhook reads planKey + monthlyIncludedTxLimit)
         planKey,
         planName,
         pricingKey,
@@ -264,9 +308,9 @@ export default async function handler(req, res) {
         monthsShown: String(monthsShown),
         paidMonths: String(paidMonths),
         bonus: String(bonus),
-        monthlyIncludedTxLimit: String(monthlyIncludedTxLimit || 0),
+        monthlyIncludedTxLimit: String(resolvedMonthlyIncludedTxLimit || 0),
 
-        // addon
+        // addon (webhook reads addonKey/addonQty)
         ...(requestType === "addon"
           ? {
               isAddon: "1",
@@ -282,6 +326,7 @@ export default async function handler(req, res) {
       },
     });
 
+    // ----------------- Create/merge request doc -----------------
     await db.collection("requests").doc(orderNumber).set(
       {
         requestId: orderNumber,
@@ -291,7 +336,7 @@ export default async function handler(req, res) {
         customerId,
         userEmail: safeStr(userSnap.data()?.email || ""),
 
-        requestType,
+        requestType, // normalized
         clientType,
         serviceId,
         serviceName,
@@ -302,7 +347,7 @@ export default async function handler(req, res) {
         lastUpdated: nowISO(),
 
         printingFee: printingFeeAED,
-        processingFee: processingFeeAED,
+        processingFee: processingFeeAED, // ✅ always present
 
         coinsUsed,
         coinsGiven,
@@ -321,6 +366,19 @@ export default async function handler(req, res) {
             }
           : {}),
 
+        // helpful to debug
+        ...(requestType === "subscription"
+          ? {
+              subscriptionMeta: {
+                planKey,
+                planName,
+                pricingKey,
+                monthlyIncludedTxLimit: resolvedMonthlyIncludedTxLimit || 0,
+                totalSubscriptionDays: totalSubDays,
+              },
+            }
+          : {}),
+
         metadata: pi.metadata || {},
         ...(attachments ? { attachments } : {}),
       },
@@ -332,13 +390,24 @@ export default async function handler(req, res) {
       clientSecret: pi.client_secret,
       paymentIntentId: pi.id,
       orderNumber,
-      processingFee: processingFeeAED,
+      processingFee: processingFeeAED, // ✅ show always
       finalPrice: totalAED,
       breakdown: { baseAmountAED, printingFeeAED, processingFeeAED },
-      addon: requestType === "addon" ? { addonKey: addonKeyFromBody, qty: resolvedAddonQty, title: addonDoc?.title || null } : null,
+      addon:
+        requestType === "addon"
+          ? { addonKey: addonKeyFromBody, qty: resolvedAddonQty, title: addonDoc?.title || null }
+          : null,
       subscription:
         requestType === "subscription"
-          ? { planKey, planName, pricingKey, subscriptionDays, giftDays, totalSubscriptionDays: totalSubDays, monthlyIncludedTxLimit }
+          ? {
+              planKey,
+              planName,
+              pricingKey,
+              subscriptionDays,
+              giftDays,
+              totalSubscriptionDays: totalSubDays,
+              monthlyIncludedTxLimit: resolvedMonthlyIncludedTxLimit || 0,
+            }
           : null,
     });
   } catch (e) {
