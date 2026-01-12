@@ -549,37 +549,25 @@ export default function ServiceProfileCard({
           </div>
 
 {isSubscriptionActive && (
-  <div className="w-full mb-3">
-    <div className="relative overflow-hidden rounded-2xl border border-blue-200/60 bg-gradient-to-r from-[#0b1f3a] via-[#123a6b] to-[#0b1f3a] px-4 py-2 shadow-lg">
-      {/* glow */}
-      <div className="absolute inset-0 opacity-25 bg-[radial-gradient(circle_at_20%_20%,rgba(255,215,0,0.35),transparent_55%),radial-gradient(circle_at_80%_0%,rgba(56,189,248,0.35),transparent_55%)]" />
+  <div className="inline-flex items-center gap-2 px-3 py-1 mb-2
+                  rounded-full
+                  bg-gradient-to-r from-[#0b1f3a] via-[#123a6b] to-[#0b1f3a]
+                  border border-blue-300/30
+                  shadow-sm">
 
-      {/* shine */}
-      <div className="absolute -left-10 top-0 h-full w-24 rotate-12 bg-white/10 blur-md animate-[pulse_2.8s_ease-in-out_infinite]" />
+    <FaCrown className="text-amber-400 text-[13px] drop-shadow-sm" />
 
-      <div className="relative flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-gradient-to-br from-amber-300 via-yellow-400 to-amber-500 shadow ring-1 ring-white/30">
-            <FaCrown className="text-[#5a3b00] text-[15px] drop-shadow" />
-          </span>
+    <span className="text-[11px] font-extrabold text-blue-100 whitespace-nowrap">
+      {lang === "ar"
+        ? "عضوية VIP فعّالة"
+        : "VIP Active"}
+    </span>
 
-          <div className="leading-tight">
-            <div className="text-[12px] font-black text-yellow-200">
-              {lang === "ar" ? "عضوية VIP فعّالة" : "VIP Subscription Active"}
-            </div>
-            <div className="text-[11px] font-semibold text-blue-100/90">
-              {lang === "ar"
-                ? "بدون رسوم الطباعة والضريبة على الطباعة"
-                : "Printing + VAT on printing are waived"}
-            </div>
-          </div>
-        </div>
-
-        <span className="text-[10px] font-black px-2 py-1 rounded-full bg-white/10 text-white border border-white/15">
-          {lang === "ar" ? "PREMIUM" : "PREMIUM"}
-        </span>
-      </div>
-    </div>
+    <span className="text-[10px] font-bold text-emerald-200/90">
+      {lang === "ar"
+        ? "(بدون طباعة وضريبة)"
+        : "(No Printing & VAT)"}
+    </span>
   </div>
 )}
 
