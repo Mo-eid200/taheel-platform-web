@@ -146,13 +146,14 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
     : Number(paymentData?.finalPrice ?? paymentData?.price ?? 0);
 
   // ✅ Service Fee (robust + fallback derived from total)
-  let servicePrice = Number(
-    (hasServerBreakdown ? serverBase : 0) ||
-      paymentData?.breakdown?.baseAmountAED ??
+let servicePrice = Number(
+  (hasServerBreakdown ? serverBase : 0) ||
+    (paymentData?.breakdown?.baseAmountAED ??
       paymentData?.baseAmountAED ??
       paymentData?.metadata?.baseAmountAED ??
-      0
-  );
+      0)
+);
+
 
   if (!Number.isFinite(servicePrice) || servicePrice <= 0) {
     const fp = Number(paymentData?.finalPrice ?? paymentData?.price ?? 0);
