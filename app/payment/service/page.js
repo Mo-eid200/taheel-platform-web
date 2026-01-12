@@ -90,20 +90,23 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
   const dir = lang === "ar" ? "rtl" : "ltr";
 
   // ✅ Service Fee (robust + fallback derived from total)
-  let servicePrice = Number(
-    paymentData?.breakdown?.baseAmountAED ??
-      paymentData?.baseAmountAED ??
-      paymentData?.metadata?.baseAmountAED ??
-      paymentData?.service?.clientPrice ??
-      paymentData?.service?.price ??
-      // ⚠️ paymentData.price قديم وممكن يكون إجمالي مش “رسوم خدمة”
-      0
-  );
+let servicePrice = Number(
+  paymentData?.breakdown?.baseAmountAED ??
+  paymentData?.baseAmountAED ??
+  paymentData?.metadata?.baseAmountAED ??
+  0
+);
 
-  // ✅ fallback: derive from total (Total Before Discount - printing - vat)
-  if (!Number.isFinite(servicePrice) || servicePrice <= 0) {
-    servicePrice = Math.max(0, Number((totalPrice - printingFee - vat).toFixed(2)));
-  }
+if (!Number.isFinite(servicePrice) || servicePrice <= 0) {
+  const fp = Number(paymentData?.finalPrice ?? paymentData?.price ?? 0);
+  const pf = Number(paymentData?.processingFee ?? 0);
+  const pr = Number(paymentData?.service?.printingFee ?? paymentData?.printingFee ?? 0);
+  const v  = Number(paymentData?.service?.vat ?? paymentData?.vat ?? 0);
+
+  // اشتقاق رسوم الخدمة/الاشتراك من النهائي (بدون processing)
+  servicePrice = Math.max(0, Number((fp - pf - pr - v).toFixed(2)));
+}
+
 
   // ✅ Detect subscription + fields
   const isSubscription =
