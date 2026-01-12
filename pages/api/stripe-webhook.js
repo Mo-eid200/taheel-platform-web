@@ -91,12 +91,25 @@ function computeAddonExpiresMonthKey(purchasedAtDate) {
 }
 function normalizeBucketsForMonth(buckets, currentMonthKey) {
   const arr = Array.isArray(buckets) ? buckets : [];
-  const keep = arr.filter(
-    (b) => String(b?.expiresMonthKey || "") === currentMonthKey && Number(b?.qtyRemaining || 0) > 0
-  );
+
+  // ✅ bucket يُحسب لهذا الشهر لو:
+  // 1) اتشترى هذا الشهر (يظهر فورًا)
+  // OR
+  // 2) مُرحّل ومحدد أن انتهاءه في هذا الشهر
+  const keep = arr.filter((b) => {
+    const qty = Number(b?.qtyRemaining || 0);
+    if (!(qty > 0)) return false;
+
+    const purchasedKey = String(b?.purchasedMonthKey || "");
+    const expiresKey = String(b?.expiresMonthKey || "");
+
+    return purchasedKey === currentMonthKey || expiresKey === currentMonthKey;
+  });
+
   const sum = keep.reduce((acc, b) => acc + Number(b.qtyRemaining || 0), 0);
   return { keep, sum };
 }
+
 
 /**
  * ✅ Lazy reset monthlyTxCredits on month change
@@ -191,6 +204,7 @@ async function applyAddonCreditTx(tx, userRef, { paymentIntentId, addonKey, addo
   if (!(qty > 0)) return { added: 0, expiresMonthKey: "", monthKey: currentMonthKey, addonsRemaining: Number(mtc.addonsRemaining || 0) };
 
   const allBuckets = Array.isArray(mtc.addonBuckets) ? [...mtc.addonBuckets] : [];
+  const purchasedMonthKey = monthKeyOf(purchasedAt);
   const expiresMonthKey = computeAddonExpiresMonthKey(purchasedAt);
 
   allBuckets.push({
@@ -198,8 +212,14 @@ async function applyAddonCreditTx(tx, userRef, { paymentIntentId, addonKey, addo
     addonKey: String(addonKey || ""),
     qtyRemaining: qty,
     purchasedAt: admin.firestore.Timestamp.fromDate(purchasedAt),
+
+    // ✅ NEW: يظهر فورًا في شهر الشراء
+    purchasedMonthKey,
+
+    // ✅ نفس منطقك القديم للترحيل (آخر 7 أيام => next month)
     expiresMonthKey,
   });
+
 
   const { sum } = normalizeBucketsForMonth(allBuckets, currentMonthKey);
 
