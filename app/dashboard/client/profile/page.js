@@ -1157,40 +1157,38 @@ useEffect(() => {
                       lang === "ar" ? srv.longDescription || "" : tr?.longDescription || srv.longDescription_en || srv.longDescription || "";
 
                     return (
-                      <ServiceProfileCard
-                        key={(srv.name || "") + i}
-                        category={selectedSection.replace("Services", "")}
-                        name={displayName}
-                        name_en={displayName}
-                        description={displayDesc}
-                        description_en={displayDesc}
-                        subscriptionActive={Boolean(freePrinting && isCompanyServicesSection)}
-                        price={srv.price}
-                        printingFee={freePrinting && isCompanyServicesSection ? 0 : srv.printingFee}
-                        tax={srv.tax}
-                        clientPrice={srv.clientPrice}
-                        duration={srv.duration}
-                        requiredDocuments={srv.requiredDocuments || srv.documents || []}
-                        requireUpload={srv.requireUpload}
-                        coins={srv.coins || 0}
-                        lang={lang}
-                        userId={client.userId || client.customerId}
-                        userWallet={client.walletBalance || 0}
-                        userCoins={client.coins || 0}
-                        userEmail={client.email}
-                        longDescription={displayLong}
-                        longDescription_en={displayLong}
-                        setCoinsBalance={(val) => setClient((c) => ({ ...c, coins: val }))}
-                        onPaid={handleServicePaid}
-                        coinsPercent={0.1}
-                        addNotification={addNotification}
-                        serviceId={srv.serviceId}
-                        repeatable={srv.repeatable}
-                        allowPaperCount={srv.allowPaperCount}
-                        pricePerPage={srv.pricePerPage}
-                        customerId={client.customerId}
-                        accountType={clientType}
-                      />
+<ServiceProfileCard
+  key={(srv.serviceId || srv.id || srv.name || "srv") + "-" + i}
+  active={srv.active !== false}
+  category={selectedSection.replace("Services", "")}
+  name={displayName}
+  name_en={displayName}
+  description={displayDesc}
+  description_en={displayDesc}
+  subscriptionActive={Boolean(freePrinting && isCompanyServicesSection)}
+  price={srv.price}
+  printingFee={srv.printingFee}
+  clientPrice={srv.clientPrice}
+  duration={srv.duration}
+  requiredDocuments={srv.requiredDocuments || srv.documents || []}
+  requireUpload={srv.requireUpload}
+  coins={srv.coins || 0}
+  lang={lang}
+  userId={client.userId || client.customerId}
+  userWallet={client.walletBalance || 0}
+  userCoins={client.coins || 0}
+  userEmail={client.email}
+  customerId={client.customerId}
+  longDescription={displayLong}
+  longDescription_en={displayLong}
+  onPaid={handleServicePaid}
+  addNotification={addNotification}
+  serviceId={srv.serviceId}
+  repeatable={srv.repeatable}
+  allowPaperCount={srv.allowPaperCount}
+  provider={srv.provider}
+/>
+
                     );
                   })}
               </div>
