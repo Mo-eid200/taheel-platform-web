@@ -7,12 +7,20 @@ import { useRouter, useSearchParams } from "next/navigation";
 import CompanyPlanCard from "./CompanyPlanCard";
 import AddonsBottomStrip from "./AddonsBottomStrip";
 
+// ✅ Stripe processing calculator (your existing util)
+import calcStripeFees from "@/utils/calcStripeFees";
+
 // ✅ Storage key used by /payment/service page
 const PAYMENT_STORAGE_KEY = "paymentData";
 
 function toNumberSafe(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : NaN;
+}
+
+function round2(n) {
+  const x = Number(n);
+  return Number.isFinite(x) ? Number(x.toFixed(2)) : 0;
 }
 
 function calcDays(subscriptionDays, monthsShown) {
@@ -23,6 +31,51 @@ function calcDays(subscriptionDays, monthsShown) {
   if (Number.isFinite(m) && m > 0) return Math.max(0, Math.round(m * 30));
 
   return 0;
+}
+
+/**
+ * ✅ VAT rule for SUBSCRIPTIONS + ADDONS (as requested):
+ * VAT 5% on (base + processingFee).
+ * processingFee comes from calcStripeFees.
+ *
+ * We do a small 2-pass to keep it stable:
+ * 1) fee on base
+ * 2) vat on (base + fee1)
+ * 3) fee on (base + vat1)
+ * 4) vat on (base + fee2)
+ *
+ * Output:
+ * - baseAmountAED
+ * - vatAED
+ * - processingFeeAED
+ * - totalPrice (base + vat)  (before processing)
+ * - finalPrice (totalPrice + processing)
+ */
+function buildGatewayTotals(baseAmountAED) {
+  const base = round2(baseAmountAED);
+
+  // pass 1
+  const pass1 = calcStripeFees(base, { isInternational: false, isCurrencyConversion: false });
+  const fee1 = round2(pass1?.stripeFee ?? 0);
+  const vat1 = round2((base + fee1) * 0.05);
+
+  // pass 2 (fee based on base + vat1)
+  const pass2 = calcStripeFees(round2(base + vat1), { isInternational: false, isCurrencyConversion: false });
+  const fee2 = round2(pass2?.stripeFee ?? fee1);
+
+  // final vat based on base + fee2 (requested)
+  const vat = round2((base + fee2) * 0.05);
+
+  const totalPrice = round2(base + vat);           // before processing
+  const finalPrice = round2(totalPrice + fee2);    // charged amount (what goes to Stripe)
+
+  return {
+    baseAmountAED: base,
+    vatAED: vat,
+    processingFeeAED: fee2,
+    totalPrice,
+    finalPrice,
+  };
 }
 
 /**
@@ -222,10 +275,13 @@ export default function CompanySubscriptionsSection({
           subscriptionName?.trim?.() ||
           (lang === "ar" ? `اشتراك ${planKey}` : `Subscription ${planKey}`);
 
-        // ✅ MATCH SERVER: amountAED + subscription metadata
+        // ✅ We calculate totals locally (processing + VAT) to send the correct amount to server
+        const totals = buildGatewayTotals(basePrice);
+
+        // ✅ MATCH SERVER: send the FINAL amount to charge
         const payload = {
           requestType: "subscription",
-          amountAED: basePrice,
+          amountAED: totals.finalPrice, // ✅ important: amount charged in Stripe
 
           customerId: finalClientDocId,
           clientType: "company",
@@ -246,6 +302,11 @@ export default function CompanySubscriptionsSection({
 
           serviceId: `subscription_${planKey}`,
           serviceName: subName,
+
+          // ✅ optional: helpful metadata (non-breaking)
+          baseAmountAED: totals.baseAmountAED,
+          vatAED: totals.vatAED,
+          processingFeeAED: totals.processingFeeAED,
         };
 
         const r = await fetch("/api/create-payment-intent", {
@@ -257,12 +318,7 @@ export default function CompanySubscriptionsSection({
         const data = await r.json().catch(() => ({}));
         if (!r.ok || !data?.ok) throw new Error(data?.error || "Failed to create payment intent");
 
-        // ✅ ALWAYS rely on server breakdown
-        const breakdown = data?.breakdown || {};
-        const totalBefore = Number(breakdown.baseAmountAED ?? basePrice);
-        const processingFeeSafe = Number(breakdown.processingFeeAED ?? data?.processingFee ?? 0);
-        const final = Number(breakdown.totalAED ?? data?.finalPrice ?? 0);
-
+        // ✅ UI paymentData (what /payment/service reads)
         const paymentDataForUI = {
           lang,
           requestType: "subscription",
@@ -278,16 +334,26 @@ export default function CompanySubscriptionsSection({
           pricingKey,
           subscriptionDays: days,
 
-          price: totalBefore,
-          totalPrice: totalBefore,
-          finalPrice: final,
+          // ✅ breakdown fields expected by your payment page
+          price: totals.totalPrice,         // total before processing (base + vat)
+          totalPrice: totals.totalPrice,    // shown as "Total Before Discount"
+          finalPrice: totals.finalPrice,    // final charged
 
           printingFee: 0,
-          vat: 0,
+          vat: totals.vatAED,               // ✅ NEW: VAT 5% on (base + processing)
           coinDiscount: 0,
-          processingFee: processingFeeSafe,
+          processingFee: totals.processingFeeAED, // ✅ from calcStripeFees
 
-          breakdown: data?.breakdown || null,
+          // keep for debugging if you like (non-breaking)
+          breakdown: data?.breakdown || {
+            baseAmountAED: totals.baseAmountAED,
+            vatAED: totals.vatAED,
+            processingFeeAED: totals.processingFeeAED,
+            totalAED: totals.finalPrice,
+          },
+
+          // help payment page derive base label correctly
+          baseAmountAED: totals.baseAmountAED,
           userEmail: user.email,
         };
 
@@ -348,9 +414,22 @@ export default function CompanySubscriptionsSection({
           titleEn ||
           (lang === "ar" ? "إضافة معاملات" : "Transaction Add-on");
 
-        // ✅ MATCH SERVER: addonKey only (server reads catalog: price + qty)
+        // ✅ IMPORTANT:
+        // we need the base price to calculate fees + VAT.
+        // If your server returns the base in response only, we can fallback to addon.price from catalog here.
+        const basePrice = round2(addon?.price ?? 0);
+
+        if (!basePrice || basePrice <= 0) {
+          // if you want STRICT server pricing only, remove this check and make server return baseAmountAED.
+          alert(lang === "ar" ? "سعر الإضافة غير متاح" : "Addon price not available");
+          return;
+        }
+
+        const totals = buildGatewayTotals(basePrice);
+
         const payload = {
           requestType: "addon",
+          amountAED: totals.finalPrice, // ✅ charge amount
 
           customerId: finalClientDocId,
           clientType: "company",
@@ -360,6 +439,11 @@ export default function CompanySubscriptionsSection({
           addonKey,
           serviceId: `addon_${addonKey}`,
           serviceName: String(addonName),
+
+          // optional (non-breaking)
+          baseAmountAED: totals.baseAmountAED,
+          vatAED: totals.vatAED,
+          processingFeeAED: totals.processingFeeAED,
         };
 
         const r = await fetch("/api/create-payment-intent", {
@@ -370,12 +454,6 @@ export default function CompanySubscriptionsSection({
 
         const data = await r.json().catch(() => ({}));
         if (!r.ok || !data?.ok) throw new Error(data?.error || "Failed to create payment intent");
-
-        // ✅ ALWAYS rely on server breakdown
-        const breakdown = data?.breakdown || {};
-        const totalBefore = Number(breakdown.baseAmountAED ?? 0);
-        const processingFeeSafe = Number(breakdown.processingFeeAED ?? data?.processingFee ?? 0);
-        const final = Number(breakdown.totalAED ?? data?.finalPrice ?? 0);
 
         const paymentDataForUI = {
           lang,
@@ -391,16 +469,23 @@ export default function CompanySubscriptionsSection({
           addonType: String(data?.addon?.type || addon?.type || "bundle"),
           addonQty: Number(data?.addon?.qty || addon?.qty || 0),
 
-          price: totalBefore,
-          totalPrice: totalBefore,
-          finalPrice: final,
+          price: totals.totalPrice,
+          totalPrice: totals.totalPrice,
+          finalPrice: totals.finalPrice,
 
           printingFee: 0,
-          vat: 0,
+          vat: totals.vatAED,                   // ✅ VAT 5%
           coinDiscount: 0,
-          processingFee: processingFeeSafe,
+          processingFee: totals.processingFeeAED, // ✅ calcStripeFees
 
-          breakdown: data?.breakdown || null,
+          breakdown: data?.breakdown || {
+            baseAmountAED: totals.baseAmountAED,
+            vatAED: totals.vatAED,
+            processingFeeAED: totals.processingFeeAED,
+            totalAED: totals.finalPrice,
+          },
+
+          baseAmountAED: totals.baseAmountAED,
           userEmail: user.email,
         };
 
