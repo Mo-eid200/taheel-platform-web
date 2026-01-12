@@ -478,30 +478,6 @@ export default function ServiceProfileCard({
 
         {showTooltip && renderTooltip()}
 
-        {/* ✅ Payment method preview (to show processing fee) */}
-        <div className="w-full flex items-center justify-between bg-white/70 border border-emerald-100 rounded-xl px-3 py-2 mb-2">
-          <label className="flex items-center gap-2 text-[11px] font-extrabold text-emerald-800 cursor-pointer">
-            <input
-              type="radio"
-              checked={payMethodPreview === "wallet"}
-              onChange={() => setPayMethodPreview("wallet")}
-              className="accent-emerald-600"
-            />
-            <FaWallet className="text-emerald-600" />
-            {lang === "ar" ? "محفظة" : "Wallet"}
-          </label>
-
-          <label className="flex items-center gap-2 text-[11px] font-extrabold text-emerald-800 cursor-pointer">
-            <input
-              type="radio"
-              checked={payMethodPreview === "gateway"}
-              onChange={() => setPayMethodPreview("gateway")}
-              className="accent-emerald-600"
-            />
-            <FaCreditCard className="text-emerald-600" />
-            {lang === "ar" ? "بوابة" : "Gateway"}
-          </label>
-        </div>
 
         {/* ✅ Price box */}
         <div className="w-full flex flex-col items-center bg-white/80 rounded-xl border border-emerald-100 shadow p-2 mb-2">
