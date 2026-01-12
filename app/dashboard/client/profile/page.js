@@ -297,7 +297,7 @@ function ClientProfilePageInner({ userId }) {
   const [showCoinsMenu, setShowCoinsMenu] = useState(false);
   const [showWalletMenu, setShowWalletMenu] = useState(false);
   const [showMessagesMenu, setShowMessagesMenu] = useState(false);
-  const active = computeSubscriptionActive(d); setFreePrinting(active);
+ 
 
   const [search, setSearch] = useState("");
   const [reloadClient, setReloadClient] = useState(false);
@@ -455,20 +455,8 @@ useEffect(() => {
           return;
         }
 
-        const d = snap.data() || {};
-       
-
-        const endAt =
-          (d.endAt?.toDate && d.endAt.toDate()) ||
-          (d.endAtISO ? new Date(d.endAtISO) : null);
-
-        const now = new Date();
-        const active =
-          (status === "active" || isActiveFlag) &&
-          endAt instanceof Date &&
-          !isNaN(endAt.getTime()) &&
-          endAt.getTime() > now.getTime();
-
+        const data = snap.data() || {};
+        const active = computeSubscriptionActive(data);
         setFreePrinting(Boolean(active));
       } finally {
         setSubLoading(false);
@@ -482,6 +470,7 @@ useEffect(() => {
 
   return () => unsub();
 }, [client?.customerId]);
+
 
 
   // =====================================
