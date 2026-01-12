@@ -1,3 +1,4 @@
+// pages/api/stripe-webhook.js
 "use strict";
 
 import Stripe from "stripe";
@@ -63,7 +64,6 @@ function addDays(date, days) {
   d.setDate(d.getDate() + Number(days || 0));
   return d;
 }
-
 async function getRawBody(req) {
   const chunks = [];
   for await (const chunk of req) {
@@ -89,198 +89,22 @@ function isInLast7DaysOfMonth(d = new Date()) {
 function computeAddonExpiresMonthKey(purchasedAtDate) {
   return isInLast7DaysOfMonth(purchasedAtDate) ? nextMonthKeyOf(purchasedAtDate) : monthKeyOf(purchasedAtDate);
 }
-function normalizeBucketsForMonth(buckets, currentMonthKey) {
-  const arr = Array.isArray(buckets) ? buckets : [];
-
-  // ✅ bucket يُحسب لهذا الشهر لو:
-  // 1) اتشترى هذا الشهر (يظهر فورًا)
-  // OR
-  // 2) مُرحّل ومحدد أن انتهاءه في هذا الشهر
+function normalizeBucketsForMonth(allBuckets, currentMonthKey) {
+  const arr = Array.isArray(allBuckets) ? allBuckets : [];
   const keep = arr.filter((b) => {
     const qty = Number(b?.qtyRemaining || 0);
     if (!(qty > 0)) return false;
-
     const purchasedKey = String(b?.purchasedMonthKey || "");
     const expiresKey = String(b?.expiresMonthKey || "");
-
     return purchasedKey === currentMonthKey || expiresKey === currentMonthKey;
   });
-
-  const sum = keep.reduce((acc, b) => acc + Number(b.qtyRemaining || 0), 0);
+  const sum = keep.reduce((acc, b) => acc + Number(b?.qtyRemaining || 0), 0);
   return { keep, sum };
 }
-
-
-/**
- * ✅ Lazy reset monthlyTxCredits on month change
- * - resets baseRemaining to baseLimit
- * - usedThisMonth = 0
- * - addonsRemaining recalculated from buckets that expire in current month
- * - keeps buckets for next month (carry-over last 7 days) but they won't count until their monthKey
- */
-async function lazyResetMonthlyCreditsIfNeeded(tx, userRef) {
-  const userSnap = await tx.get(userRef);
-  if (!userSnap.exists) throw new Error("USER_NOT_FOUND");
-
-  const u = userSnap.data() || {};
-  const mtc = u.monthlyTxCredits || {};
-
-  const now = new Date();
-  const currentMonthKey = monthKeyOf(now);
-
-  // if not initialized
-  if (!mtc.monthKey) {
-    const baseLimit = Number(mtc.baseLimit || 0);
-    const allBuckets = Array.isArray(mtc.addonBuckets) ? mtc.addonBuckets : [];
-    const { keep, sum } = normalizeBucketsForMonth(allBuckets, currentMonthKey);
-
-    tx.set(
-      userRef,
-      {
-        monthlyTxCredits: {
-          monthKey: currentMonthKey,
-          baseLimit,
-          baseRemaining: baseLimit,
-          usedThisMonth: 0,
-          addonBuckets: allBuckets, // store all (current+next) for carry logic
-          addonsRemaining: sum,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-      },
-      { merge: true }
-    );
-
-    return { didReset: true, monthKey: currentMonthKey };
-  }
-
-  // same month -> optional repair addonsRemaining
-  if (String(mtc.monthKey || "") === currentMonthKey) {
-    const allBuckets = Array.isArray(mtc.addonBuckets) ? mtc.addonBuckets : [];
-    const { sum } = normalizeBucketsForMonth(allBuckets, currentMonthKey);
-    if (Number(mtc.addonsRemaining || 0) !== sum) {
-      tx.update(userRef, {
-        "monthlyTxCredits.addonsRemaining": sum,
-        "monthlyTxCredits.updatedAt": admin.firestore.FieldValue.serverTimestamp(),
-      });
-    }
-    return { didReset: false, monthKey: currentMonthKey };
-  }
-
-  // new month
-  const baseLimit = Number(mtc.baseLimit || 0);
-  const allBuckets = Array.isArray(mtc.addonBuckets) ? mtc.addonBuckets : [];
-  const { sum } = normalizeBucketsForMonth(allBuckets, currentMonthKey);
-
-  tx.update(userRef, {
-    "monthlyTxCredits.monthKey": currentMonthKey,
-    "monthlyTxCredits.baseRemaining": baseLimit,
-    "monthlyTxCredits.usedThisMonth": 0,
-    "monthlyTxCredits.addonsRemaining": sum,
-    "monthlyTxCredits.updatedAt": admin.firestore.FieldValue.serverTimestamp(),
-  });
-
-  return { didReset: true, monthKey: currentMonthKey };
-}
-
-/**
- * ✅ Apply Add-on to monthlyTxCredits with carry-over last 7 days
- * - creates a bucket with expiresMonthKey:
- *   - current month normally
- *   - next month if bought in last 7 days
- * - recalculates addonsRemaining for current month only
- */
-async function applyAddonCreditTx(tx, userRef, { paymentIntentId, addonKey, addonQty, purchasedAt }) {
-  await lazyResetMonthlyCreditsIfNeeded(tx, userRef);
-
-  const userSnap = await tx.get(userRef);
-  if (!userSnap.exists) throw new Error("USER_NOT_FOUND");
-
-  const u = userSnap.data() || {};
-  const mtc = u.monthlyTxCredits || {};
-  const now = new Date();
-  const currentMonthKey = String(mtc.monthKey || monthKeyOf(now));
-
-  const qty = Number(addonQty || 0);
-  if (!(qty > 0)) return { added: 0, expiresMonthKey: "", monthKey: currentMonthKey, addonsRemaining: Number(mtc.addonsRemaining || 0) };
-
-  const allBuckets = Array.isArray(mtc.addonBuckets) ? [...mtc.addonBuckets] : [];
-  const purchasedMonthKey = monthKeyOf(purchasedAt);
-  const expiresMonthKey = computeAddonExpiresMonthKey(purchasedAt);
-
-  allBuckets.push({
-    id: String(paymentIntentId),
-    addonKey: String(addonKey || ""),
-    qtyRemaining: qty,
-    purchasedAt: admin.firestore.Timestamp.fromDate(purchasedAt),
-
-    // ✅ NEW: يظهر فورًا في شهر الشراء
-    purchasedMonthKey,
-
-    // ✅ نفس منطقك القديم للترحيل (آخر 7 أيام => next month)
-    expiresMonthKey,
-  });
-
-
-  const { sum } = normalizeBucketsForMonth(allBuckets, currentMonthKey);
-
-  tx.update(userRef, {
-    "monthlyTxCredits.addonBuckets": allBuckets,
-    "monthlyTxCredits.addonsRemaining": sum,
-    "monthlyTxCredits.updatedAt": admin.firestore.FieldValue.serverTimestamp(),
-  });
-
-  return { added: qty, expiresMonthKey, monthKey: currentMonthKey, addonsRemaining: sum };
-}
-
-
-/**
- * ✅ Apply subscription base limit for current month
- * - sets baseLimit to plan monthlyIncludedTxLimit
- * - resets baseRemaining to baseLimit
- * - usedThisMonth = 0
- * - keeps addon buckets (including next-month carry) untouched
- */
-async function applySubscriptionBaseLimitTx(tx, userRef, baseLimit) {
-  await lazyResetMonthlyCreditsIfNeeded(tx, userRef);
-
-  const userSnap = await tx.get(userRef);
-  if (!userSnap.exists) throw new Error("USER_NOT_FOUND");
-
-  const u = userSnap.data() || {};
-  const mtc = u.monthlyTxCredits || {};
-
-  const now = new Date();
-  const currentMonthKey = String(mtc.monthKey || monthKeyOf(now));
-
-  const allBuckets = Array.isArray(mtc.addonBuckets) ? mtc.addonBuckets : [];
-  const { sum } = normalizeBucketsForMonth(allBuckets, currentMonthKey);
-
-  const lim = Number(baseLimit || 0);
-
-  tx.update(userRef, {
-    "monthlyTxCredits.monthKey": currentMonthKey,
-    "monthlyTxCredits.baseLimit": lim,
-    "monthlyTxCredits.baseRemaining": lim,
-    "monthlyTxCredits.usedThisMonth": 0,
-    "monthlyTxCredits.addonsRemaining": sum,
-    "monthlyTxCredits.updatedAt": admin.firestore.FieldValue.serverTimestamp(),
-  });
-
-  return {
-    monthKey: currentMonthKey,
-    baseLimit: lim,
-    baseRemaining: lim,
-    usedThisMonth: 0,
-    addonsRemaining: sum,
-    totalRemaining: lim + sum,
-  };
-}
-
 
 // ---------------- service reader ----------------
 async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFallback = "") {
   const clientTypesToTry = clientType ? [clientType] : ["company", "resident", "nonresident", "other"];
-
   for (const ct of clientTypesToTry) {
     try {
       const docRef = db.collection("servicesByClientType").doc(String(ct));
@@ -308,7 +132,6 @@ async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFa
       console.warn("fetchServiceFromByClientType error for", ct, e?.message || e);
     }
   }
-
   return null;
 }
 
@@ -368,7 +191,8 @@ export default async function handler(req, res) {
     const reqIdFromMeta = md.requestId || md.orderNumber || null;
 
     const requestTypeMeta = normLower(
-      md.requestType || (md.serviceName && normLower(md.serviceName).includes("wallet") ? "wallet_recharge" : "service")
+      md.requestType ||
+        (md.serviceName && normLower(md.serviceName).includes("wallet") ? "wallet_recharge" : "service")
     );
 
     const clientTypeMeta = normLower(md.clientType || md.client_type || md.serviceClientType || "");
@@ -376,13 +200,12 @@ export default async function handler(req, res) {
     const coinsGiven = safeNum(md.coinsGiven ?? md.cashbackCoins ?? md.coins ?? 0);
     const coinsUsed = safeNum(md.coinsUsed ?? 0);
 
-const printingFeeFromMeta = safeNum(md.printingFee ?? 0);
-const processingFeeMeta = safeNum(md.processingFee ?? md.processing_fee ?? md.processing_fee_value ?? 0);
+    const printingFeeFromMeta = safeNum(md.printingFee ?? 0);
+    const processingFeeMeta = safeNum(md.processingFee ?? md.processing_fee ?? md.processing_fee_value ?? 0);
 
-// ✅ MUST be present for UI breakdown
-const baseAmountFromMeta = safeNum(md.baseAmountAED ?? md.baseAmount ?? 0);
-const totalAEDFromMeta = safeNum(md.totalAED ?? 0);
-
+    // ✅ لازم موجودين للـ UI breakdown
+    const baseAmountFromMeta = safeNum(md.baseAmountAED ?? md.baseAmount ?? 0);
+    const totalAEDFromMeta = safeNum(md.totalAED ?? 0);
 
     const serviceId = safeStr(md.serviceId || "");
     const serviceNameFromMeta = safeStr(md.serviceName || "");
@@ -400,7 +223,7 @@ const totalAEDFromMeta = safeNum(md.totalAED ?? 0);
       normLower(serviceId).startsWith("addon_") ||
       normLower(serviceNameFromMeta).includes("add-on");
 
-    // subscription
+    // -------- SUBSCRIPTION META --------
     const planKey = safeStr(md.planKey || "").trim();
     const planName = safeStr(md.planName || md.subscriptionName || md.planTitle || "").trim() || planKey;
     const pricingKey = safeStr(md.pricingKey || "").trim();
@@ -408,15 +231,15 @@ const totalAEDFromMeta = safeNum(md.totalAED ?? 0);
     const totalSubscriptionDays = safeNum(md.totalSubscriptionDays || md.totalSubDays || 0);
     const subscriptionDays = safeNum(md.subscriptionDays || 0);
     const giftDays = safeNum(md.giftDays || 0);
-    const daysToApply = totalSubscriptionDays > 0 ? totalSubscriptionDays : Math.max(0, subscriptionDays + giftDays) || 30;
+    const daysToApply =
+      totalSubscriptionDays > 0 ? totalSubscriptionDays : Math.max(0, subscriptionDays + giftDays) || 30;
 
     const paidMonths = safeNum(md.paidMonths || 0);
     const bonus = safeNum(md.bonus || 0);
 
     const isSubscription = requestTypeMeta === "subscription" || planKey.length > 0;
 
-    // IMPORTANT: monthlyIncludedTxLimit from metadata if your create-payment-intent sends it
-    // If not sent, we will fallback to reading from companySubscriptionPlans/<planKey>
+    // لو مش مرسولة من create-payment-intent هنقرأها من companySubscriptionPlans/<planKey>
     const planMonthlyLimitMeta = safeNum(md.monthlyIncludedTxLimit || md.monthlyTxLimit || md.monthlyLimit || 0);
 
     // attachments
@@ -429,10 +252,11 @@ const totalAEDFromMeta = safeNum(md.totalAED ?? 0);
       }
     }
 
-    // amount
+    // amount (Stripe بالـ cents)
     const amountSmallest = pi.amount_received ?? pi.amount ?? 0;
     const amountAED = Number((amountSmallest / 100).toFixed(2));
 
+    // idempotency doc
     const processedRef = db.collection("stripePaymentsProcessed").doc(paymentIntentId);
 
     // locate requestRef
@@ -449,7 +273,7 @@ const totalAEDFromMeta = safeNum(md.totalAED ?? 0);
       }
     }
 
-    // locate user
+    // locate user (mandatory)
     const customerIdMeta = safeStr(md.customerId || md.userId || "").trim();
     if (!customerIdMeta) {
       await processedRef.set({
@@ -484,51 +308,35 @@ const totalAEDFromMeta = safeNum(md.totalAED ?? 0);
     let notifyDataAfterTx = {};
 
     // =============================
-    // Transaction
+    // Transaction (SAFE: all reads first)
     // =============================
     await db.runTransaction(async (tx) => {
-      // all reads first
+      // --------- READS (must be before any writes) ---------
       const procCheck = await tx.get(processedRef);
       if (procCheck.exists) throw new Error("ALREADY_PROCESSED");
 
       const uDoc = await tx.get(userRef);
-      if (!uDoc.exists) throw new Error("User disappeared during transaction");
-
+      if (!uDoc.exists) throw new Error("USER_NOT_FOUND");
       const udata = uDoc.data() || {};
-      const userIsCompany = normLower(udata.accountType || udata.type || "") === "company";
-      const isCompany = clientTypeMeta === "company" || customerIdMeta.startsWith("COM-") || userIsCompany;
 
+      // تحديد الشركة مضبوط (حسب اتفاقنا)
+      const userIsCompany = normLower(udata.accountType || udata.type || udata.clientType || "") === "company";
+      const metaSaysCompany = clientTypeMeta === "company" || normLower(md.accountType || "") === "company";
+      const idLooksCompany = String(customerIdMeta || "").startsWith("COM-");
+      const isCompany = userIsCompany || metaSaysCompany || idLooksCompany;
+
+      // request doc read (if exists)
       const rDoc = requestRef ? await tx.get(requestRef) : null;
 
-const subRef = db.collection("companySubscriptions").doc(customerIdMeta);
-const subSnap = isCompany ? await tx.get(subRef) : null;
+      // companySubscriptions (only for companies)
+      const subRef = db.collection("companySubscriptions").doc(customerIdMeta);
+      const subSnap = isCompany ? await tx.get(subRef) : null;
 
-// ✅ Decide printingFee visibility for SERVICE only
-const addonsRemainingNow = safeNum(udata?.monthlyTxCredits?.addonsRemaining || 0);
-
-let subActiveNow = false;
-if (isCompany && subSnap && subSnap.exists) {
-  const sub = subSnap.data() || {};
-  const status = normLower(sub.status || "");
-  const endAt = toDateSafe(sub.endAt) || (sub.endAtISO ? new Date(sub.endAtISO) : null);
-  subActiveNow =
-    (sub.isActive === true || status === "active" || status === "trial") &&
-    !!endAt &&
-    endAt.getTime() > Date.now();
-}
-
-const shouldHidePrintingFee =
-  isCompany &&
-  requestTypeMeta === "service" &&
-  !isAddon &&
-  !isSubscription &&
-  (subActiveNow || addonsRemainingNow > 0);
-
-      // addon catalog doc (ONLY if addon)
+      // addon catalog (only if addon)
       let addonCatalog = null;
       let resolvedAddonQty = addonQtyMeta;
 
-      if (isAddon && addonKey) {
+      if (isAddon && isCompany && addonKey) {
         const addonRef = db.collection("companyAddonsCatalog").doc(addonKey);
         const addonSnap = await tx.get(addonRef);
         if (addonSnap.exists) {
@@ -540,9 +348,9 @@ const shouldHidePrintingFee =
         }
       }
 
-      // plan doc (ONLY if subscription) -> to resolve monthlyIncludedTxLimit
+      // plan monthly limit resolve (only if subscription)
       let planMonthlyLimitResolved = planMonthlyLimitMeta;
-      if (isSubscription && planKey && !(planMonthlyLimitResolved > 0)) {
+      if (isSubscription && isCompany && planKey && !(planMonthlyLimitResolved > 0)) {
         const planRef = db.collection("companySubscriptionPlans").doc(planKey);
         const planSnap = await tx.get(planRef);
         if (planSnap.exists) {
@@ -552,10 +360,77 @@ const shouldHidePrintingFee =
         }
       }
 
-      // writes
+      // --------- COMPUTE monthlyTxCredits normalized (NO WRITES YET) ---------
+      const now = new Date();
+      const currentMonthKey = monthKeyOf(now);
+
+      const mtc0 = udata.monthlyTxCredits || {};
+      const monthKey0 = String(mtc0.monthKey || "");
+      const baseLimit0 = Number(mtc0.baseLimit || 0);
+      const baseRemaining0 = Number(mtc0.baseRemaining || baseLimit0);
+      const used0 = Number(mtc0.usedThisMonth || 0);
+      const buckets0 = Array.isArray(mtc0.addonBuckets) ? mtc0.addonBuckets : [];
+
+      // لو أول مرة أو شهر اتغير => reset lazy
+      let monthKey = monthKey0 || currentMonthKey;
+      let baseLimit = baseLimit0;
+      let baseRemaining = baseRemaining0;
+      let usedThisMonth = used0;
+      let addonBuckets = [...buckets0];
+
+      if (!monthKey0) {
+        monthKey = currentMonthKey;
+        baseRemaining = baseLimit;
+        usedThisMonth = 0;
+      } else if (monthKey0 !== currentMonthKey) {
+        monthKey = currentMonthKey;
+        baseRemaining = baseLimit;
+        usedThisMonth = 0;
+      }
+
+      // احسب addonsRemaining لهذا الشهر (بعد reset)
+      let { sum: addonsRemaining } = normalizeBucketsForMonth(addonBuckets, monthKey);
+
+      // حالة الاشتراك الحالية (لإخفاء printingFee فقط)
+      let subActiveNow = false;
+      if (isCompany && subSnap && subSnap.exists) {
+        const sub = subSnap.data() || {};
+        const status = normLower(sub.status || "");
+        const endAt = toDateSafe(sub.endAt) || (sub.endAtISO ? new Date(sub.endAtISO) : null);
+        subActiveNow =
+          (sub.isActive === true || status === "active" || status === "trial") &&
+          !!endAt &&
+          endAt.getTime() > now.getTime();
+      }
+
+      const shouldHidePrintingFee =
+        isCompany &&
+        requestTypeMeta === "service" &&
+        !isAddon &&
+        !isSubscription &&
+        (subActiveNow || addonsRemaining > 0);
+
+      // --------- PREPARE request update/create (NO WRITES YET) ---------
       let finalRequestId = reqId || null;
 
-      // A) request
+      // --------- WRITES start هنا (بعد ما خلصنا كل القراءات والحسابات) ---------
+
+      // (A) write/reset monthlyTxCredits fields لو محتاج (حتى لو مفيش addon/subscription)
+      // - بنعمله لأنك عايز النظام يصلّح نفسه شهريًا
+      // - لكن لو انت مش عايز ده إلا عند addon/subscription فقط، قولّي وهشيله
+      const monthlyTxCreditsPatch = {
+        monthKey,
+        baseLimit: Number(baseLimit || 0),
+        baseRemaining: Number(baseRemaining || 0),
+        usedThisMonth: Number(usedThisMonth || 0),
+        addonBuckets,
+        addonsRemaining: Number(addonsRemaining || 0),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+
+      tx.set(userRef, { monthlyTxCredits: monthlyTxCreditsPatch }, { merge: true });
+
+      // (B) request update/create
       if (requestRef && rDoc && rDoc.exists) {
         finalRequestId = String(rDoc.id);
         const rdata = rDoc.data() || {};
@@ -563,23 +438,25 @@ const shouldHidePrintingFee =
         const history = Array.isArray(rdata.statusHistory) ? [...rdata.statusHistory] : [];
         history.push({ status: "paid", timestamp: nowISO(), updatedBy: "stripe-webhook" });
 
-const updates = {
-  lastUpdated: nowISO(),
-  status: "paid",
-  paidAmount: amountAED,
-  paymentIntentId,
-  statusHistory: history,
-  paidAt: nowISO(),
+        const updates = {
+          lastUpdated: nowISO(),
+          status: "paid",
+          paidAmount: amountAED,
+          paymentIntentId,
+          statusHistory: history,
+          paidAt: nowISO(),
 
-  // ✅ always persist breakdown for UI
-  baseAmountAED: baseAmountFromMeta || safeNum(rdata.baseAmountAED || 0),
-  processingFee: typeof rdata.processingFee !== "undefined" ? rdata.processingFee : processingFeeMeta || 0,
-  totalAED: totalAEDFromMeta || amountAED,
+          // ✅ breakdown always stored
+          baseAmountAED: baseAmountFromMeta || safeNum(rdata.baseAmountAED || 0),
+          processingFee:
+            typeof rdata.processingFee !== "undefined"
+              ? rdata.processingFee
+              : processingFeeMeta || 0,
+          totalAED: totalAEDFromMeta || amountAED,
 
-  assignedTo: rdata.assignedTo || assignedToMeta || "",
-  assignedToName: rdata.assignedToName || assignedToNameMeta || "",
-};
-
+          assignedTo: rdata.assignedTo || assignedToMeta || "",
+          assignedToName: rdata.assignedToName || assignedToNameMeta || "",
+        };
 
         if (rdata.attachments) updates.attachments = rdata.attachments;
         else if (attachmentsMeta && Object.keys(attachmentsMeta).length) updates.attachments = attachmentsMeta;
@@ -611,16 +488,23 @@ const updates = {
             requireUpload: typeof serviceDoc.requireUpload === "boolean" ? serviceDoc.requireUpload : false,
           };
 
-          if (!updates.baseAmountAED) updates.baseAmountAED = baseAmountFromMeta || safeNum(md.baseAmountAED || 0);
-          if (!updates.totalAED) updates.totalAED = totalAEDFromMeta || amountAED;
-
-
           updates.service = svc;
           updates.serviceName = svc.name;
           updates.serviceId = svc.serviceId;
           updates.providers = svc.providers;
-          updates.printingFee = shouldHidePrintingFee ? 0 : (rdata.printingFee ?? svc.printingFee ?? printingFeeFromMeta ?? 0);
+
+          // ✅ printingFee: صفر للشركات لو اشتراك فعّال أو عندها add-ons remaining
+          updates.printingFee = shouldHidePrintingFee
+            ? 0
+            : (typeof rdata.printingFee !== "undefined"
+                ? rdata.printingFee
+                : (svc.printingFee ?? printingFeeFromMeta ?? 0));
+
           updates.requiredDocuments = svc.requiredDocuments;
+        } else {
+          updates.printingFee = shouldHidePrintingFee
+            ? 0
+            : (typeof rdata.printingFee !== "undefined" ? rdata.printingFee : printingFeeFromMeta || 0);
         }
 
         if (isAddon) {
@@ -657,14 +541,13 @@ const updates = {
           serviceName: serviceNameFromMeta || "",
           requestType: isAddon ? "addon" : requestTypeMeta,
 
-paidAmount: amountAED,
+          paidAmount: amountAED,
 
-// ✅ breakdown always stored
-baseAmountAED: baseAmountFromMeta || 0,
-printingFee: shouldHidePrintingFee ? 0 : (printingFeeFromMeta ?? 0),
-processingFee: processingFeeMeta ?? 0,
-totalAED: totalAEDFromMeta || amountAED,
-
+          // ✅ breakdown always stored
+          baseAmountAED: baseAmountFromMeta || 0,
+          printingFee: shouldHidePrintingFee ? 0 : (printingFeeFromMeta ?? 0),
+          processingFee: processingFeeMeta ?? 0,
+          totalAED: totalAEDFromMeta || amountAED,
 
           coinsGiven,
           coinsUsed,
@@ -706,7 +589,7 @@ totalAED: totalAEDFromMeta || amountAED,
         requestRef = newReqRef;
       }
 
-      // B) wallet/coins
+      // (C) wallet/coins
       if (requestTypeMeta === "wallet_recharge") {
         const prevWallet = Number(udata.walletBalance ?? udata.wallet ?? 0);
         const newWallet = +(prevWallet + amountAED).toFixed(2);
@@ -722,135 +605,242 @@ totalAED: totalAEDFromMeta || amountAED,
         }
       }
 
-      // ✅ B2) ADDON → monthlyTxCredits buckets + carry-over last 7 days
-// ✅ B2) ADDON → monthlyTxCredits buckets + carry-over last 7 days
-// ✅ B2) ADDON → monthlyTxCredits + mirror into companySubscriptions
-if (isAddon && isCompany) {
-  const qtyToAdd = Number(resolvedAddonQty || 0);
-  if (qtyToAdd > 0) {
-    const purchasedAt = new Date();
+      // (D) ADDON → تعديل buckets + mirror في companySubscriptions
+      if (isAddon && isCompany) {
+        const qtyToAdd = Number(resolvedAddonQty || 0);
+        if (qtyToAdd > 0) {
+          const purchasedAt = new Date();
+          const purchasedMonthKey = monthKeyOf(purchasedAt);
+          const expiresMonthKey = computeAddonExpiresMonthKey(purchasedAt);
 
-    const r = await applyAddonCreditTx(tx, userRef, {
-      paymentIntentId,
-      addonKey: addonKey || (addonCatalog?.addonKey || ""),
-      addonQty: qtyToAdd,
-      purchasedAt,
-    });
+          addonBuckets = [...addonBuckets];
+          addonBuckets.push({
+            id: String(paymentIntentId),
+            addonKey: String(addonKey || ""),
+            qtyRemaining: qtyToAdd,
+            purchasedAt: admin.firestore.Timestamp.fromDate(purchasedAt),
+            purchasedMonthKey,
+            expiresMonthKey,
+          });
 
-    // ✅ Mirror snapshot for UI (companySubscriptions)
-    const companyPublicId = safeStr(udata.companyId || udata.customerId || udata.userId || customerIdMeta);
-    const companyEmail = safeStr(udata.email || md.userEmail || "");
+          const { sum: addonsRemainingAfter } = normalizeBucketsForMonth(addonBuckets, monthKey);
 
-    tx.set(
-      subRef,
-      {
-        companyDocId: customerIdMeta,
-        companyId: companyPublicId,
-        email: companyEmail,
+          // update user monthlyTxCredits
+          tx.set(
+            userRef,
+            {
+              monthlyTxCredits: {
+                monthKey,
+                baseLimit: Number(baseLimit || 0),
+                baseRemaining: Number(baseRemaining || 0),
+                usedThisMonth: Number(usedThisMonth || 0),
+                addonBuckets,
+                addonsRemaining: Number(addonsRemainingAfter || 0),
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              },
+            },
+            { merge: true }
+          );
 
-        // ✅ useful snapshot for UI
-        txCredits: {
-          monthKey: r.monthKey,
-          baseLimit: safeNum(udata?.monthlyTxCredits?.baseLimit || 0),
-          baseRemaining: safeNum(udata?.monthlyTxCredits?.baseRemaining || 0),
-          usedThisMonth: safeNum(udata?.monthlyTxCredits?.usedThisMonth || 0),
-          addonsRemaining: safeNum(r.addonsRemaining || 0),
-          totalRemaining:
-            safeNum(udata?.monthlyTxCredits?.baseRemaining || 0) + safeNum(r.addonsRemaining || 0),
-          updatedAtISO: nowISO(),
-        },
+          const companyPublicId = safeStr(udata.companyId || udata.customerId || udata.userId || customerIdMeta);
+          const companyEmail = safeStr(udata.email || md.userEmail || "");
 
-        lastAddon: {
-          addonKey: addonKey || "",
-          addonQty: qtyToAdd,
-          expiresMonthKey: r.expiresMonthKey,
+          tx.set(
+            subRef,
+            {
+              companyDocId: customerIdMeta,
+              companyId: companyPublicId,
+              email: companyEmail,
+
+              txCredits: {
+                monthKey,
+                baseLimit: Number(baseLimit || 0),
+                baseRemaining: Number(baseRemaining || 0),
+                usedThisMonth: Number(usedThisMonth || 0),
+                addonsRemaining: Number(addonsRemainingAfter || 0),
+                totalRemaining: Number(baseRemaining || 0) + Number(addonsRemainingAfter || 0),
+                updatedAtISO: nowISO(),
+              },
+
+              lastAddon: {
+                addonKey: safeStr(addonKey || ""),
+                addonQty: qtyToAdd,
+                expiresMonthKey: safeStr(expiresMonthKey || ""),
+                paymentIntentId,
+                requestId: finalRequestId,
+                amountAED,
+                purchasedAtISO: purchasedAt.toISOString(),
+              },
+
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              ...(subSnap && subSnap.exists ? {} : { createdAt: admin.firestore.FieldValue.serverTimestamp() }),
+            },
+            { merge: true }
+          );
+
+          // optional history (user)
+          tx.set(userRef.collection("monthlyTxCreditsHistory").doc(paymentIntentId), {
+            type: "addon_topup",
+            paymentIntentId,
+            requestId: finalRequestId,
+            addonKey: safeStr(addonKey || ""),
+            addonQtyAdded: qtyToAdd,
+            expiresMonthKey: safeStr(expiresMonthKey || ""),
+            amountAED,
+            purchasedAtISO: purchasedAt.toISOString(),
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          // تحديث المتغير المحلي للمتابعة
+          addonsRemaining = addonsRemainingAfter;
+        }
+      }
+
+      // (E) SUBSCRIPTION → تمديد endAt + reset baseLimit/baseRemaining لهذا الشهر + mirror في companySubscriptions
+      if (isSubscription && isCompany) {
+        const lim = Number(planMonthlyLimitResolved || 0);
+
+        // reset base credits for current month (keep addonBuckets)
+        baseLimit = lim;
+        baseRemaining = lim;
+        usedThisMonth = 0;
+
+        const { sum: addonsRemainingAfterSub } = normalizeBucketsForMonth(addonBuckets, monthKey);
+
+        // update user monthlyTxCredits
+        tx.set(
+          userRef,
+          {
+            monthlyTxCredits: {
+              monthKey,
+              baseLimit: Number(baseLimit || 0),
+              baseRemaining: Number(baseRemaining || 0),
+              usedThisMonth: Number(usedThisMonth || 0),
+              addonBuckets,
+              addonsRemaining: Number(addonsRemainingAfterSub || 0),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+          },
+          { merge: true }
+        );
+
+        // تمديد الاشتراك لو كان لسه فعّال
+        let startDate = now;
+        let baseEnd = now;
+
+        if (subSnap && subSnap.exists) {
+          const old = subSnap.data() || {};
+          const oldEnd = toDateSafe(old.endAt) || (old.endAtISO ? new Date(old.endAtISO) : null);
+          const oldStatus = normLower(old.status || "");
+          const oldActiveNow =
+            !!oldEnd &&
+            oldEnd.getTime() > now.getTime() &&
+            (old.isActive === true || oldStatus === "active" || oldStatus === "trial");
+
+          if (oldActiveNow) {
+            baseEnd = oldEnd;
+            const oldStart = toDateSafe(old.startAt) || (old.startAtISO ? new Date(old.startAtISO) : null);
+            startDate = oldStart || now;
+          }
+        }
+
+        const endDate = addDays(baseEnd, daysToApply);
+
+        // ✅ isActive = endAt > now فقط (الاتفاق)
+        const isActiveNow = endDate.getTime() > now.getTime();
+        const statusNow = isActiveNow ? "active" : "expired";
+
+        const companyPublicId = safeStr(udata.companyId || udata.customerId || udata.userId || customerIdMeta);
+        const companyEmail = safeStr(udata.email || md.userEmail || "");
+
+        tx.set(
+          subRef,
+          {
+            companyDocId: customerIdMeta,
+            companyId: companyPublicId,
+            email: companyEmail,
+
+            planKey,
+            planName,
+            pricingKey,
+
+            subscriptionDays: Number(daysToApply || 0),
+            paidMonths: Number(paidMonths || 0),
+            bonus: Number(bonus || 0),
+
+            monthlyIncludedTxLimit: lim,
+
+            startAt: admin.firestore.Timestamp.fromDate(startDate),
+            endAt: admin.firestore.Timestamp.fromDate(endDate),
+            startAtISO: startDate.toISOString(),
+            endAtISO: endDate.toISOString(),
+
+            status: statusNow,
+            isActive: isActiveNow,
+
+            txCredits: {
+              monthKey,
+              baseLimit: Number(baseLimit || 0),
+              baseRemaining: Number(baseRemaining || 0),
+              usedThisMonth: Number(usedThisMonth || 0),
+              addonsRemaining: Number(addonsRemainingAfterSub || 0),
+              totalRemaining: Number(baseRemaining || 0) + Number(addonsRemainingAfterSub || 0),
+              updatedAtISO: nowISO(),
+            },
+
+            lastRequestId: finalRequestId,
+            lastPaymentIntentId: paymentIntentId,
+
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            ...(subSnap && subSnap.exists ? {} : { createdAt: admin.firestore.FieldValue.serverTimestamp() }),
+          },
+          { merge: true }
+        );
+
+        // history under companySubscriptions
+        tx.set(subRef.collection("history").doc(paymentIntentId), {
+          companyDocId: customerIdMeta,
+          companyId: companyPublicId,
+          email: companyEmail,
+
+          requestId: finalRequestId,
+          paymentIntentId,
+
+          planKey,
+          planName,
+          pricingKey,
+
+          monthlyIncludedTxLimit: lim,
+          subscriptionDays: Number(daysToApply || 0),
+          paidMonths: Number(paidMonths || 0),
+          bonus: Number(bonus || 0),
+
+          startAt: admin.firestore.Timestamp.fromDate(startDate),
+          endAt: admin.firestore.Timestamp.fromDate(endDate),
+
+          status: statusNow,
+          isActive: isActiveNow,
+
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        // optional user history
+        tx.set(userRef.collection("monthlyTxCreditsHistory").doc(`${paymentIntentId}_sub`), {
+          type: "subscription_reset",
           paymentIntentId,
           requestId: finalRequestId,
+          planKey,
+          pricingKey,
+          baseLimit: lim,
+          monthKey,
           amountAED,
-          purchasedAtISO: purchasedAt.toISOString(),
-        },
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
 
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        ...(subSnap && subSnap.exists ? {} : { createdAt: admin.firestore.FieldValue.serverTimestamp() }),
-      },
-      { merge: true }
-    );
+        addonsRemaining = addonsRemainingAfterSub;
+      }
 
-    // optional history (users)
-    const histRef = userRef.collection("monthlyTxCreditsHistory").doc(paymentIntentId);
-    tx.set(histRef, {
-      type: "addon_topup",
-      paymentIntentId,
-      requestId: finalRequestId,
-      addonKey: addonKey || "",
-      addonQtyAdded: qtyToAdd,
-      expiresMonthKey: r.expiresMonthKey,
-      amountAED,
-      purchasedAtISO: purchasedAt.toISOString(),
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-  }
-}
-
-
-      // ✅ B3) SUBSCRIPTION → set baseLimit/baseRemaining monthly + reset usedThisMonth
-if (isSubscription && isCompany) {
-  const lim = Number(planMonthlyLimitResolved || 0);
-
-  const snap = await applySubscriptionBaseLimitTx(tx, userRef, lim);
-
-  // ✅ Mirror snapshot for UI (companySubscriptions)
-  const companyPublicId = safeStr(udata.companyId || udata.customerId || udata.userId || customerIdMeta);
-  const companyEmail = safeStr(udata.email || md.userEmail || "");
-
-  tx.set(
-    subRef,
-    {
-      companyDocId: customerIdMeta,
-      companyId: companyPublicId,
-      email: companyEmail,
-
-      planKey,
-      planName,
-      pricingKey,
-
-      // ✅ number of transactions per plan (your main ask)
-      monthlyIncludedTxLimit: lim,
-
-      // ✅ snapshot
-      txCredits: {
-        monthKey: snap.monthKey,
-        baseLimit: snap.baseLimit,
-        baseRemaining: snap.baseRemaining,
-        usedThisMonth: snap.usedThisMonth,
-        addonsRemaining: snap.addonsRemaining,
-        totalRemaining: snap.totalRemaining,
-        updatedAtISO: nowISO(),
-      },
-
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      ...(subSnap && subSnap.exists ? {} : { createdAt: admin.firestore.FieldValue.serverTimestamp() }),
-    },
-    { merge: true }
-  );
-
-  // optional history
-  const histRef = userRef.collection("monthlyTxCreditsHistory").doc(`${paymentIntentId}_sub`);
-  tx.set(histRef, {
-    type: "subscription_reset",
-    paymentIntentId,
-    requestId: finalRequestId,
-    planKey,
-    pricingKey,
-    baseLimit: lim,
-    monthKey: snap.monthKey,
-    amountAED,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
-}
-
-
-      // C) transactions log
+      // (F) transactions log
       const txRef = db.collection("transactions").doc();
       tx.set(txRef, {
         userId: userRef.id,
@@ -866,7 +856,7 @@ if (isSubscription && isCompany) {
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      // D) notification doc
+      // (G) notification doc
       const notifRef = db.collection("notifications").doc();
 
       const notifTitle = langIsEn
@@ -907,97 +897,7 @@ if (isSubscription && isCompany) {
         },
       });
 
-      // D2) subscription document
-      if (isSubscription && isCompany) {
-        const now = new Date();
-        let startDate = now;
-        let baseEnd = now;
-
-        if (subSnap && subSnap.exists) {
-          const old = subSnap.data() || {};
-          const oldEnd = toDateSafe(old.endAt) || toDateSafe(old.expiresAt) || toDateSafe(old.endAtISO);
-          const oldStatus = normLower(old.status || "");
-
-          if (oldEnd && oldEnd.getTime() > now.getTime() && (oldStatus === "active" || oldStatus === "trial")) {
-            baseEnd = oldEnd;
-            const oldStart = toDateSafe(old.startAt) || toDateSafe(old.startAtISO);
-            startDate = oldStart || toDateSafe(old.createdAt) || now;
-          }
-        }
-
-        const endDate = addDays(baseEnd, daysToApply);
-        const startTs = admin.firestore.Timestamp.fromDate(startDate);
-        const endTs = admin.firestore.Timestamp.fromDate(endDate);
-
-        const isExpiredNow = endDate.getTime() <= now.getTime();
-        const statusNow = isExpiredNow ? "expired" : "active";
-
-        const companyPublicId = safeStr(udata.companyId || udata.customerId || udata.userId || customerIdMeta);
-        const companyEmail = safeStr(udata.email || md.userEmail || "");
-
-        tx.set(
-          subRef,
-          {
-            companyDocId: customerIdMeta,
-            companyId: companyPublicId,
-            email: companyEmail,
-
-            planKey,
-            planName,
-            pricingKey,
-
-            subscriptionDays: daysToApply,
-            paidMonths,
-            bonus,
-
-            startAt: startTs,
-            endAt: endTs,
-            startAtISO: startDate.toISOString(),
-            endAtISO: endDate.toISOString(),
-
-            status: statusNow,
-            isActive: !isExpiredNow,
-
-            computed: {
-              isExpired: isExpiredNow,
-              isActiveNow: !isExpiredNow,
-              nowISO: now.toISOString(),
-            },
-
-            lastRequestId: finalRequestId,
-            lastPaymentIntentId: paymentIntentId,
-
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            ...(subSnap && subSnap.exists ? {} : { createdAt: admin.firestore.FieldValue.serverTimestamp() }),
-          },
-          { merge: true }
-        );
-
-        tx.set(subRef.collection("history").doc(paymentIntentId), {
-          companyDocId: customerIdMeta,
-          companyId: companyPublicId,
-          email: companyEmail,
-
-          requestId: finalRequestId,
-          paymentIntentId,
-
-          planKey,
-          planName,
-          pricingKey,
-
-          subscriptionDays: daysToApply,
-          paidMonths,
-          bonus,
-
-          startAt: startTs,
-          endAt: endTs,
-
-          status: "active",
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      }
-
-      // E) processed (idempotency)
+      // (H) processed (idempotency)
       tx.set(processedRef, {
         paymentIntentId,
         processedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -1016,7 +916,7 @@ if (isSubscription && isCompany) {
           isCompany,
           userIsCompany,
           daysToApply,
-          planMonthlyLimitResolved,
+          planMonthlyLimitResolved: planMonthlyLimitResolved || 0,
         },
       });
 
@@ -1033,7 +933,7 @@ if (isSubscription && isCompany) {
       };
     });
 
-    // push after tx
+    // push after tx (outside transaction)
     try {
       if (finalRequestIdAfterTx) {
         await sendExpoPushToUser(userRef, notifyTitleAfterTx, notifyBodyAfterTx, notifyDataAfterTx);
@@ -1048,4 +948,4 @@ if (isSubscription && isCompany) {
     console.error("❌ webhook processing error:", err);
     return res.status(500).send("internal_error");
   }
-} 
+}
