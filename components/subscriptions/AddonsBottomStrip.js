@@ -135,8 +135,8 @@ export default function CompanyAddonsSection({
             </div>
             <div className="text-[12px] text-white/60 font-semibold">
               {lang === "ar"
-                ? "اختر الباقة المناسبة… الرصيد يضاف تلقائيًا بعد الدفع"
-                : "Pick the right bundle… credits are added automatically after payment"}
+                ? "اختر الباقة المناسبة…"
+                : "Pick the right bundle… "}
             </div>
           </div>
         </div>
