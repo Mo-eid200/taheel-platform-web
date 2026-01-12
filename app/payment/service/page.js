@@ -2,7 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { loadStripe } from "@stripe/stripe-js";
-import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
+import {
+  Elements,
+  CardElement,
+  useStripe,
+  useElements,
+} from "@stripe/react-stripe-js";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import PaymentSuccessPage from "../PaymentSuccess/page";
@@ -73,42 +78,13 @@ function CardForm({ paymentData, lang = "ar", onSuccess }) {
     paymentData?.serviceName ||
     "اسم غير متوفر";
 
-  // ✅ basics
-  const printingFee = Number(paymentData?.service?.printingFee ?? paymentData?.printingFee ?? 0);
-  const vat = Number(paymentData?.service?.vat ?? paymentData?.vat ?? 0);
-  const coinDiscount = Number(paymentData?.service?.coinDiscount ?? paymentData?.coinDiscount ?? 0);
-
-  const totalPrice = Number(paymentData?.totalPrice ?? paymentData?.price ?? 0);
-  const finalPrice = Number(paymentData?.finalPrice ?? paymentData?.price ?? 0);
-  const processingFee = Number(paymentData?.processingFee ?? 0);
-
+  const userEmail = paymentData?.userEmail || paymentData?.service?.userEmail || "";
   const orderNumber = paymentData?.orderNumber;
   const clientSecret = paymentData?.clientSecret;
 
-  const userEmail = paymentData?.userEmail || paymentData?.service?.userEmail || "";
-
   const dir = lang === "ar" ? "rtl" : "ltr";
 
-  // ✅ Service Fee (robust + fallback derived from total)
-let servicePrice = Number(
-  paymentData?.breakdown?.baseAmountAED ??
-  paymentData?.baseAmountAED ??
-  paymentData?.metadata?.baseAmountAED ??
-  0
-);
-
-if (!Number.isFinite(servicePrice) || servicePrice <= 0) {
-  const fp = Number(paymentData?.finalPrice ?? paymentData?.price ?? 0);
-  const pf = Number(paymentData?.processingFee ?? 0);
-  const pr = Number(paymentData?.service?.printingFee ?? paymentData?.printingFee ?? 0);
-  const v  = Number(paymentData?.service?.vat ?? paymentData?.vat ?? 0);
-
-  // اشتقاق رسوم الخدمة/الاشتراك من النهائي (بدون processing)
-  servicePrice = Math.max(0, Number((fp - pf - pr - v).toFixed(2)));
-}
-
-
-  // ✅ Detect subscription + fields
+  // ✅ Detect subscription + fields (same logic you had)
   const isSubscription =
     String(paymentData?.requestType || "").toLowerCase() === "subscription" ||
     !!paymentData?.planKey ||
@@ -125,8 +101,68 @@ if (!Number.isFinite(servicePrice) || servicePrice <= 0) {
   // fallback: لو عندك monthsShown نعتبر الشهر 30 يوم
   const monthsShown = Number(paymentData?.monthsShown ?? 0);
   const fallbackDays = monthsShown > 0 ? monthsShown * 30 : 0;
-
   const subDaysToShow = subscriptionDays > 0 ? subscriptionDays : fallbackDays;
+
+  // ✅ NEW (SAFE): server/client breakdown support (for subscriptions/addons)
+  const bd = paymentData?.breakdown || null;
+
+  const serverBase = bd ? Number(bd.baseAmountAED ?? bd.baseAmount ?? 0) : 0;
+  const serverVat = bd ? Number(bd.vatAED ?? bd.vat ?? 0) : 0;
+  const serverProc = bd ? Number(bd.processingFeeAED ?? bd.processingFee ?? 0) : 0;
+  const serverTotal = bd ? Number(bd.totalAED ?? bd.total ?? 0) : 0;
+
+  const hasServerBreakdown =
+    !!bd &&
+    Number.isFinite(serverBase) &&
+    serverBase >= 0 &&
+    Number.isFinite(serverVat) &&
+    serverVat >= 0 &&
+    Number.isFinite(serverProc) &&
+    serverProc >= 0 &&
+    Number.isFinite(serverTotal) &&
+    serverTotal > 0;
+
+  // ✅ basics (keep old behavior for services, but if breakdown exists use it)
+  const printingFee = hasServerBreakdown
+    ? 0
+    : Number(paymentData?.service?.printingFee ?? paymentData?.printingFee ?? 0);
+
+  const vat = hasServerBreakdown
+    ? serverVat
+    : Number(paymentData?.service?.vat ?? paymentData?.vat ?? 0);
+
+  const coinDiscount = Number(
+    paymentData?.service?.coinDiscount ?? paymentData?.coinDiscount ?? 0
+  );
+
+  const processingFee = hasServerBreakdown
+    ? serverProc
+    : Number(paymentData?.processingFee ?? 0);
+
+  const totalPrice = Number(paymentData?.totalPrice ?? paymentData?.price ?? 0);
+
+  const finalPrice = hasServerBreakdown
+    ? serverTotal
+    : Number(paymentData?.finalPrice ?? paymentData?.price ?? 0);
+
+  // ✅ Service Fee (robust + fallback derived from total)
+  let servicePrice = Number(
+    (hasServerBreakdown ? serverBase : 0) ||
+      paymentData?.breakdown?.baseAmountAED ??
+      paymentData?.baseAmountAED ??
+      paymentData?.metadata?.baseAmountAED ??
+      0
+  );
+
+  if (!Number.isFinite(servicePrice) || servicePrice <= 0) {
+    const fp = Number(paymentData?.finalPrice ?? paymentData?.price ?? 0);
+    const pf = Number(paymentData?.processingFee ?? 0);
+    const pr = Number(paymentData?.service?.printingFee ?? paymentData?.printingFee ?? 0);
+    const v = Number(paymentData?.service?.vat ?? paymentData?.vat ?? 0);
+
+    // اشتقاق رسوم الخدمة/الاشتراك من النهائي (بدون processing)
+    servicePrice = Math.max(0, Number((fp - pf - pr - v).toFixed(2)));
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -146,9 +182,12 @@ if (!Number.isFinite(servicePrice) || servicePrice <= 0) {
     }
 
     try {
-      const { error: stripeError, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
-        payment_method: { card: elements.getElement(CardElement) },
-      });
+      const { error: stripeError, paymentIntent } = await stripe.confirmCardPayment(
+        clientSecret,
+        {
+          payment_method: { card: elements.getElement(CardElement) },
+        }
+      );
 
       if (stripeError) {
         setPayMsg(stripeError.message || (lang === "ar" ? "فشل الدفع." : "Payment failed."));
@@ -192,7 +231,7 @@ if (!Number.isFinite(servicePrice) || servicePrice <= 0) {
               to: userEmail,
               orderNumber,
               serviceName,
-              price: servicePrice, // ✅ هنا هتروح “رسوم الخدمة” صح
+              price: servicePrice, // ✅ رسوم الخدمة/الاشتراك
               printingFee,
               vat,
               coinDiscount,
@@ -336,7 +375,9 @@ if (!Number.isFinite(servicePrice) || servicePrice <= 0) {
       </div>
 
       <div className="w-full mb-3">
-        <label className="text-emerald-200 font-bold text-sm mb-1 block">{LANG[lang].cardLabel}</label>
+        <label className="text-emerald-200 font-bold text-sm mb-1 block">
+          {LANG[lang].cardLabel}
+        </label>
         <div className="bg-white rounded-lg shadow p-2 border border-emerald-200">
           <CardElement
             options={{
