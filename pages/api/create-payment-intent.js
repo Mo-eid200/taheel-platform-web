@@ -229,12 +229,19 @@ async function shouldWaivePrintingFeeForCompany({ customerId, clientType }) {
  * - STRIPE_FEE_FIXED_AED = "1.00"
  * - STRIPE_FEE_PERCENT  = "0.029"
  */
-function calcProcessingFeeAED(amountAED) {
-  const fixed = safeNum(process.env.STRIPE_FEE_FIXED_AED || 0);
-  const percent = safeNum(process.env.STRIPE_FEE_PERCENT || 0);
-  const fee = fixed + amountAED * percent;
-  return Number(fee.toFixed(2));
+function calcStripeFees(amount, options = {}) {
+  const percentFee = 0.029; // 2.9%
+  const fixedFee = 1;       // 1 AED
+  const intlFee = options.isInternational ? amount * 0.01 : 0;
+  const currencyFee = options.isCurrencyConversion ? amount * 0.01 : 0;
+
+  const stripeFee = (amount * percentFee) + fixedFee + intlFee + currencyFee;
+
+  return {
+    stripeFee: Number(stripeFee.toFixed(2)),
+  };
 }
+
 
 // ✅ VAT 5%
 function calcVatAED(amountAED) {
@@ -362,33 +369,40 @@ export default async function handler(req, res) {
     // --------------------------------
     // ✅ Fee + VAT logic
     // --------------------------------
-    const applyVat = requestType === "subscription" || requestType === "addon";
+const applyVat = requestType === "subscription" || requestType === "addon";
 
-    let processingFeeAED = 0;
-    let vatAED = 0;
-    let totalPriceAED = 0; // base + printing + vat (before processing)
-    let totalAED = 0;      // final charged (includes processing)
+const feeOpts = {
+  isInternational: !!body.isInternational,
+  isCurrencyConversion: !!body.isCurrencyConversion,
+};
 
-    if (!applyVat) {
-      // old behavior (no VAT)
-      processingFeeAED = calcProcessingFeeAED(baseAmountAED + printingFeeAED);
-      vatAED = 0;
-      totalPriceAED = Number((baseAmountAED + printingFeeAED).toFixed(2));
-      totalAED = Number((totalPriceAED + processingFeeAED).toFixed(2));
-    } else {
-      // 2-pass: VAT on (base + processingFee)
-      const fee1 = calcProcessingFeeAED(baseAmountAED + printingFeeAED);
-      const vat1 = calcVatAED(baseAmountAED + fee1);
+let processingFeeAED = 0;
+let vatAED = 0;
+let totalPriceAED = 0;
+let totalAED = 0;
 
-      const fee2 = calcProcessingFeeAED(baseAmountAED + printingFeeAED + vat1);
-      const vat2 = calcVatAED(baseAmountAED + fee2);
+if (!applyVat) {
+  processingFeeAED = calcStripeFees(baseAmountAED + printingFeeAED, feeOpts).stripeFee;
+  vatAED = 0;
 
-      processingFeeAED = fee2;
-      vatAED = vat2;
+  totalPriceAED = Number((baseAmountAED + printingFeeAED).toFixed(2));
+  totalAED = Number((totalPriceAED + processingFeeAED).toFixed(2));
+} else {
+  // Pass 1
+  const fee1 = calcStripeFees(baseAmountAED + printingFeeAED, feeOpts).stripeFee;
+  const vat1 = calcVatAED(baseAmountAED + printingFeeAED + fee1);
 
-      totalPriceAED = Number((baseAmountAED + printingFeeAED + vatAED).toFixed(2));
-      totalAED = Number((totalPriceAED + processingFeeAED).toFixed(2));
-    }
+  // Pass 2 (stabilize)
+  const fee2 = calcStripeFees(baseAmountAED + printingFeeAED + vat1, feeOpts).stripeFee;
+  const vat2 = calcVatAED(baseAmountAED + printingFeeAED + fee2);
+
+  processingFeeAED = fee2;
+  vatAED = vat2;
+
+  totalPriceAED = Number((baseAmountAED + printingFeeAED + vatAED).toFixed(2));
+  totalAED = Number((totalPriceAED + processingFeeAED).toFixed(2));
+}
+
 
     const amountSmallest = Math.round(totalAED * 100);
     const orderNumber = safeStr(body.requestId || body.orderNumber || generateOrderNumber()).trim();
