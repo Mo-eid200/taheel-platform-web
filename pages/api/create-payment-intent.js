@@ -14,6 +14,11 @@ import admin from "firebase-admin";
  * - ADDON: price & qty from catalog only
  * - SUBSCRIPTION: monthlyIncludedTxLimit resolved server-side if missing
  *
+ * ✅ VAT:
+ * - Apply VAT 5% ONLY for: subscription + addon (packages)
+ * - VAT is calculated on: (baseAmount + processingFee)  ✅ as requested
+ * - 2-pass to stabilize fee since fee depends on total
+ *
  * ✅ Webhook remains single-writer for:
  * - stripePaymentsProcessed
  * - companySubscriptions
@@ -23,7 +28,9 @@ import admin from "firebase-admin";
 
 if (!admin.apps.length) {
   try {
-    const sa = process.env.GOOGLE_SERVICE_ACCOUNT_KEY ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY) : null;
+    const sa = process.env.GOOGLE_SERVICE_ACCOUNT_KEY
+      ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY)
+      : null;
     if (sa && sa.private_key) {
       sa.private_key = sa.private_key.replace(/\\n/g, "\n");
       admin.initializeApp({ credential: admin.credential.cert(sa) });
@@ -229,6 +236,12 @@ function calcProcessingFeeAED(amountAED) {
   return Number(fee.toFixed(2));
 }
 
+// ✅ VAT 5%
+function calcVatAED(amountAED) {
+  const vat = safeNum(amountAED) * 0.05;
+  return Number(vat.toFixed(2));
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Method not allowed" });
 
@@ -346,12 +359,38 @@ export default async function handler(req, res) {
 
     if (!(baseAmountAED > 0)) return res.status(400).json({ ok: false, error: "Invalid base amount (0)" });
 
-    // ✅ processingFee ALWAYS present
-    const processingFeeAED = calcProcessingFeeAED(baseAmountAED + printingFeeAED);
+    // --------------------------------
+    // ✅ Fee + VAT logic
+    // --------------------------------
+    const applyVat = requestType === "subscription" || requestType === "addon";
 
-    const totalAED = Number((baseAmountAED + printingFeeAED + processingFeeAED).toFixed(2));
+    let processingFeeAED = 0;
+    let vatAED = 0;
+    let totalPriceAED = 0; // base + printing + vat (before processing)
+    let totalAED = 0;      // final charged (includes processing)
+
+    if (!applyVat) {
+      // old behavior (no VAT)
+      processingFeeAED = calcProcessingFeeAED(baseAmountAED + printingFeeAED);
+      vatAED = 0;
+      totalPriceAED = Number((baseAmountAED + printingFeeAED).toFixed(2));
+      totalAED = Number((totalPriceAED + processingFeeAED).toFixed(2));
+    } else {
+      // 2-pass: VAT on (base + processingFee)
+      const fee1 = calcProcessingFeeAED(baseAmountAED + printingFeeAED);
+      const vat1 = calcVatAED(baseAmountAED + fee1);
+
+      const fee2 = calcProcessingFeeAED(baseAmountAED + printingFeeAED + vat1);
+      const vat2 = calcVatAED(baseAmountAED + fee2);
+
+      processingFeeAED = fee2;
+      vatAED = vat2;
+
+      totalPriceAED = Number((baseAmountAED + printingFeeAED + vatAED).toFixed(2));
+      totalAED = Number((totalPriceAED + processingFeeAED).toFixed(2));
+    }
+
     const amountSmallest = Math.round(totalAED * 100);
-
     const orderNumber = safeStr(body.requestId || body.orderNumber || generateOrderNumber()).trim();
 
     // attachments safe
@@ -390,6 +429,8 @@ export default async function handler(req, res) {
         // breakdown
         baseAmountAED: String(baseAmountAED.toFixed(2)),
         printingFee: String(printingFeeAED.toFixed(2)),
+        vatAED: String(vatAED.toFixed(2)),
+        totalPriceAED: String(totalPriceAED.toFixed(2)),
         processingFee: String(processingFeeAED.toFixed(2)),
         totalAED: String(totalAED.toFixed(2)),
 
@@ -440,6 +481,8 @@ export default async function handler(req, res) {
 
       baseAmountAED,
       printingFee: printingFeeAED,
+      vat: vatAED,
+      totalPriceAED,
       processingFee: processingFeeAED,
       totalAED,
 
@@ -490,10 +533,24 @@ export default async function handler(req, res) {
       orderNumber,
 
       processingFee: processingFeeAED,
+      vat: vatAED,
+      totalPrice: totalPriceAED,
       finalPrice: totalAED,
-      breakdown: { baseAmountAED, printingFeeAED, processingFeeAED, totalAED },
 
-      addon: requestType === "addon" ? { addonKey: addonKeyFromBody, qty: resolvedAddonQty, title: addonDoc?.title || null } : null,
+      breakdown: {
+        baseAmountAED,
+        printingFeeAED,
+        vatAED,
+        totalPriceAED,
+        processingFeeAED,
+        totalAED,
+      },
+
+      addon:
+        requestType === "addon"
+          ? { addonKey: addonKeyFromBody, qty: resolvedAddonQty, title: addonDoc?.title || null }
+          : null,
+
       subscription:
         requestType === "subscription"
           ? {
