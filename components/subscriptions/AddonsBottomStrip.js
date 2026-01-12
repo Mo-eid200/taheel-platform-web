@@ -61,6 +61,55 @@ const THEMES = [
   },
 ];
 
+// 🎗️ Corner ribbons
+const RIBBONS = [
+  { bg: "from-emerald-300 via-sky-400 to-indigo-500", text: "text-emerald-950" },
+  { bg: "from-sky-300 via-indigo-400 to-fuchsia-500", text: "text-sky-950" },
+  { bg: "from-violet-300 via-fuchsia-400 to-amber-400", text: "text-violet-950" },
+  { bg: "from-amber-300 via-orange-400 to-rose-500", text: "text-amber-950" },
+];
+
+const POPULAR_RIBBON = {
+  bg: "from-yellow-300 via-amber-400 to-orange-500",
+  text: "text-black",
+};
+
+function Ribbon({ lang, isPopular, palette, dir }) {
+  const isAr = lang === "ar";
+  const sideClass = isAr ? "left-0" : "right-0";
+  const translateClass = isAr ? "-translate-x-10" : "translate-x-10";
+
+  return (
+    <div className={cn("absolute top-0 z-20", sideClass)} dir={dir}>
+      <div
+        className={cn(
+          "select-none",
+          translateClass,
+          "-translate-y-2 rotate-45",
+          "px-14 py-2",
+          "bg-gradient-to-r",
+          palette.bg,
+          "shadow-lg shadow-black/25",
+          "border border-white/20"
+        )}
+      >
+        <div className={cn("flex items-center gap-2 text-[11px] font-black tracking-wide", palette.text)}>
+          {isPopular ? <BadgeCheck className="w-4 h-4" /> : null}
+          <span>
+            {isPopular
+              ? isAr
+                ? "الأكثر طلبًا"
+                : "POPULAR"
+              : isAr
+              ? "إضافة"
+              : "ADD-ON"}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CompanyAddonsSection({
   lang = "ar",
   addons = [],
@@ -130,6 +179,8 @@ export default function CompanyAddonsSection({
             const price = Number(a?.price || 0);
             const title = pickText(a?.title, lang);
 
+            const palette = a?.popular ? POPULAR_RIBBON : RIBBONS[idx % RIBBONS.length];
+
             return (
               <motion.div
                 key={a?.id || a?.addonKey || idx}
@@ -137,12 +188,16 @@ export default function CompanyAddonsSection({
                 transition={{ type: "spring", stiffness: 260, damping: 18 }}
                 className={cn(
                   "relative rounded-3xl overflow-hidden p-5 backdrop-blur-xl",
-                  "border bg-white/6",
+                  "border",
                   t.border,
                   "ring-1",
-                  t.ring
+                  t.ring,
+                  t.bg
                 )}
               >
+                {/* Corner Ribbon */}
+                <Ribbon lang={lang} dir={dir} isPopular={!!a?.popular} palette={palette} />
+
                 {/* glow */}
                 <div
                   className="pointer-events-none absolute -inset-1 opacity-40"
@@ -156,7 +211,7 @@ export default function CompanyAddonsSection({
                     "blur-2xl"
                   )}
                   style={{
-                    background: `linear-gradient(90deg, ${"rgba(0,0,0,0)"}, ${"rgba(0,0,0,0)"})`,
+                    background: `linear-gradient(90deg, rgba(0,0,0,0), rgba(0,0,0,0))`,
                   }}
                 />
                 <div
@@ -169,13 +224,18 @@ export default function CompanyAddonsSection({
                   }}
                 />
 
-                {/* top area */}
+                {/* content */}
                 <div className="relative">
                   <div className={cn("flex items-start justify-between gap-3", lang === "ar" && "flex-row-reverse")}>
                     <div className={cn("min-w-0", lang === "ar" ? "text-right" : "text-left")}>
                       <div className="text-white font-extrabold truncate">{title}</div>
 
-                      <div className={cn("mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full border text-[12px] font-extrabold", t.chip)}>
+                      <div
+                        className={cn(
+                          "mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full border text-[12px] font-extrabold",
+                          t.chip
+                        )}
+                      >
                         <span>{lang === "ar" ? "معاملات" : "TX"}</span>
                         <span className="text-white">•</span>
                         <span>{qty}</span>
@@ -183,17 +243,6 @@ export default function CompanyAddonsSection({
                     </div>
 
                     <div className={cn("flex flex-col items-end gap-2", lang === "ar" && "items-start")}>
-                      {a?.popular ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-white text-black border border-white/60">
-                          <BadgeCheck className="w-4 h-4" />
-                          {lang === "ar" ? "الأكثر طلبًا" : "Popular"}
-                        </span>
-                      ) : (
-                        <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-black/30 text-white/70 border border-white/10">
-                          Add-on
-                        </span>
-                      )}
-
                       <div className={cn("w-10 h-10 rounded-2xl border flex items-center justify-center", t.iconBg)}>
                         <Zap className="w-5 h-5 text-white/90" />
                       </div>
@@ -203,9 +252,7 @@ export default function CompanyAddonsSection({
                   {/* price */}
                   <div className={cn("mt-5 flex items-end justify-between", lang === "ar" && "flex-row-reverse")}>
                     <div className="leading-none">
-                      <div className="text-white/70 text-[12px] font-bold">
-                        {lang === "ar" ? "السعر" : "Price"}
-                      </div>
+                      <div className="text-white/70 text-[12px] font-bold">{lang === "ar" ? "السعر" : "Price"}</div>
                       <div className="text-white text-4xl font-black tracking-tight">{money(price)}</div>
                     </div>
                     <div className="text-white/60 text-sm font-bold pb-1">{lang === "ar" ? "درهم" : "AED"}</div>
@@ -213,9 +260,7 @@ export default function CompanyAddonsSection({
 
                   {/* footer note */}
                   <div className={cn("mt-3 text-[12px] text-white/60 font-semibold", lang === "ar" ? "text-right" : "text-left")}>
-                    {lang === "ar"
-                      ? "تشمل: طباعة + ضريبة + معالجة"
-                      : "Includes: printing + VAT + processing"}
+                    {lang === "ar" ? "تشمل: طباعة + ضريبة + معالجة" : "Includes: printing + VAT + processing"}
                   </div>
 
                   {/* CTA */}
