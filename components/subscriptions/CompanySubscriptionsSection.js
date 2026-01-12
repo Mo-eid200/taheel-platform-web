@@ -7,11 +7,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import CompanyPlanCard from "./CompanyPlanCard";
 import AddonsBottomStrip from "./AddonsBottomStrip";
 
-// ✅ لو Stripe API عندك بيتوقع amount بالـ fils/cents (AED * 100) خليها true
-const SEND_AMOUNT_IN_SMALLEST_UNIT = false;
-
-// ✅ لو عايز تفصل بين دفع الاشتراكات والخدمات (اختياري)
-const PAYMENT_STORAGE_KEY = "paymentData"; // أو: "paymentData_subscription"
+// ✅ Storage key used by /payment/service page
+const PAYMENT_STORAGE_KEY = "paymentData";
 
 function toNumberSafe(v) {
   const n = Number(v);
@@ -64,13 +61,13 @@ export default function CompanySubscriptionsSection({
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const [submitting, setSubmitting] = useState(false); // ✅ منع دبل كليك
-  const [clientDocId, setClientDocId] = useState(""); // ✅ COM-...
+  const [submitting, setSubmitting] = useState(false);
+  const [clientDocId, setClientDocId] = useState("");
 
   const [addons, setAddons] = useState([]);
   const [addonsLoading, setAddonsLoading] = useState(true);
 
-  // ✅ Load Addons Catalog (fix sorting + safe)
+  // ✅ Load Addons Catalog
   useEffect(() => {
     let alive = true;
 
@@ -80,9 +77,9 @@ export default function CompanySubscriptionsSection({
         const snap = await getDocs(collection(firestore, "companyAddonsCatalog"));
         const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
+        // ✅ active only + popular first
         const filtered = arr
           .filter((a) => a?.isActive !== false)
-          // ✅ popular first (TRUE should come first)
           .sort((a, b) => (b?.popular === true ? 1 : 0) - (a?.popular === true ? 1 : 0))
           .reverse();
 
@@ -101,7 +98,7 @@ export default function CompanySubscriptionsSection({
     };
   }, []);
 
-  // ✅ Resolve clientDocId once (URL first, then usersByUid mapping)
+  // ✅ Resolve clientDocId once
   useEffect(() => {
     let alive = true;
 
@@ -172,7 +169,7 @@ export default function CompanySubscriptionsSection({
       subscriptionName,
       subscriptionDays,
     }) => {
-      // ✅ لو الأب متحكم
+      // ✅ external callback override
       if (typeof onSubscribe === "function") {
         return onSubscribe({
           planKey,
@@ -222,44 +219,33 @@ export default function CompanySubscriptionsSection({
         const days = calcDays(subscriptionDays, monthsShown);
 
         const subName =
-          subscriptionName?.trim?.() || (lang === "ar" ? `اشتراك ${planKey}` : `Subscription ${planKey}`);
+          subscriptionName?.trim?.() ||
+          (lang === "ar" ? `اشتراك ${planKey}` : `Subscription ${planKey}`);
 
-        const amountForServer = SEND_AMOUNT_IN_SMALLEST_UNIT ? Math.round(basePrice * 100) : basePrice;
-
+        // ✅ MATCH SERVER: amountAED + subscription metadata
         const payload = {
-          amount: amountForServer,
-          serviceId: `subscription_${planKey}`,
-          serviceName: subName,
+          requestType: "subscription",
+          amountAED: basePrice,
 
           customerId: finalClientDocId,
-          userEmail: user.email,
           clientType: "company",
-
-          attachments: {},
-          providers: [],
-          requestType: "subscription",
-
-          coinsUsed: 0,
-          coinsGiven: 0,
-          printingFee: 0,
-          vat: 0,
-          processingFee: 0,
-
-          assignedTo: "",
-          assignedToName: "",
-          status: "pending",
-          employeeData: {},
+          userEmail: user.email,
+          lang,
 
           planKey,
           pricingKey,
+
           monthsShown,
           paidMonths,
           bonus,
-          isOffer,
-          isMost,
+          isOffer: !!isOffer,
+          isMost: !!isMost,
+
           subscriptionDays: days,
-          subscriptionName: subName,
-          lang,
+          giftDays: 0,
+
+          serviceId: `subscription_${planKey}`,
+          serviceName: subName,
         };
 
         const r = await fetch("/api/create-payment-intent", {
@@ -271,13 +257,11 @@ export default function CompanySubscriptionsSection({
         const data = await r.json().catch(() => ({}));
         if (!r.ok || !data?.ok) throw new Error(data?.error || "Failed to create payment intent");
 
-        const processingFeeFromServer = toNumberSafe(data?.processingFee ?? 0);
-        const finalFromServer = toNumberSafe(data?.finalPrice);
-
-        const processingFeeSafe = Number.isFinite(processingFeeFromServer) ? processingFeeFromServer : 0;
-
-        const totalBefore = basePrice;
-        const final = Number.isFinite(finalFromServer) ? finalFromServer : totalBefore + processingFeeSafe;
+        // ✅ ALWAYS rely on server breakdown
+        const breakdown = data?.breakdown || {};
+        const totalBefore = Number(breakdown.baseAmountAED ?? basePrice);
+        const processingFeeSafe = Number(breakdown.processingFeeAED ?? data?.processingFee ?? 0);
+        const final = Number(breakdown.totalAED ?? data?.finalPrice ?? 0);
 
         const paymentDataForUI = {
           lang,
@@ -289,6 +273,7 @@ export default function CompanySubscriptionsSection({
           serviceId: `subscription_${planKey}`,
           serviceName: subName,
           subscriptionName: subName,
+
           planKey,
           pricingKey,
           subscriptionDays: days,
@@ -302,6 +287,7 @@ export default function CompanySubscriptionsSection({
           coinDiscount: 0,
           processingFee: processingFeeSafe,
 
+          breakdown: data?.breakdown || null,
           userEmail: user.email,
         };
 
@@ -318,7 +304,7 @@ export default function CompanySubscriptionsSection({
   );
 
   // =========================
-  // ✅ Buy Addon (Fix to match your DB shape)
+  // ✅ Buy Addon (SERVER resolves price/qty from catalog)
   // =========================
   const handleBuyAddon = useCallback(
     async (addon) => {
@@ -333,11 +319,11 @@ export default function CompanySubscriptionsSection({
           return;
         }
 
-        // ✅ Resolve COM-...
         let finalClientDocId = (clientDocId || "").trim();
         if (!finalClientDocId) {
           finalClientDocId = await resolveClientDocId({ searchParams, uid: user.uid });
         }
+
         if (!finalClientDocId) {
           alert(
             lang === "ar"
@@ -353,20 +339,6 @@ export default function CompanySubscriptionsSection({
           return;
         }
 
-        const type = String(addon?.type || "bundle").toLowerCase().trim(); // bundle | emergency
-        const qty = Number(addon?.qty || 0) || 0;
-
-        // ✅ Price: bundle uses price, emergency uses priceMin (for now)
-        let basePrice =
-          type === "emergency"
-            ? toNumberSafe(addon?.priceMin ?? addon?.price ?? 0)
-            : toNumberSafe(addon?.price ?? 0);
-
-        if (!Number.isFinite(basePrice) || basePrice <= 0) {
-          alert(lang === "ar" ? "سعر الإضافة غير صالح" : "Invalid addon price");
-          return;
-        }
-
         const titleAr = addon?.title?.ar;
         const titleEn = addon?.title?.en;
 
@@ -376,43 +348,18 @@ export default function CompanySubscriptionsSection({
           titleEn ||
           (lang === "ar" ? "إضافة معاملات" : "Transaction Add-on");
 
-        const amountForServer = SEND_AMOUNT_IN_SMALLEST_UNIT ? Math.round(basePrice * 100) : basePrice;
-
-        // ✅ IMPORTANT: keep payload small + stable for webhook
+        // ✅ MATCH SERVER: addonKey only (server reads catalog: price + qty)
         const payload = {
-          amount: amountForServer,
-          serviceId: `addon_${addonKey}`,
-          serviceName: String(addonName),
-
-          customerId: finalClientDocId,
-          userEmail: user.email,
-          clientType: "company",
-
-          attachments: {},
-          providers: [],
           requestType: "addon",
 
-          coinsUsed: 0,
-          coinsGiven: 0,
-          printingFee: 0,
-          vat: 0,
-          processingFee: 0,
-
-          assignedTo: "",
-          assignedToName: "",
-          status: "pending",
-          employeeData: {},
-
-          // ✅ Add-on metadata (for credit)
-          addonKey,
-          addonType: type,
-          addonQty: qty,
-
-          // ✅ Emergency range (optional helpful)
-          priceMin: Number(addon?.priceMin || 0) || 0,
-          priceMax: Number(addon?.priceMax || 0) || 0,
-
+          customerId: finalClientDocId,
+          clientType: "company",
+          userEmail: user.email,
           lang,
+
+          addonKey,
+          serviceId: `addon_${addonKey}`,
+          serviceName: String(addonName),
         };
 
         const r = await fetch("/api/create-payment-intent", {
@@ -424,13 +371,11 @@ export default function CompanySubscriptionsSection({
         const data = await r.json().catch(() => ({}));
         if (!r.ok || !data?.ok) throw new Error(data?.error || "Failed to create payment intent");
 
-        const processingFeeFromServer = toNumberSafe(data?.processingFee ?? 0);
-        const finalFromServer = toNumberSafe(data?.finalPrice);
-
-        const processingFeeSafe = Number.isFinite(processingFeeFromServer) ? processingFeeFromServer : 0;
-
-        const totalBefore = basePrice;
-        const final = Number.isFinite(finalFromServer) ? finalFromServer : totalBefore + processingFeeSafe;
+        // ✅ ALWAYS rely on server breakdown
+        const breakdown = data?.breakdown || {};
+        const totalBefore = Number(breakdown.baseAmountAED ?? 0);
+        const processingFeeSafe = Number(breakdown.processingFeeAED ?? data?.processingFee ?? 0);
+        const final = Number(breakdown.totalAED ?? data?.finalPrice ?? 0);
 
         const paymentDataForUI = {
           lang,
@@ -443,8 +388,8 @@ export default function CompanySubscriptionsSection({
           serviceName: String(addonName),
 
           addonKey,
-          addonType: type,
-          addonQty: qty,
+          addonType: String(data?.addon?.type || addon?.type || "bundle"),
+          addonQty: Number(data?.addon?.qty || addon?.qty || 0),
 
           price: totalBefore,
           totalPrice: totalBefore,
@@ -455,6 +400,7 @@ export default function CompanySubscriptionsSection({
           coinDiscount: 0,
           processingFee: processingFeeSafe,
 
+          breakdown: data?.breakdown || null,
           userEmail: user.email,
         };
 
@@ -502,7 +448,6 @@ export default function CompanySubscriptionsSection({
         ))}
       </div>
 
-      {/* ✅ Add-ons Bottom Strip */}
       <AddonsBottomStrip
         lang={lang}
         darkMode={darkMode}

@@ -4,21 +4,17 @@ import Stripe from "stripe";
 import admin from "firebase-admin";
 
 /**
- * Confirm a Stripe PaymentIntent and sync request to "paid" WITHOUT touching:
+ * Confirm Stripe PaymentIntent succeeded, then mark request as "paid".
+ * 🚫 Does NOT touch:
  * - stripePaymentsProcessed
  * - companySubscriptions
- * - monthlyTxCredits
- *
- * ✅ Safe alongside webhook:
- * - webhook remains the single writer of processed/subscriptions/monthlyTxCredits/addons carry-over logic.
+ * - users.monthlyTxCredits
+ * ✅ Webhook remains single-writer for credits/subscriptions/carry-over.
  */
 
 if (!admin.apps.length) {
   try {
-    const sa = process.env.GOOGLE_SERVICE_ACCOUNT_KEY
-      ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY)
-      : null;
-
+    const sa = process.env.GOOGLE_SERVICE_ACCOUNT_KEY ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY) : null;
     if (sa && sa.private_key) {
       sa.private_key = sa.private_key.replace(/\\n/g, "\n");
       admin.initializeApp({ credential: admin.credential.cert(sa) });
@@ -29,9 +25,7 @@ if (!admin.apps.length) {
     console.error("Failed to initialize firebase-admin:", e);
     try {
       admin.initializeApp();
-    } catch {
-      /* ignore */
-    }
+    } catch {}
   }
 }
 
@@ -65,20 +59,19 @@ export default async function handler(req, res) {
     const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
     if (!pi) return res.status(400).json({ ok: false, error: "PaymentIntent not found" });
 
-    if (normLower(pi.status) !== "succeeded") {
+    const piStatus = normLower(pi.status);
+    if (piStatus !== "succeeded") {
       return res.status(400).json({ ok: false, error: "PaymentIntent not succeeded", status: pi.status });
     }
 
-    // 2) Metadata
+    // 2) Amount received
+    const amountSmallest = safeNum(pi.amount_received ?? pi.amount ?? 0);
+    const amountAED = Number((amountSmallest / 100).toFixed(2));
+
+    // 3) Resolve request id
     const md = pi.metadata || {};
     let reqId = providedRequestId || md.requestId || md.orderNumber || null;
 
-    const amountSmallest = pi.amount_received ?? pi.amount ?? 0;
-    const amountAED = Number((amountSmallest / 100).toFixed(2));
-
-    const processingFeeMeta = safeNum(md.processingFee ?? md.processing_fee ?? md.processing_fee_value ?? 0);
-
-    // 3) Find request
     let requestRef = null;
     let requestSnap = null;
 
@@ -95,11 +88,10 @@ export default async function handler(req, res) {
     }
 
     if (!requestRef) {
-      // لا نعمل processed ولا أي شيء — نخلي الويبهوك يظبط
+      // webhook will still handle credits/subscriptions; we do nothing else
       return res.status(200).json({ ok: true, warning: "request_not_found", paymentIntentId });
     }
 
-    // 4) If already paid -> ok
     if (requestSnap && requestSnap.exists) {
       const rdata = requestSnap.data() || {};
       if (normLower(rdata.status) === "paid") {
@@ -107,7 +99,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // 5) Update request to paid (best-effort) — WITHOUT processed/subscriptions/monthlyTxCredits
+    // 4) Transactional update -> paid
     await db.runTransaction(async (tx) => {
       const r = await tx.get(requestRef);
       if (!r.exists) return;
@@ -118,47 +110,50 @@ export default async function handler(req, res) {
       const history = Array.isArray(rdata.statusHistory) ? [...rdata.statusHistory] : [];
       history.push({ status: "paid", timestamp: nowISO(), updatedBy: "server-confirmPayment" });
 
-      // ---- infer type fields from metadata (optional consistency only) ----
-      const requestTypeMeta = normLower(
-        md.requestType ||
-          (md.serviceName && normLower(md.serviceName).includes("wallet") ? "wallet_recharge" : "service")
-      );
+      // DO NOT overwrite requestType if it already exists
+      const existingType = normLower(rdata.requestType || "");
+      const mdType = normLower(md.requestType || "");
+      const finalType = existingType || mdType || "service";
 
-      const addonKey = safeStr(md.addonKey || md.addon_id || md.addonId || "").trim();
-      const addonQty = safeNum(md.addonQty || md.addon_qty || 0);
+      // Only enrich addon/subscription fields if request already is that type OR metadata explicitly indicates it
+      const addonKey = safeStr(md.addonKey || "").trim();
+      const addonQty = safeNum(md.addonQty || 0);
       const planKey = safeStr(md.planKey || "").trim();
       const pricingKey = safeStr(md.pricingKey || "").trim();
 
-      const isAddon = requestTypeMeta === "addon" || addonKey.length > 0;
-      const isSubscription = requestTypeMeta === "subscription" || planKey.length > 0;
-
-      const extra = {};
-      if (isAddon) {
-        extra.requestType = "addon";
-        extra.addon = {
-          ...(typeof rdata.addon === "object" && rdata.addon ? rdata.addon : {}),
-          addonKey,
-          addonQty,
-        };
-      } else if (isSubscription) {
-        extra.requestType = "subscription";
-        extra.planKey = planKey;
-        extra.pricingKey = pricingKey;
-      } else if (requestTypeMeta) {
-        // keep whatever metadata says, only if it exists
-        extra.requestType = requestTypeMeta;
-      }
-
-      tx.update(requestRef, {
+      const updates = {
         lastUpdated: nowISO(),
         status: "paid",
         paidAmount: amountAED,
         paidAt: nowISO(),
         paymentIntentId,
-        processingFee: typeof rdata.processingFee !== "undefined" ? rdata.processingFee : processingFeeMeta || 0,
         statusHistory: history,
-        ...extra,
-      });
+        requestType: finalType,
+      };
+
+      // keep processingFee from request if exists, else fallback metadata
+      if (typeof rdata.processingFee === "undefined") {
+        updates.processingFee = safeNum(md.processingFee ?? 0);
+      }
+
+      if (finalType === "addon" && addonKey) {
+        updates.addon = {
+          ...(typeof rdata.addon === "object" && rdata.addon ? rdata.addon : {}),
+          addonKey,
+          qty: addonQty,
+        };
+      }
+
+      if (finalType === "subscription" && planKey) {
+        updates.subscriptionMeta = {
+          ...(typeof rdata.subscriptionMeta === "object" && rdata.subscriptionMeta ? rdata.subscriptionMeta : {}),
+          planKey,
+          pricingKey,
+          monthlyIncludedTxLimit: safeNum(md.monthlyIncludedTxLimit ?? 0),
+        };
+      }
+
+      tx.update(requestRef, updates);
     });
 
     return res.status(200).json({ ok: true, orderNumber: requestRef.id, paymentIntentId });
