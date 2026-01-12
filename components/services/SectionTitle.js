@@ -66,7 +66,6 @@ export default function ServiceSection({
     let mounted = true;
 
     async function loadSubscription() {
-      // لو مش شركة أو مفيش IDs: صفّر كل حاجة
       if (!isCompany || candidateIds.length === 0) {
         if (mounted) setSubInfo({ ...EMPTY_SUB, loading: false });
         return;
@@ -107,8 +106,7 @@ export default function ServiceSection({
           (found.endAtISO ? Date.parse(found.endAtISO) : 0);
 
         const now = Date.now();
-        const withinWindow =
-          (!startMs || now >= startMs) && (!endMs || now < endMs);
+        const withinWindow = (!startMs || now >= startMs) && (!endMs || now < endMs);
 
         const active = (isActiveFlag || status === "active") && withinWindow;
 
@@ -134,7 +132,7 @@ export default function ServiceSection({
     return () => {
       mounted = false;
     };
-  }, [isCompany, candidateKey]); // ✅ أقوى من candidateIds كـ dependency
+  }, [isCompany, candidateKey]);
 
   const subscriptionActive = isCompany && Boolean(subInfo.active);
 
@@ -156,25 +154,40 @@ export default function ServiceSection({
         {filteredServices.map((srv, i) => (
           <ServiceProfileCard
             key={(srv.serviceId || srv.name || "srv") + "-" + i}
+
+            // ✅ مهم: عشان زر "تقدم الآن" يقفل لو الخدمة مش مفعلة
+            active={typeof srv.active === "boolean" ? srv.active : true}
+
             category={category}
             name={srv.name}
             name_en={srv.name_en}
             description={srv.description}
             description_en={srv.description_en}
+
+            // ✅ price = الرسوم الحكومية
             price={srv.price}
+
+            // ✅ printingFee = رسوم الطباعة
             printingFee={srv.printingFee}
-            tax={srv.tax}
+
+            // ❌ شيل tax: الكارت بيحسب 5% على الطباعة تلقائيًا
+            // tax={srv.tax}
+
+            // clientPrice موجود بس الحساب النهائي داخل الكارت على القواعد المتفق عليها
             clientPrice={srv.clientPrice}
+
             duration={srv.duration}
             requiredDocuments={srv.requiredDocuments || srv.documents || []}
             requireUpload={srv.requireUpload}
             coins={srv.coins || 0}
             lang={lang}
+
             userId={client?.userId}
             userWallet={client?.walletBalance || 0}
             userCoins={client?.coins || 0}
             userEmail={client?.email}
             customerId={client?.customerId}
+
             longDescription={srv.longDescription}
             longDescription_en={srv.longDescription_en}
             onPaid={onPaid}
@@ -183,6 +196,8 @@ export default function ServiceSection({
             repeatable={srv.repeatable}
             allowPaperCount={srv.allowPaperCount}
             provider={srv.provider}
+
+            // ✅ الاشتراك: لو Active => الطباعة والضرائب = 0 داخل الكارت
             subscriptionActive={subscriptionActive}
           />
         ))}

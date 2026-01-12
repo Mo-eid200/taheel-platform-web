@@ -552,7 +552,7 @@ export default function ServiceProfileCard({
             <div className="w-full text-center text-[11px] font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg py-1 mb-1">
               <FaCrown className="inline mr-2 text-emerald-600" />
               {lang === "ar"
-                ? "اشتراك فعّال: الطباعة والضرائب مجانًا"
+                ? "اشتراك فعّال: بدون رسوم الطباعة والضرائب "
                 : "Active subscription: Printing & tax waived"}
             </div>
           )}
