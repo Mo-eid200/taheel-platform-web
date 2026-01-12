@@ -2,27 +2,64 @@
 
 import React, { useMemo } from "react";
 import { motion } from "framer-motion";
-import { Zap, Sparkles } from "lucide-react";
+import { Zap, Sparkles, BadgeCheck } from "lucide-react";
 
 function cn(...a) {
   return a.filter(Boolean).join(" ");
 }
-
 function isPlainObject(v) {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
-
 function pickText(v, lang) {
   if (v == null) return "";
   if (typeof v === "string" || typeof v === "number") return String(v);
   if (isPlainObject(v)) return String(lang === "ar" ? v.ar || "" : v.en || "");
   return "";
 }
-
 function money(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n.toLocaleString() : "";
 }
+
+// 🎨 Color themes for cards (cycled)
+const THEMES = [
+  {
+    ring: "ring-emerald-400/25",
+    border: "border-emerald-300/15",
+    bg: "bg-gradient-to-br from-emerald-500/14 via-white/6 to-sky-500/10",
+    glow: "from-emerald-400/25 via-sky-400/20 to-purple-500/15",
+    chip: "bg-emerald-400/15 text-emerald-100 border-emerald-300/20",
+    iconBg: "bg-emerald-400/12 border-emerald-300/20",
+    btn: "from-emerald-600 via-teal-600 to-sky-700",
+  },
+  {
+    ring: "ring-sky-400/25",
+    border: "border-sky-300/15",
+    bg: "bg-gradient-to-br from-sky-500/14 via-white/6 to-indigo-500/12",
+    glow: "from-sky-400/25 via-indigo-400/18 to-fuchsia-500/14",
+    chip: "bg-sky-400/15 text-sky-100 border-sky-300/20",
+    iconBg: "bg-sky-400/12 border-sky-300/20",
+    btn: "from-sky-600 via-indigo-600 to-fuchsia-700",
+  },
+  {
+    ring: "ring-violet-400/25",
+    border: "border-violet-300/15",
+    bg: "bg-gradient-to-br from-violet-500/14 via-white/6 to-amber-500/10",
+    glow: "from-violet-400/22 via-fuchsia-400/18 to-amber-400/14",
+    chip: "bg-violet-400/15 text-violet-100 border-violet-300/20",
+    iconBg: "bg-violet-400/12 border-violet-300/20",
+    btn: "from-violet-600 via-fuchsia-600 to-amber-600",
+  },
+  {
+    ring: "ring-amber-400/25",
+    border: "border-amber-300/15",
+    bg: "bg-gradient-to-br from-amber-500/14 via-white/6 to-rose-500/10",
+    glow: "from-amber-400/22 via-rose-400/18 to-purple-400/14",
+    chip: "bg-amber-400/15 text-amber-100 border-amber-300/20",
+    iconBg: "bg-amber-400/12 border-amber-300/20",
+    btn: "from-amber-600 via-orange-600 to-rose-700",
+  },
+];
 
 export default function CompanyAddonsSection({
   lang = "ar",
@@ -36,11 +73,17 @@ export default function CompanyAddonsSection({
   const bundles = useMemo(() => {
     const list = Array.isArray(addons) ? addons : [];
 
-    // ✅ keep only bundles (remove emergency completely)
+    // ✅ keep bundles only + sort from smaller to larger (qty then price)
     return list
       .filter((a) => String(a?.type || "").toLowerCase() === "bundle")
-      // ✅ popular first
-      .sort((a, b) => (b?.popular === true) - (a?.popular === true));
+      .sort((a, b) => {
+        const qa = Number(a?.qty || 0);
+        const qb = Number(b?.qty || 0);
+        if (qa !== qb) return qa - qb;
+        const pa = Number(a?.price || 0);
+        const pb = Number(b?.price || 0);
+        return pa - pb;
+      });
   }, [addons]);
 
   return (
@@ -58,8 +101,8 @@ export default function CompanyAddonsSection({
             </div>
             <div className="text-[12px] text-white/60 font-semibold">
               {lang === "ar"
-                ? "اشتري معاملات إضافية… الرصيد يتضاف تلقائيًا بعد الدفع"
-                : "Buy extra transactions… credits are added automatically after payment"}
+                ? "اختر الباقة المناسبة… الرصيد يضاف تلقائيًا بعد الدفع"
+                : "Pick the right bundle… credits are added automatically after payment"}
             </div>
           </div>
         </div>
@@ -69,88 +112,134 @@ export default function CompanyAddonsSection({
         ) : null}
       </div>
 
-      {/* Bundles Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {loading ? (
-          Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="rounded-3xl border border-white/10 bg-white/5 p-4 animate-pulse">
-              <div className="h-3 w-40 bg-white/10 rounded mb-2" />
-              <div className="h-2 w-24 bg-white/10 rounded mb-4" />
-              <div className="h-8 w-24 bg-white/10 rounded" />
-              <div className="h-10 w-full bg-white/10 rounded-2xl mt-4" />
+          Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="rounded-3xl border border-white/10 bg-white/5 p-5 animate-pulse">
+              <div className="h-3 w-44 bg-white/10 rounded mb-2" />
+              <div className="h-2 w-28 bg-white/10 rounded mb-5" />
+              <div className="h-10 w-32 bg-white/10 rounded-2xl mb-4" />
+              <div className="h-12 w-full bg-white/10 rounded-2xl" />
             </div>
           ))
         ) : bundles.length ? (
-          bundles.map((a) => (
-            <motion.div
-              key={a?.id || a?.addonKey}
-              whileHover={{ y: -3 }}
-              className="rounded-3xl border border-white/12 bg-white/6 backdrop-blur-xl p-4 overflow-hidden relative"
-            >
-              {/* glow */}
-              <div
-                className="absolute -inset-[2px] opacity-0 hover:opacity-60 transition-opacity duration-300"
-                style={{
-                  background:
-                    "linear-gradient(90deg, rgba(56,189,248,0.18), rgba(168,85,247,0.16), rgba(16,185,129,0.14))",
-                  filter: "blur(16px)",
-                }}
-              />
+          bundles.map((a, idx) => {
+            const t = THEMES[idx % THEMES.length];
+            const qty = Number(a?.qty || 0);
+            const price = Number(a?.price || 0);
+            const title = pickText(a?.title, lang);
 
-              <div className="relative">
-                <div className={cn("flex items-start justify-between gap-2", lang === "ar" && "flex-row-reverse")}>
-                  <div className={cn("min-w-0", lang === "ar" ? "text-right" : "text-left")}>
-                    <div className="text-white font-extrabold truncate">{pickText(a?.title, lang)}</div>
-                    <div className="text-[12px] text-white/60 font-semibold mt-1">
-                      {lang === "ar"
-                        ? `${Number(a?.qty || 0)} معاملات إضافية`
-                        : `${Number(a?.qty || 0)} extra transactions`}
+            return (
+              <motion.div
+                key={a?.id || a?.addonKey || idx}
+                whileHover={{ y: -4 }}
+                transition={{ type: "spring", stiffness: 260, damping: 18 }}
+                className={cn(
+                  "relative rounded-3xl overflow-hidden p-5 backdrop-blur-xl",
+                  "border bg-white/6",
+                  t.border,
+                  "ring-1",
+                  t.ring
+                )}
+              >
+                {/* glow */}
+                <div
+                  className="pointer-events-none absolute -inset-1 opacity-40"
+                  style={{
+                    background: `linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01))`,
+                  }}
+                />
+                <div
+                  className={cn(
+                    "pointer-events-none absolute -inset-[2px] opacity-0 hover:opacity-80 transition-opacity duration-300",
+                    "blur-2xl"
+                  )}
+                  style={{
+                    background: `linear-gradient(90deg, ${"rgba(0,0,0,0)"}, ${"rgba(0,0,0,0)"})`,
+                  }}
+                />
+                <div
+                  className={cn("pointer-events-none absolute -inset-[2px] opacity-0 hover:opacity-70 transition-opacity duration-300")}
+                  style={{
+                    background: `linear-gradient(90deg, ${
+                      t.glow.includes("emerald") ? "rgba(16,185,129,0.22)" : "rgba(56,189,248,0.22)"
+                    }, rgba(168,85,247,0.16), rgba(245,158,11,0.12))`,
+                    filter: "blur(18px)",
+                  }}
+                />
+
+                {/* top area */}
+                <div className="relative">
+                  <div className={cn("flex items-start justify-between gap-3", lang === "ar" && "flex-row-reverse")}>
+                    <div className={cn("min-w-0", lang === "ar" ? "text-right" : "text-left")}>
+                      <div className="text-white font-extrabold truncate">{title}</div>
+
+                      <div className={cn("mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full border text-[12px] font-extrabold", t.chip)}>
+                        <span>{lang === "ar" ? "معاملات" : "TX"}</span>
+                        <span className="text-white">•</span>
+                        <span>{qty}</span>
+                      </div>
+                    </div>
+
+                    <div className={cn("flex flex-col items-end gap-2", lang === "ar" && "items-start")}>
+                      {a?.popular ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-white text-black border border-white/60">
+                          <BadgeCheck className="w-4 h-4" />
+                          {lang === "ar" ? "الأكثر طلبًا" : "Popular"}
+                        </span>
+                      ) : (
+                        <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-black/30 text-white/70 border border-white/10">
+                          Add-on
+                        </span>
+                      )}
+
+                      <div className={cn("w-10 h-10 rounded-2xl border flex items-center justify-center", t.iconBg)}>
+                        <Zap className="w-5 h-5 text-white/90" />
+                      </div>
                     </div>
                   </div>
 
-                  {a?.popular ? (
-                    <span className="px-2 py-1 rounded-full text-[11px] font-extrabold bg-white text-black border border-white/50">
-                      {lang === "ar" ? "الأكثر طلبًا" : "Popular"}
-                    </span>
-                  ) : (
-                    <span className="px-2 py-1 rounded-full text-[11px] font-extrabold bg-black/30 text-white/70 border border-white/10">
-                      Add-on
-                    </span>
-                  )}
-                </div>
-
-                <div className={cn("mt-4 flex items-end justify-between", lang === "ar" && "flex-row-reverse")}>
-                  <div className="text-white text-3xl font-black">{money(a?.price)}</div>
-                  <div className="text-white/60 text-sm font-bold">{lang === "ar" ? "درهم" : "AED"}</div>
-                </div>
-
-                <div className={cn("mt-3 flex items-center justify-between", lang === "ar" && "flex-row-reverse")}>
-                  <div className="text-[12px] text-white/60 font-semibold">
-                    {lang === "ar" ? "تغطية: طباعة + ضريبة + معالجة" : "Covers: printing + VAT + processing"}
+                  {/* price */}
+                  <div className={cn("mt-5 flex items-end justify-between", lang === "ar" && "flex-row-reverse")}>
+                    <div className="leading-none">
+                      <div className="text-white/70 text-[12px] font-bold">
+                        {lang === "ar" ? "السعر" : "Price"}
+                      </div>
+                      <div className="text-white text-4xl font-black tracking-tight">{money(price)}</div>
+                    </div>
+                    <div className="text-white/60 text-sm font-bold pb-1">{lang === "ar" ? "درهم" : "AED"}</div>
                   </div>
-                  <div className="w-10 h-10 rounded-2xl bg-white/8 border border-white/10 flex items-center justify-center">
-                    <Zap className="w-5 h-5 text-white/85" />
-                  </div>
-                </div>
 
-                <button
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => onBuyAddon?.(a)}
-                  className={cn(
-                    "mt-4 w-full py-3 rounded-2xl font-extrabold transition",
-                    "bg-gradient-to-r from-emerald-600 via-sky-600 to-purple-700 text-white",
-                    "hover:scale-[1.01] active:scale-[0.99]",
-                    disabled && "opacity-60 cursor-not-allowed hover:scale-100"
-                  )}
-                >
-                  {lang === "ar" ? "شراء وإضافة الرصيد" : "Buy & Add Credits"}
-                </button>
-              </div>
-            </motion.div>
-          ))
+                  {/* footer note */}
+                  <div className={cn("mt-3 text-[12px] text-white/60 font-semibold", lang === "ar" ? "text-right" : "text-left")}>
+                    {lang === "ar"
+                      ? "تشمل: طباعة + ضريبة + معالجة"
+                      : "Includes: printing + VAT + processing"}
+                  </div>
+
+                  {/* CTA */}
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => onBuyAddon?.(a)}
+                    className={cn(
+                      "mt-4 w-full py-3.5 rounded-2xl font-extrabold transition",
+                      "text-white shadow-lg shadow-black/20",
+                      "bg-gradient-to-r",
+                      t.btn,
+                      "hover:scale-[1.01] active:scale-[0.99]",
+                      disabled && "opacity-60 cursor-not-allowed hover:scale-100"
+                    )}
+                  >
+                    {lang === "ar" ? "شراء وإضافة الرصيد" : "Buy & Add Credits"}
+                  </button>
+                </div>
+              </motion.div>
+            );
+          })
         ) : (
-          <div className="md:col-span-3 rounded-3xl border border-white/10 bg-white/5 p-6 text-center text-white/70 font-semibold">
+          <div className="lg:col-span-3 rounded-3xl border border-white/10 bg-white/5 p-6 text-center text-white/70 font-semibold">
             {lang === "ar" ? "لا توجد إضافات متاحة حاليًا." : "No add-ons available right now."}
           </div>
         )}
