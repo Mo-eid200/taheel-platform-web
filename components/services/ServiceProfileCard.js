@@ -9,8 +9,6 @@ import {
   FaUser,
   FaTag,
   FaCoins,
-  FaWallet,
-  FaCreditCard,
   FaCrown,
 } from "react-icons/fa";
 import ServiceUploadModal from "./ServiceUploadModal";
@@ -25,6 +23,14 @@ import calcStripeFees from "@/utils/calcStripeFees";
  * - VAT = 5% ONLY on Printing Fee.
  * - VAT/Printing are waived ONLY for company services when subscriptionActive=true.
  * - If printingFee is 0 => VAT is 0 automatically.
+ *
+ * ✅ FIELD MEANINGS (YOU CONFIRMED):
+ * - active: الخدمة مفعلة
+ * - category: نوع الخدمة (company/resident/nonresident/other)
+ * - price: الرسوم الحكومية
+ * - printingFee: رسوم الطباعة
+ * - profit: أرباح داخلية (لا تظهر للعميل)
+ * - clientPrice: كان “سعر شامل” لكن هنلتزم بالقواعد أعلاه في الحساب والعرض
  */
 
 const CATEGORY_STYLES = {
@@ -140,20 +146,28 @@ function toNumberSafe(v, fallback = 0) {
 }
 
 export default function ServiceProfileCard({
+  // ✅ new
+  active = true,
+
   category = "resident",
   name,
   name_en,
   customerId,
   description,
   description_en,
-  price,
-  printingFee = 0,
-  clientPrice,
+
+  // ✅ confirmed meanings
+  price, // government fees
+  printingFee = 0, // printing fee
+  clientPrice, // موجود بس هنلتزم بالقواعد للحساب
+
   requiredDocuments = [],
   coins = 0,
+
   userId,
   userWallet = 0,
   userCoins = 0,
+
   lang = "ar",
   repeatable = false,
   requireUpload = false,
@@ -164,6 +178,8 @@ export default function ServiceProfileCard({
   longDescription,
   longDescription_en,
   provider,
+
+  // ✅ company subscription flag (from companySubscriptions isActive)
   subscriptionActive = false,
 }) {
   const style = CATEGORY_STYLES[category] || CATEGORY_STYLES.resident;
@@ -180,9 +196,6 @@ export default function ServiceProfileCard({
   const [uploadedDocs, setUploadedDocs] = useState({});
   const [showDocsModal, setShowDocsModal] = useState(false);
 
-  // ✅ Allow user to select method on card so we can show "processing fee"
-  const [payMethodPreview, setPayMethodPreview] = useState("wallet"); // wallet | gateway
-
   const [translatedName, setTranslatedName] = useState("");
   const [translatedDescription, setTranslatedDescription] = useState("");
   const [translatedLongDescription, setTranslatedLongDescription] = useState("");
@@ -194,7 +207,8 @@ export default function ServiceProfileCard({
 
   const docsArray = useMemo(() => {
     if (Array.isArray(requiredDocuments)) return requiredDocuments;
-    if (requiredDocuments && typeof requiredDocuments === "object") return Object.values(requiredDocuments);
+    if (requiredDocuments && typeof requiredDocuments === "object")
+      return Object.values(requiredDocuments);
     return [];
   }, [requiredDocuments]);
 
@@ -274,48 +288,54 @@ export default function ServiceProfileCard({
     return () => {
       ignore = true;
     };
-  }, [lang, name, name_en, description, description_en, longDescription, longDescription_en, serviceId]);
+  }, [
+    lang,
+    name,
+    name_en,
+    description,
+    description_en,
+    longDescription,
+    longDescription_en,
+    serviceId,
+  ]);
 
   // =========================
-  // ✅ Pricing (Final, 100% consistent)
+  // ✅ Pricing (Aligned with your meanings + rules)
   // =========================
   const baseServiceCount = repeatable ? quantity : 1;
   const basePaperCount = allowPaperCount ? paperCount : 1;
 
-  // ✅ Choose the service base price (clientPrice overrides price when present)
-  const serviceUnit = toNumberSafe(typeof clientPrice !== "undefined" ? clientPrice : price, 0);
-  const serviceBase = +(serviceUnit * baseServiceCount).toFixed(2);
+  // ✅ Government fees (your "price") * quantity (if repeatable)
+  const govUnit = toNumberSafe(price, 0);
+  const govTotal = +(govUnit * baseServiceCount).toFixed(2);
 
-  // ✅ printing (waived only when company subscription active)
+  // ✅ Printing fee (waived only if company subscription active) * paperCount
   const rawPrintingPerUnit = toNumberSafe(printingFee, 0);
   const effectivePrintingPerUnit = isSubscriptionActive ? 0 : rawPrintingPerUnit;
   const printingTotal = +(effectivePrintingPerUnit * basePaperCount).toFixed(2);
 
-  // ✅ VAT total = 5% on printing total only
+  // ✅ VAT 5% ONLY on printing
   const vatTotal = printingTotal > 0 ? +(printingTotal * 0.05).toFixed(2) : 0;
 
-  // ✅ Total before VAT (to pass into PayModal)
-  const payTotalBeforeVat = +(serviceBase + printingTotal).toFixed(2);
+  // ✅ Subtotal before processing
+  const subtotal = +(govTotal + printingTotal + vatTotal).toFixed(2);
 
-  // ✅ Total including VAT (display)
-  const totalWithVat = +(serviceBase + printingTotal + vatTotal).toFixed(2);
-
-  // ✅ Stripe fee preview (only for gateway)
-  const stripeFeesPreview = calcStripeFees(totalWithVat, {
+  // ✅ Processing fee (always shown on card now)
+  const stripeFeesPreview = calcStripeFees(subtotal, {
     isInternational: false,
     isCurrencyConversion: false,
   });
-  const processingFeePreview = payMethodPreview === "gateway" ? +stripeFeesPreview.stripeFee.toFixed(2) : 0;
+  const processingFee = +stripeFeesPreview.stripeFee.toFixed(2);
 
-  // ✅ Final displayed total (includes processing fee only if gateway is chosen)
-  const finalDisplayTotal =
-    payMethodPreview === "gateway"
-      ? +stripeFeesPreview.totalAmount.toFixed(2)
-      : totalWithVat;
+  // ✅ Final total shown on card
+  const finalDisplayTotal = +stripeFeesPreview.totalAmount.toFixed(2);
+
+  // ✅ totals for modal (source of truth)
+  const payTotalBeforeVat = +(govTotal + printingTotal).toFixed(2);
 
   const allDocsUploaded = !requireUpload || docKeys.every((k) => uploadedDocs[k]);
   const isPaperCountReady = !allowPaperCount || (paperCount && paperCount > 0);
-  const canPay = allDocsUploaded && isPaperCountReady;
+  const canPay = Boolean(active) && allDocsUploaded && isPaperCountReady;
 
   function handlePaid() {
     setIsPaid(true);
@@ -333,7 +353,9 @@ export default function ServiceProfileCard({
 
   function getServiceNameFontSize() {
     const nameStr =
-      lang === "en" ? (name_en || translatedName || name || "") : (name || name_en || "");
+      lang === "en"
+        ? name_en || translatedName || name || ""
+        : name || name_en || "";
     if (nameStr.length > 38) return "text-[16px]";
     if (nameStr.length > 28) return "text-[18px]";
     if (nameStr.length > 18) return "text-[20px]";
@@ -341,24 +363,38 @@ export default function ServiceProfileCard({
   }
 
   function renderTooltip() {
-    const titleTxt = lang === "en" ? (name_en || translatedName || name || "") : (name || name_en || "");
+    const titleTxt =
+      lang === "en"
+        ? name_en || translatedName || name || ""
+        : name || name_en || "";
+
     const descTxt =
       lang === "en"
-        ? (longDescription_en ||
-            translatedLongDescription ||
-            description_en ||
-            translatedDescription ||
-            description ||
-            "")
-        : (longDescription || longDescription_en || description || description_en || "");
+        ? longDescription_en ||
+          translatedLongDescription ||
+          description_en ||
+          translatedDescription ||
+          description ||
+          ""
+        : longDescription ||
+          longDescription_en ||
+          description ||
+          description_en ||
+          "";
 
     return (
       <div
         className="fixed z-[200] left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center pointer-events-none"
-        style={{ minWidth: 280, maxWidth: 380, boxShadow: "0 2px 24px 0 rgba(16,185,129,0.18)" }}
+        style={{
+          minWidth: 280,
+          maxWidth: 380,
+          boxShadow: "0 2px 24px 0 rgba(16,185,129,0.18)",
+        }}
       >
         <div className="bg-white rounded-xl border border-emerald-400 shadow-lg p-4 w-full text-sm">
-          <h3 className="text-base font-extrabold text-emerald-700 mb-1 text-center">{titleTxt}</h3>
+          <h3 className="text-base font-extrabold text-emerald-700 mb-1 text-center">
+            {titleTxt}
+          </h3>
           <div className="text-gray-800 text-xs mb-2 text-center">{descTxt}</div>
 
           {docsForUI.length > 0 && (
@@ -378,23 +414,33 @@ export default function ServiceProfileCard({
           <table className="w-full text-xs text-emerald-900 font-bold border border-emerald-200 rounded-xl shadow mb-2 bg-emerald-50 overflow-hidden">
             <tbody>
               <tr>
-                <td>{lang === "ar" ? "سعر الخدمة" : "Service Price"}</td>
-                <td className="text-right">{serviceBase.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}</td>
+                <td>{lang === "ar" ? "الرسوم الحكومية" : "Government Fees"}</td>
+                <td className="text-right">
+                  {govTotal.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
+                </td>
               </tr>
-              <tr>
+              <tr className={!isSubscriptionActive ? "" : "opacity-70"}>
                 <td>{lang === "ar" ? "رسوم الطباعة" : "Printing Fee"}</td>
-                <td className="text-right">{printingTotal.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}</td>
+                <td className="text-right">
+                  {printingTotal.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
+                </td>
               </tr>
-              <tr>
-                <td>{lang === "ar" ? "ضريبة 5% على الطباعة" : "VAT 5% on Printing"}</td>
-                <td className="text-right">{vatTotal.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}</td>
+              <tr className={!isSubscriptionActive ? "" : "opacity-70"}>
+                <td>{lang === "ar" ? "الضرائب (5% على الطباعة)" : "Tax (5% on Printing)"}</td>
+                <td className="text-right">
+                  {vatTotal.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
+                </td>
               </tr>
               <tr>
                 <td>{lang === "ar" ? "رسوم الدفع الإلكتروني" : "Processing Fee"}</td>
-                <td className="text-right">{processingFeePreview.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}</td>
+                <td className="text-right">
+                  {processingFee.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
+                </td>
               </tr>
               <tr>
-                <td className="font-extrabold">{lang === "ar" ? "الإجمالي النهائي" : "Final Total"}</td>
+                <td className="font-extrabold">
+                  {lang === "ar" ? "الإجمالي النهائي" : "Final Total"}
+                </td>
                 <td className="font-extrabold text-emerald-900 text-right">
                   {finalDisplayTotal.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
                 </td>
@@ -406,8 +452,8 @@ export default function ServiceProfileCard({
             <div className="text-[11px] font-extrabold text-emerald-700 text-center bg-emerald-50 border border-emerald-200 rounded-lg py-2">
               <FaCrown className="inline mr-2 text-emerald-600" />
               {lang === "ar"
-                ? "اشتراك الشركة فعّال: الطباعة والضريبة مجانًا"
-                : "Active subscription: Printing & VAT are waived"}
+                ? "اشتراك الشركة فعّال: الطباعة والضرائب مجانًا"
+                : "Active subscription: Printing & tax are waived"}
             </div>
           )}
         </div>
@@ -469,15 +515,20 @@ export default function ServiceProfileCard({
             display: "block",
             cursor: "pointer",
           }}
-          title={lang === "en" ? (name_en || translatedName || name || "") : (name || name_en || "")}
+          title={
+            lang === "en"
+              ? name_en || translatedName || name || ""
+              : name || name_en || ""
+          }
           onMouseEnter={() => setShowTooltip(true)}
           onMouseLeave={() => setShowTooltip(false)}
         >
-          {lang === "en" ? (name_en || translatedName || name || "") : (name || name_en || "")}
+          {lang === "en"
+            ? name_en || translatedName || name || ""
+            : name || name_en || ""}
         </h3>
 
         {showTooltip && renderTooltip()}
-
 
         {/* ✅ Price box */}
         <div className="w-full flex flex-col items-center bg-white/80 rounded-xl border border-emerald-100 shadow p-2 mb-2">
@@ -485,7 +536,9 @@ export default function ServiceProfileCard({
             <span className="font-extrabold text-emerald-700 text-2xl drop-shadow text-center">
               {finalDisplayTotal.toFixed(2)}
             </span>
-            <span className="text-base text-gray-500 font-bold">{lang === "ar" ? "درهم" : "AED"}</span>
+            <span className="text-base text-gray-500 font-bold">
+              {lang === "ar" ? "درهم" : "AED"}
+            </span>
             <Image
               src="/aed-logo.png"
               alt={lang === "ar" ? "درهم إماراتي" : "AED"}
@@ -499,35 +552,49 @@ export default function ServiceProfileCard({
             <div className="w-full text-center text-[11px] font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg py-1 mb-1">
               <FaCrown className="inline mr-2 text-emerald-600" />
               {lang === "ar"
-                ? "اشتراك فعّال: الطباعة والضريبة مجانًا"
-                : "Active subscription: Printing & VAT waived"}
+                ? "اشتراك فعّال: الطباعة والضرائب مجانًا"
+                : "Active subscription: Printing & tax waived"}
             </div>
           )}
 
           <table className="w-full text-[12px] text-gray-700 mb-1">
             <tbody>
               <tr>
-                <td>{lang === "ar" ? "سعر الخدمة" : "Service Price"}</td>
-                <td className="text-right">{serviceBase.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}</td>
+                <td>{lang === "ar" ? "الرسوم الحكومية" : "Government Fees"}</td>
+                <td className="text-right">
+                  {govTotal.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
+                </td>
               </tr>
 
               <tr className={!isSubscriptionActive ? "" : "opacity-70"}>
                 <td>{lang === "ar" ? "رسوم الطباعة" : "Printing Fee"}</td>
-                <td className="text-right">{printingTotal.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}</td>
+                <td className="text-right">
+                  {printingTotal.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
+                </td>
               </tr>
 
               <tr className={!isSubscriptionActive ? "" : "opacity-70"}>
-                <td>{lang === "ar" ? "ضريبة 5% على الطباعة" : "VAT 5% on Printing"}</td>
-                <td className="text-right">{vatTotal.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}</td>
+                <td>
+                  {lang === "ar"
+                    ? "الضرائب (5% على الطباعة)"
+                    : "Tax (5% on Printing)"}
+                </td>
+                <td className="text-right">
+                  {vatTotal.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
+                </td>
               </tr>
 
               <tr>
                 <td>{lang === "ar" ? "رسوم الدفع الإلكتروني" : "Processing Fee"}</td>
-                <td className="text-right">{processingFeePreview.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}</td>
+                <td className="text-right">
+                  {processingFee.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
+                </td>
               </tr>
 
               <tr>
-                <td className="font-extrabold text-emerald-700">{lang === "ar" ? "الإجمالي النهائي" : "Final Total"}</td>
+                <td className="font-extrabold text-emerald-700">
+                  {lang === "ar" ? "الإجمالي النهائي" : "Final Total"}
+                </td>
                 <td className="font-extrabold text-emerald-800 text-right">
                   {finalDisplayTotal.toFixed(2)} {lang === "ar" ? "د.إ" : "AED"}
                 </td>
@@ -569,7 +636,7 @@ export default function ServiceProfileCard({
             document.body
           )}
 
-        {/* Apply button */}
+        {/* ✅ Apply button ONLY */}
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -587,60 +654,63 @@ export default function ServiceProfileCard({
           `}
           disabled={!canPay || isPaid}
         >
-          {isPaid ? (lang === "ar" ? "تم الدفع" : "Paid") : (lang === "ar" ? "تقدم الآن" : "Apply Now")}
+          {isPaid
+            ? lang === "ar"
+              ? "تم الدفع"
+              : "Paid"
+            : !active
+            ? lang === "ar"
+              ? "غير متاحة"
+              : "Unavailable"
+            : lang === "ar"
+            ? "تقدم الآن"
+            : "Apply Now"}
         </button>
       </div>
 
+      {/* ✅ Pay Modal */}
+      {typeof window !== "undefined" &&
+        showPayModal &&
+        createPortal(
+          <ServicePayModal
+            open={showPayModal}
+            onClose={() => setShowPayModal(false)}
+            serviceName={name}
+            serviceId={serviceId}
 
-{/* ✅ Pay Modal */}
-{typeof window !== "undefined" &&
-  showPayModal &&
-  createPortal(
-    <ServicePayModal
-      open={showPayModal}
-      onClose={() => setShowPayModal(false)}
+            // ✅ Fallback only
+            totalPrice={payTotalBeforeVat}
+            printingFee={rawPrintingPerUnit} // per unit
 
-      serviceName={name}
-      serviceId={serviceId}
+            // ✅ SOURCE OF TRUTH TOTALS
+            serviceBase={govTotal}          // الرسوم الحكومية
+            printingTotal={printingTotal}   // الطباعة (0 لو اشتراك)
+            vatTotal={vatTotal}             // الضرائب (0 لو اشتراك)
 
-      // ✅ Fallback only (مش هيتستخدم طالما بنبعت totals)
-      totalPrice={payTotalBeforeVat}
-      printingFee={rawPrintingPerUnit} // per unit الأصلي (المودال بيحفظه كـ printingFeePerUnit)
+            // ✅ company subscription => enforce printing/vat = 0 inside modal too
+            freePrinting={isSubscriptionActive}
 
-      // ✅ SOURCE OF TRUTH TOTALS (لازم دول يتبعتوا)
-      serviceBase={serviceBase}
-      printingTotal={printingTotal}
-      vatTotal={vatTotal}
+            clientType={category}
+            coinsBalance={coinsBalance}
+            cashbackCoins={coins}
+            userWallet={wallet}
 
-      // ✅ company subscription => enforce printing/vat = 0 inside modal too
-      freePrinting={isSubscriptionActive}
+            // ✅ no selector on card => modal starts gateway by default
+            initialPayMethod={"gateway"}
 
-      clientType={category}
+            lang={lang}
+            customerId={customerId}
+            userId={userId}
+            userEmail={userEmail}
+            uploadedDocs={uploadedDocs}
+            onPaid={handlePaid}
 
-      coinsBalance={coinsBalance}
-      cashbackCoins={coins} // نقاط المكافأة
-      userWallet={wallet}
-
-      // ✅ مهم جداً: خلي المودال يبدأ بنفس اختيار الكارت
-      initialPayMethod={payMethodPreview} // "wallet" | "gateway"
-
-      lang={lang}
-      customerId={customerId}
-      userId={userId}
-      userEmail={userEmail}
-      uploadedDocs={uploadedDocs}
-      onPaid={handlePaid}
-
-      assignedTo=""
-      assignedToName=""
-
-      provider={Array.isArray(provider) ? provider : provider ? [provider] : []}
-    />,
-    document.body
-  )}
-
-
-
+            assignedTo=""
+            assignedToName=""
+            provider={Array.isArray(provider) ? provider : provider ? [provider] : []}
+          />,
+          document.body
+        )}
 
       <div className="absolute -bottom-6 right-0 left-0 w-full h-8 bg-gradient-to-t from-emerald-100/60 via-white/20 to-transparent blur-2xl opacity-80 z-0 pointer-events-none" />
     </div>
