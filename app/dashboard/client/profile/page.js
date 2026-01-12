@@ -45,6 +45,7 @@ import CoinsWidget from "@/components/clientheader/CoinsWidget";
 import NotificationWidget from "@/components/clientheader/NotificationWidget";
 import { translateServiceFields } from "@/utils/translate";
 import CompanySubscriptionsSection from "@/components/subscriptions/CompanySubscriptionsSection";
+import { computeSubscriptionActive } from "@/utils/subscription";
 
 // =====================================
 // Small helpers
@@ -296,6 +297,7 @@ function ClientProfilePageInner({ userId }) {
   const [showCoinsMenu, setShowCoinsMenu] = useState(false);
   const [showWalletMenu, setShowWalletMenu] = useState(false);
   const [showMessagesMenu, setShowMessagesMenu] = useState(false);
+  const active = computeSubscriptionActive(d); setFreePrinting(active);
 
   const [search, setSearch] = useState("");
   const [reloadClient, setReloadClient] = useState(false);
@@ -454,8 +456,7 @@ useEffect(() => {
         }
 
         const d = snap.data() || {};
-        const status = String(d.status || "").toLowerCase();
-        const isActiveFlag = d.isActive === true;
+       
 
         const endAt =
           (d.endAt?.toDate && d.endAt.toDate()) ||

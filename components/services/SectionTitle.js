@@ -6,6 +6,7 @@ import { firestore } from "@/lib/firebase.client";
 
 import SectionTitle from "@/components/services/SectionTitle";
 import ServiceProfileCard from "@/components/services/ServiceProfileCard";
+import { computeSubscriptionActive } from "@/utils/subscription";
 
 const EMPTY_SUB = {
   loading: false,
@@ -92,8 +93,7 @@ export default function ServiceSection({
           return;
         }
 
-        const status = String(found.status || "").toLowerCase();
-        const isActiveFlag = Boolean(found.isActive);
+        const active = computeSubscriptionActive(found);
 
         const startMs =
           found.startAt?.toMillis?.() ??
@@ -108,7 +108,7 @@ export default function ServiceSection({
         const now = Date.now();
         const withinWindow = (!startMs || now >= startMs) && (!endMs || now < endMs);
 
-        const active = (isActiveFlag || status === "active") && withinWindow;
+        
 
         if (mounted) {
           setSubInfo({
