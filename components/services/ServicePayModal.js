@@ -465,211 +465,292 @@ export default function ServicePayModal({
 
   if (!open) return null;
 
-  return (
-    <AnimatePresence>
+const isWallet = payMethod === "wallet";
+const isGateway = payMethod === "gateway";
+
+const headerTheme = isWallet
+  ? "from-emerald-700 via-emerald-600 to-green-700"
+  : "from-indigo-700 via-blue-700 to-cyan-600";
+
+const payBtnTheme = isWallet
+  ? "from-emerald-500 via-emerald-600 to-green-600 hover:from-emerald-600 hover:to-green-700"
+  : "from-indigo-600 via-blue-600 to-cyan-600 hover:from-indigo-700 hover:to-cyan-700";
+
+const methodRing = (active) =>
+  active
+    ? "ring-2 ring-offset-2 ring-emerald-400 shadow-emerald-200/60"
+    : "ring-1 ring-white/40 hover:ring-emerald-200/70";
+
+return (
+  <AnimatePresence>
+    <motion.div
+      className="fixed inset-0 z-[100] flex justify-center items-center bg-black/60 backdrop-blur-[6px]"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
       <motion.div
-        className="fixed inset-0 z-[100] flex justify-center items-center bg-gradient-to-br from-black/60 via-emerald-900/60 to-black/60 backdrop-blur-[2px]"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
+        className="relative w-full max-w-md rounded-[28px] overflow-hidden shadow-2xl border border-white/15"
+        initial={{ scale: 0.98, opacity: 0, y: 26 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.98, opacity: 0, y: 26 }}
+        transition={{ duration: 0.25, ease: "easeOut" }}
       >
-        <motion.div
-          className="bg-gradient-to-br from-white via-emerald-50 to-emerald-100 rounded-3xl shadow-2xl border border-emerald-200 px-6 pt-7 pb-4 max-w-sm w-full relative flex flex-col items-center"
-          initial={{ scale: 0.97, opacity: 0, y: 30 }}
-          animate={{ scale: 1, opacity: 1, y: 0 }}
-          exit={{ scale: 0.97, opacity: 0, y: 30 }}
-          transition={{ duration: 0.32, ease: "easeOut" }}
-        >
-          <img
-            src="/logo3.png"
-            alt="Logo"
-            className="mb-2 w-14 h-14 object-contain rounded-full shadow border border-emerald-100"
-            draggable={false}
-            loading="eager"
-          />
+        {/* Header */}
+        <div className={`px-6 pt-6 pb-5 bg-gradient-to-r ${headerTheme}`}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-white/10 border border-white/15 flex items-center justify-center shadow">
+                {isWallet ? (
+                  <FaWallet className="text-white text-xl" />
+                ) : (
+                  <FaCreditCard className="text-white text-xl" />
+                )}
+              </div>
 
-          <button
-            className="absolute top-3 right-4 bg-emerald-600 text-white rounded-full w-8 h-8 flex items-center justify-center text-xl shadow hover:bg-emerald-700 transition"
-            onClick={onClose}
-            aria-label={lang === "ar" ? "إغلاق" : "Close"}
-          >
-            <FaTimes />
-          </button>
+              <div className="flex flex-col">
+                <div className="text-white font-black text-lg leading-tight">
+                  {lang === "ar" ? "بوابة الدفع" : "Payment"}
+                </div>
+                <div className="text-white/85 text-xs font-semibold">
+                  {lang === "ar" ? "عملية مشفّرة وآمنة" : "Secure & Encrypted"}
+                </div>
+              </div>
+            </div>
 
-          <div className="text-emerald-700 font-black text-lg mb-1 text-center">
-            {lang === "ar" ? "دفع الخدمة" : "Service Payment"}
+            <button
+              onClick={onClose}
+              className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 border border-white/15 text-white flex items-center justify-center transition"
+              aria-label={lang === "ar" ? "إغلاق" : "Close"}
+            >
+              <FaTimes />
+            </button>
           </div>
-          <div className="font-bold text-emerald-900 text-base mb-3 text-center">
-            {serviceName}
-          </div>
 
-          <table className="w-full text-xs text-gray-700 font-bold mb-2 border-separate border-spacing-y-1">
-            <tbody>
-              <tr>
-                <td>{lang === "ar" ? "الإجمالي قبل خصم الكوينات" : "Total Before Coins"}</td>
-                <td className="text-right">{totalWithVatFinal.toFixed(2)} د.إ</td>
-              </tr>
+          {/* Service name */}
+          <div className="mt-4 rounded-2xl bg-white/10 border border-white/15 p-3">
+            <div className="text-white/75 text-[11px] font-bold">
+              {lang === "ar" ? "الخدمة" : "Service"}
+            </div>
+            <div className="text-white font-extrabold text-sm leading-snug">
+              {serviceName}
+            </div>
+
+            {/* Badges */}
+            <div className="mt-2 flex flex-wrap gap-2">
+              {hasActiveSubscription && (
+                <span className="px-2 py-1 rounded-full text-[10px] font-black bg-emerald-200/20 text-emerald-100 border border-emerald-200/30">
+                  {lang === "ar" ? "اشتراك فعّال: طباعة مجانية" : "Active Subscription: Free Printing"}
+                </span>
+              )}
+              <span className="px-2 py-1 rounded-full text-[10px] font-black bg-white/10 text-white/90 border border-white/15">
+                {lang === "ar" ? "VAT 5% على الطباعة فقط" : "VAT 5% on printing only"}
+              </span>
+              <span className="px-2 py-1 rounded-full text-[10px] font-black bg-white/10 text-white/90 border border-white/15">
+                🔒 {lang === "ar" ? "Secure" : "Secure"}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="px-6 pt-5 pb-6 bg-gradient-to-b from-white via-emerald-50 to-white">
+          {/* Invoice */}
+          <div className="rounded-2xl border border-emerald-100 bg-white shadow-sm p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="font-black text-emerald-900 text-sm">
+                {lang === "ar" ? "ملخص الدفع" : "Payment Summary"}
+              </div>
+              <div className="text-[11px] font-bold text-gray-500">
+                {totals.usedCardTotals ? (lang === "ar" ? "قيم دقيقة" : "Exact") : (lang === "ar" ? "قيم تقديرية" : "Fallback")}
+              </div>
+            </div>
+
+            <div className="space-y-2 text-[12px] font-bold text-gray-700">
+              <div className="flex justify-between">
+                <span>{lang === "ar" ? "الإجمالي قبل خصم الكوينات" : "Total Before Coins"}</span>
+                <span>{totalWithVatFinal.toFixed(2)} د.إ</span>
+              </div>
 
               {effectivePrintingTotal > 0 && (
-                <tr>
-                  <td>{lang === "ar" ? "رسوم الطباعة (إجمالي)" : "Printing Total"}</td>
-                  <td className="text-right">{effectivePrintingTotal.toFixed(2)} د.إ</td>
-                </tr>
+                <div className="flex justify-between">
+                  <span>{lang === "ar" ? "رسوم الطباعة (إجمالي)" : "Printing Total"}</span>
+                  <span>{effectivePrintingTotal.toFixed(2)} د.إ</span>
+                </div>
               )}
 
               {effectiveVatTotal > 0 && (
-                <tr>
-                  <td>{lang === "ar" ? "ضريبة 5% على الطباعة" : "VAT 5% on Printing"}</td>
-                  <td className="text-right">{effectiveVatTotal.toFixed(2)} د.إ</td>
-                </tr>
+                <div className="flex justify-between">
+                  <span>{lang === "ar" ? "ضريبة 5% على الطباعة" : "VAT 5% on Printing"}</span>
+                  <span>{effectiveVatTotal.toFixed(2)} د.إ</span>
+                </div>
               )}
 
-              <tr>
-                <td className="flex items-center gap-1">
-                  <FaCoins className="text-yellow-500 mr-1" size={10} />
+              <div className="flex justify-between">
+                <span className="flex items-center gap-1">
+                  <FaCoins className="text-yellow-500" size={12} />
                   {lang === "ar" ? "خصم الكوينات" : "Coins Discount"}
-                </td>
-                <td className="text-right text-yellow-700">
+                </span>
+                <span className="text-yellow-700">
                   {useCoins ? `-${coinDiscountValueAed.toFixed(2)} د.إ` : "0 د.إ"}
-                </td>
-              </tr>
+                </span>
+              </div>
 
-              <tr>
-                <td>{lang === "ar" ? "رسوم معالجة الدفع الإلكتروني" : "Processing Fee"}</td>
-                <td className="text-right">
-                  {payMethod === "gateway" ? stripeFeeValue.toFixed(2) : "0.00"} د.إ
-                </td>
-              </tr>
+              <div className="flex justify-between">
+                <span>{lang === "ar" ? "رسوم المعالجة" : "Processing Fee"}</span>
+                <span>{isGateway ? stripeFeeValue.toFixed(2) : "0.00"} د.إ</span>
+              </div>
 
-              <tr>
-                <td className="font-extrabold text-emerald-700">
-                  {lang === "ar" ? "السعر النهائي" : "Final"}
-                </td>
-                <td className="font-extrabold text-emerald-800 text-right">
+              <div className="h-px bg-emerald-100 my-2" />
+
+              <div className="flex justify-between text-[13px]">
+                <span className="font-extrabold text-emerald-900">
+                  {lang === "ar" ? "السعر النهائي" : "Final Total"}
+                </span>
+                <span className="font-black text-emerald-800">
                   {finalPriceWithFees.toFixed(2)} د.إ
-                </td>
-              </tr>
-            </tbody>
-          </table>
-
-          <div className="w-full flex flex-row items-center justify-between mb-1">
-            <label className="flex items-center gap-1 font-bold text-xs text-emerald-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={useCoins}
-                onChange={(e) => setUseCoins(e.target.checked)}
-                disabled={(coinsBalance || 0) < 1 || maxCoinDiscountPoints <= 0}
-                className="accent-yellow-500 scale-90"
-              />
-              <FaCoins className="text-yellow-500" size={12} />
-              {lang === "ar"
-                ? `استخدم الكوينات (حتى 10% من الطباعة)`
-                : "Use coins (up to 10% of printing)"}
-            </label>
-
-            <span className="font-black text-yellow-700 text-xs">
-              {lang === "ar" ? "رصيدك:" : "Your coins:"} {coinsBalance || 0}
-            </span>
+                </span>
+              </div>
+            </div>
           </div>
 
-          <div className="w-full flex flex-row items-center justify-between mb-1">
-            <label
-              className={`flex items-center gap-1 font-bold text-emerald-800 text-xs cursor-pointer ${
-                (Number(userWallet) || 0) < finalPriceNoGateway ? "opacity-60" : ""
+          {/* Coins toggle */}
+          <div className="mt-4 rounded-2xl border border-yellow-100 bg-white p-4 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <label className="flex items-center gap-2 font-black text-[12px] text-emerald-900 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={useCoins}
+                  onChange={(e) => setUseCoins(e.target.checked)}
+                  disabled={(coinsBalance || 0) < 1 || maxCoinDiscountPoints <= 0}
+                  className="accent-yellow-500"
+                />
+                <FaCoins className="text-yellow-500" />
+                {lang === "ar" ? "استخدم الكوينات" : "Use coins"}
+                <span className="text-[10px] font-bold text-gray-500">
+                  ({lang === "ar" ? "حتى 10% من الطباعة" : "up to 10% of printing"})
+                </span>
+              </label>
+
+              <div className="text-[11px] font-black text-yellow-700">
+                {lang === "ar" ? "رصيدك:" : "Balance:"} {coinsBalance || 0}
+              </div>
+            </div>
+
+            <div className="mt-2 text-[11px] font-semibold text-gray-600">
+              {!useCoins ? (
+                <span className="flex items-center gap-2">
+                  <span className="inline-flex w-2 h-2 rounded-full bg-emerald-500" />
+                  {lang === "ar"
+                    ? `ستحصل على ${cashbackCoins} كوين مكافأة`
+                    : `You’ll get ${cashbackCoins} coins cashback`}
+                </span>
+              ) : (
+                <span className="flex items-center gap-2">
+                  <span className="inline-flex w-2 h-2 rounded-full bg-gray-400" />
+                  {lang === "ar" ? "لا مكافأة عند استخدام الكوينات" : "No cashback when using coins"}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Pay method visual cards */}
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            {/* Wallet */}
+            <button
+              type="button"
+              onClick={() => setPayMethod("wallet")}
+              disabled={(Number(userWallet) || 0) < finalPriceNoGateway}
+              className={`text-left rounded-2xl p-4 bg-white border transition relative ${
+                (Number(userWallet) || 0) < finalPriceNoGateway
+                  ? "opacity-50 cursor-not-allowed border-gray-200"
+                  : `cursor-pointer ${methodRing(isWallet)} border-emerald-100 hover:shadow`
               }`}
             >
-              <input
-                type="radio"
-                checked={payMethod === "wallet"}
-                onChange={() => setPayMethod("wallet")}
-                disabled={(Number(userWallet) || 0) < finalPriceNoGateway}
-                className="accent-emerald-600 scale-90"
-              />
-              <FaWallet className="text-emerald-600" size={12} />
-              {lang === "ar" ? "المحفظة" : "Wallet"}
-              <span className="text-gray-600 font-bold ml-2">{userWallet} د.إ</span>
-            </label>
+              <div className="flex items-center justify-between">
+                <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center">
+                  <FaWallet className="text-emerald-700" />
+                </div>
+                {isWallet && <FaCheckCircle className="text-emerald-600" />}
+              </div>
 
-            <label className="flex items-center gap-1 font-bold text-emerald-800 text-xs cursor-pointer">
-              <input
-                type="radio"
-                checked={payMethod === "gateway"}
-                onChange={() => setPayMethod("gateway")}
-                className="accent-emerald-600 scale-90"
-              />
-              <FaCreditCard className="text-emerald-600" size={12} />
-              {lang === "ar" ? "بوابة الدفع" : "Gateway"}
-            </label>
+              <div className="mt-3 font-black text-emerald-900 text-sm">
+                {lang === "ar" ? "المحفظة" : "Wallet"}
+              </div>
+              <div className="text-[11px] font-bold text-gray-600 mt-1">
+                {lang === "ar" ? "الرصيد:" : "Balance:"} {Number(userWallet || 0).toFixed(2)} د.إ
+              </div>
+
+              {(Number(userWallet) || 0) < finalPriceNoGateway && (
+                <div className="mt-2 text-[10px] font-black text-red-600">
+                  {lang === "ar" ? "الرصيد غير كافي" : "Insufficient balance"}
+                </div>
+              )}
+            </button>
+
+            {/* Gateway */}
+            <button
+              type="button"
+              onClick={() => setPayMethod("gateway")}
+              className={`text-left rounded-2xl p-4 bg-white border border-blue-100 transition cursor-pointer ${methodRing(isGateway)} hover:shadow`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center">
+                  <FaCreditCard className="text-blue-700" />
+                </div>
+                {isGateway && <FaCheckCircle className="text-emerald-600" />}
+              </div>
+
+              <div className="mt-3 font-black text-blue-900 text-sm">
+                {lang === "ar" ? "بوابة الدفع" : "Gateway"}
+              </div>
+              <div className="text-[11px] font-bold text-gray-600 mt-1">
+                {lang === "ar" ? "Stripe / Cards" : "Stripe / Cards"}
+              </div>
+            </button>
           </div>
 
-          <div className="w-full mb-1 text-center">
-            {!useCoins ? (
-              <div className="flex flex-row items-center justify-center gap-1 text-yellow-700 font-bold text-xs">
-                <FaCoins className="text-yellow-500" size={12} />
-                {lang === "ar"
-                  ? `ستحصل على ${cashbackCoins} كوين مكافأة`
-                  : `You'll get ${cashbackCoins} coins cashback`}
-              </div>
-            ) : (
-              <div className="text-gray-500 text-xs font-bold">
-                {lang === "ar" ? "لا مكافأة عند استخدام الكوينات" : "No cashback if you use coins"}
-              </div>
-            )}
-          </div>
-
+          {/* Pay button */}
           <button
             onClick={onPayClick}
             disabled={isPaying}
-            className={`w-full py-2 rounded-full font-black text-base shadow-lg transition
-              bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-400 text-white
-              hover:from-emerald-600 hover:to-emerald-500 hover:shadow-emerald-200/90
-              hover:scale-105 duration-150
-              focus:outline-none focus:ring-2 focus:ring-emerald-400
-              ${isPaying ? "opacity-40" : ""}
-            `}
-            style={{ cursor: isPaying ? "wait" : "pointer" }}
+            className={`mt-4 w-full py-3 rounded-full font-black text-base text-white shadow-lg transition bg-gradient-to-r ${payBtnTheme} ${
+              isPaying ? "opacity-50 cursor-wait" : "hover:scale-[1.02]"
+            }`}
           >
             {isPaying ? (
-              <span className="flex items-center justify-center gap-2 text-xs">
+              <span className="flex items-center justify-center gap-2 text-[13px]">
                 <FaSpinner className="animate-spin" />
                 {lang === "ar" ? "جاري الدفع..." : "Processing..."}
               </span>
             ) : (
               <span>
                 {lang === "ar"
-                  ? `دفع الآن (${finalPriceWithFees.toFixed(2)} د.إ)`
+                  ? `ادفع الآن (${finalPriceWithFees.toFixed(2)} د.إ)`
                   : `Pay Now (${finalPriceWithFees.toFixed(2)} AED)`}
               </span>
             )}
           </button>
 
+          {/* Message */}
           {payMsg && (
             <div
-              className={`mt-2 text-center font-bold text-xs flex flex-row items-center justify-center gap-1 ${
+              className={`mt-3 text-center font-black text-xs flex items-center justify-center gap-2 ${
                 msgSuccess ? "text-emerald-700" : "text-red-600"
               }`}
             >
-              {msgSuccess ? (
-                <FaCheckCircle className="text-emerald-500" size={16} />
-              ) : (
-                <FaExclamationCircle className="text-red-400" size={14} />
-              )}
+              {msgSuccess ? <FaCheckCircle /> : <FaExclamationCircle />}
               <span>{payMsg}</span>
             </div>
           )}
 
-          <div className="w-full text-center mt-5 mb-1 flex flex-col items-center gap-1">
-            <div className="text-xs text-emerald-700 font-semibold flex items-center justify-center">
-              <FaCheckCircle className="inline mr-2 text-emerald-500" />
-              {lang === "ar"
-                ? "جميع بياناتك مشفرة وآمنة ويتم حفظها بسرية تامة."
-                : "All your data is encrypted and securely stored."}
-            </div>
+          {/* Footer note */}
+          <div className="mt-4 text-center text-[11px] font-semibold text-gray-500">
+            🔒 {lang === "ar" ? "بيانات الدفع مشفرة بالكامل" : "Payment data is fully encrypted"}
           </div>
-
-          <div className="absolute -bottom-6 right-0 left-0 w-full h-7 bg-gradient-to-t from-emerald-200/70 via-white/20 to-transparent blur-2xl opacity-80 pointer-events-none" />
-        </motion.div>
+        </div>
       </motion.div>
-    </AnimatePresence>
-  );
+    </motion.div>
+  </AnimatePresence>
+);
 }
