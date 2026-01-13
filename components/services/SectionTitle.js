@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { doc, getDoc } from "firebase/firestore";
 import { firestore } from "@/lib/firebase.client";
-import MonthlyCreditsFloatingCounter from "@/components/MonthlyCreditsFloatingCounter";
+import MonthlyCreditsFloatingCounter from "@/components/subscriptions/MonthlyCreditsFloatingCounter";
 import SectionTitle from "@/components/services/SectionTitle";
 import ServiceProfileCard from "@/components/services/ServiceProfileCard";
 import { computeSubscriptionActive } from "@/utils/subscription";
