@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { doc, getDoc } from "firebase/firestore";
 import { firestore } from "@/lib/firebase.client";
-
+import MonthlyCreditsFloatingCounter from "@/components/MonthlyCreditsFloatingCounter";
 import SectionTitle from "@/components/services/SectionTitle";
 import ServiceProfileCard from "@/components/services/ServiceProfileCard";
 import { computeSubscriptionActive } from "@/utils/subscription";
@@ -149,6 +149,14 @@ export default function ServiceSection({
       <SectionTitle icon={icon} color={color}>
         {title}
       </SectionTitle>
+
+       {/* ✅ يظهر فقط في خدمات الشركات + لو الاشتراك Active */}
+    {isCompany && subscriptionActive && (
+      <MonthlyCreditsFloatingCounter
+        companyDocId={client?.customerId}
+        lang={lang}
+      />
+    )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
         {filteredServices.map((srv, i) => (
