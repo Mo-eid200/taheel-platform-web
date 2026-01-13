@@ -46,6 +46,7 @@ import NotificationWidget from "@/components/clientheader/NotificationWidget";
 import { translateServiceFields } from "@/utils/translate";
 import CompanySubscriptionsSection from "@/components/subscriptions/CompanySubscriptionsSection";
 import { computeSubscriptionActive } from "@/utils/subscription";
+import MonthlyCreditsFloatingCounter from "@/components/subscriptions/MonthlyCreditsFloatingCounter";
 
 // =====================================
 // Small helpers
@@ -1099,6 +1100,14 @@ useEffect(() => {
               <SectionTitle icon={sectionTitles[selectedSection].icon} color={sectionTitles[selectedSection].color}>
                 {lang === "ar" ? sectionTitles[selectedSection].ar : sectionTitles[selectedSection].en}
               </SectionTitle>
+
+                  {/* ✅ العداد يظهر فقط في صفحة خدمات الشركات + اشتراك Active */}
+    {selectedSection === "companyServices" && Boolean(freePrinting) && (
+      <MonthlyCreditsFloatingCounter
+        companyDocId={client?.customerId}
+        lang={lang}
+      />
+    )}
 
               {/* Search box */}
               <div className="w-full flex items-center gap-2 mb-5">
