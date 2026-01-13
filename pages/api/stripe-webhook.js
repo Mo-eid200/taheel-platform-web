@@ -88,12 +88,20 @@ function isInLast7DaysOfMonth(d = new Date()) {
 }
 
 // ✅ Add-on purchase rule (month-based):
+// - لو اتشترى آخر 7 أيام من الشهر => usableMonthKey = الشهر القادم فقط
+// - غير كده => usableMonthKey = الشهر الحالي
 function computeAddonUsableMonthKey(purchasedAtDate) {
   return isInLast7DaysOfMonth(purchasedAtDate) ? nextMonthKeyOf(purchasedAtDate) : monthKeyOf(purchasedAtDate);
 }
 
 /**
  * ✅ فلترة الـ buckets:
+ * - qtyRemaining > 0
+ * - صالح فقط للشهر = usableMonthKey
+ *   (لو اتشترى آخر 7 أيام => usableMonthKey = الشهر القادم)
+ *
+ * توافق:
+ * - لو bucket قديم مفيهوش usableMonthKey => fallback لـ expiresMonthKey ثم purchasedMonthKey
  */
 function normalizeBucketsForMonth(allBuckets, currentMonthKey) {
   const arr = Array.isArray(allBuckets) ? allBuckets : [];
@@ -210,6 +218,7 @@ export default async function handler(req, res) {
     const printingFeeFromMeta = safeNum(md.printingFee ?? 0);
     const processingFeeMeta = safeNum(md.processingFee ?? md.processing_fee ?? md.processing_fee_value ?? 0);
 
+    // ✅ لازم موجودين للـ UI breakdown
     const baseAmountFromMeta = safeNum(md.baseAmountAED ?? md.baseAmount ?? 0);
     const totalAEDFromMeta = safeNum(md.totalAED ?? 0);
 
@@ -245,6 +254,7 @@ export default async function handler(req, res) {
 
     const isSubscription = requestTypeMeta === "subscription" || planKey.length > 0;
 
+    // لو مش مرسولة من create-payment-intent هنقرأها من companySubscriptionPlans/<planKey>
     const planMonthlyLimitMeta = safeNum(md.monthlyIncludedTxLimit || md.monthlyTxLimit || md.monthlyLimit || 0);
 
     // attachments
@@ -559,7 +569,9 @@ export default async function handler(req, res) {
         tx.update(requestRef, updates);
       } else {
         if (!finalRequestId) {
-          finalRequestId = `REQ-${Math.floor(100 + Math.random() * 900)}-${Math.floor(1000 + Math.random() * 9000)}`;
+          finalRequestId = `REQ-${Math.floor(100 + Math.random() * 900)}-${Math.floor(
+            1000 + Math.random() * 9000
+          )}`;
         }
 
         const newReqRef = db.collection("requests").doc(finalRequestId);
@@ -622,6 +634,8 @@ export default async function handler(req, res) {
 
       // =============================
       // (X) DECREMENT monthly tx credits AFTER successful SERVICE payment
+      // - Only for companies
+      // - Only for "service" (not wallet, not addon, not subscription)
       // =============================
       const shouldDecrementCredits =
         isCompany &&
@@ -630,27 +644,37 @@ export default async function handler(req, res) {
         !isSubscription;
 
       if (shouldDecrementCredits) {
+        // 1) decrement from baseRemaining first, else from addon buckets
         if (Number(baseRemaining || 0) > 0) {
           baseRemaining = Math.max(0, Number(baseRemaining || 0) - 1);
           usedThisMonth = Number(usedThisMonth || 0) + 1;
         } else {
           addonBuckets = Array.isArray(addonBuckets) ? [...addonBuckets] : [];
+          let decDone = false;
+
           for (let i = 0; i < addonBuckets.length; i++) {
             const qty = Number(addonBuckets[i]?.qtyRemaining || 0);
             if (qty > 0) {
-              addonBuckets[i] = { ...addonBuckets[i], qtyRemaining: Math.max(0, qty - 1) };
+              addonBuckets[i] = {
+                ...addonBuckets[i],
+                qtyRemaining: Math.max(0, qty - 1),
+              };
+              decDone = true;
               usedThisMonth = Number(usedThisMonth || 0) + 1;
               break;
             }
           }
+          // لو مفيش رصيد فعلياً خلاص مفيش خصم
         }
 
+        // 2) re-normalize buckets for current month + compute addonsRemaining
         const { keep, sum: addonsRemainingAfterSpend } = normalizeBucketsForMonth(addonBuckets, monthKey);
         addonBuckets = keep;
         addonsRemaining = Number(addonsRemainingAfterSpend || 0);
 
         const totalRemainingAfterSpend = Number(baseRemaining || 0) + Number(addonsRemaining || 0);
 
+        // 3) update user monthlyTxCredits
         tx.set(
           userRef,
           {
@@ -667,6 +691,8 @@ export default async function handler(req, res) {
           { merge: true }
         );
 
+        // 4) update companySubscriptions mirror + isActive (benefit flag)
+        // isActive = timeValid (subTimeValidNow) + credits > 0
         if (subSnap && subSnap.exists) {
           const benefitsActiveNow = (subTimeValidNow === true) && (totalRemainingAfterSpend > 0);
 
@@ -712,6 +738,8 @@ export default async function handler(req, res) {
         if (qtyToAdd > 0) {
           const purchasedAt = new Date();
           const purchasedMonthKey = monthKeyOf(purchasedAt);
+
+          // ✅ usableMonthKey للشهر القادم فقط لو آخر 7 أيام
           const usableMonthKey = computeAddonUsableMonthKey(purchasedAt);
 
           addonBuckets = [...addonBuckets];
@@ -720,14 +748,19 @@ export default async function handler(req, res) {
             addonKey: String(addonKey || ""),
             qtyRemaining: qtyToAdd,
             purchasedAt: admin.firestore.Timestamp.fromDate(purchasedAt),
+
             purchasedMonthKey,
+
             usableMonthKey,
+
+            // للتوافق
             expiresMonthKey: usableMonthKey,
           });
 
           const { keep, sum: addonsRemainingAfter } = normalizeBucketsForMonth(addonBuckets, monthKey);
           addonBuckets = keep;
 
+          // ✅ لو الاشتراك الزمني ساري، وجود رصيد بعد الاضافة يفعّل الإعفاء
           let timeValidFromOld = false;
 
           if (subSnap && subSnap.exists) {
@@ -816,6 +849,8 @@ export default async function handler(req, res) {
 
       // (E) SUBSCRIPTION ... + ✅ rule: renew last 7 days => carry addons to next month, else clear addons
       if (isSubscription && isCompany) {
+        // ✅ rule: لو الاشتراك اتدفع آخر 7 أيام من الشهر => ترحيل الـ addons للشهر الجديد
+        // لو قبل آخر 7 أيام => إلغاء الـ addons
         const renewInLast7DaysOfMonth = isInLast7DaysOfMonth(now);
 
         if (renewInLast7DaysOfMonth) {
@@ -825,12 +860,13 @@ export default async function handler(req, res) {
             expiresMonthKey: nextMonthKeyOf(now),
           }));
         } else {
-          addonBuckets = [];
+          addonBuckets = []; // ✅ يتلغى الاد اونز
           addonsRemaining = 0;
         }
 
         const lim = Number(planMonthlyLimitResolved || 0);
 
+        // ✅ نزّل الرصيد الشهري بتاع الاشتراك (reset)
         baseLimit = lim;
         baseRemaining = lim;
         usedThisMonth = 0;
@@ -879,17 +915,13 @@ export default async function handler(req, res) {
         const timeValid = endDate.getTime() > now.getTime();
         const statusNow = timeValid ? "active" : "expired";
 
-        const hasCreditsAfterSub =
-          (Number(baseRemaining || 0) + Number(addonsRemainingAfterSub || 0)) > 0;
+        const hasCreditsAfterSub = (Number(baseRemaining || 0) + Number(addonsRemainingAfterSub || 0)) > 0;
 
+        // ✅ لو انتهى الاشتراك => isActive false مهما كان
         const isActiveNow = timeValid && hasCreditsAfterSub;
 
         const companyPublicId = safeStr(udata.companyId || udata.customerId || udata.userId || customerIdMeta);
         const companyEmail = safeStr(udata.email || md.userEmail || "");
-
-        // ✅✅✅ التعديل الوحيد: تثبيت إن الحساب "مشترك" كهوية (حتى لو isActive وقف لاحقاً)
-        const subscriberUntilISO = endDate.toISOString();
-        const subscriberUntilAt = admin.firestore.Timestamp.fromDate(endDate);
 
         tx.set(
           subRef,
@@ -911,18 +943,10 @@ export default async function handler(req, res) {
             startAt: admin.firestore.Timestamp.fromDate(startDate),
             endAt: admin.firestore.Timestamp.fromDate(endDate),
             startAtISO: startDate.toISOString(),
-            endAtISO: subscriberUntilISO,
+            endAtISO: endDate.toISOString(),
 
             status: statusNow,
             isActive: isActiveNow,
-
-            // ✅✅✅ NEW: هوية الاشتراك (مش بتتأثر بخلّص الرصيد)
-            isSubscriber: true,
-            subscriberPlanKey: planKey,
-            subscriberPlanName: planName,
-            subscriberUntilAt,
-            subscriberUntilISO,
-            subscriberUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
 
             txCredits: {
               monthKey,
@@ -1036,7 +1060,9 @@ export default async function handler(req, res) {
         metadata: {
           orderId: finalRequestId,
           paymentIntentId,
-          ...(isSubscription ? { type: "subscription", planKey, planName, pricingKey, subscriptionDays: daysToApply } : {}),
+          ...(isSubscription
+            ? { type: "subscription", planKey, planName, pricingKey, subscriptionDays: daysToApply }
+            : {}),
           ...(isAddon ? { type: "addon", addonKey: addonKey || "", addonQty: Number(resolvedAddonQty || 0) } : {}),
         },
       });
