@@ -43,13 +43,6 @@ function calcDays(subscriptionDays, monthsShown) {
  * 2) vat on (base + fee1)
  * 3) fee on (base + vat1)
  * 4) vat on (base + fee2)
- *
- * Output:
- * - baseAmountAED
- * - vatAED
- * - processingFeeAED
- * - totalPrice (base + vat)  (before processing)
- * - finalPrice (totalPrice + processing)
  */
 function buildGatewayTotals(baseAmountAED) {
   const base = round2(baseAmountAED);
@@ -66,8 +59,8 @@ function buildGatewayTotals(baseAmountAED) {
   // final vat based on base + fee2 (requested)
   const vat = round2((base + fee2) * 0.05);
 
-  const totalPrice = round2(base + vat);           // before processing
-  const finalPrice = round2(totalPrice + fee2);    // charged amount (what goes to Stripe)
+  const totalPrice = round2(base + vat);        // before processing
+  const finalPrice = round2(totalPrice + fee2); // charged amount
 
   return {
     baseAmountAED: base,
@@ -103,6 +96,22 @@ async function resolveClientDocId({ searchParams, uid }) {
   }
 }
 
+// ✅ safely resolve end date from Firestore (Timestamp | ISO string)
+function resolveEndDate(subData) {
+  try {
+    if (!subData) return null;
+    const endAt = subData.endAt;
+    if (endAt && typeof endAt.toDate === "function") return endAt.toDate();
+    if (subData.endAtISO) {
+      const d = new Date(subData.endAtISO);
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export default function CompanySubscriptionsSection({
   lang = "ar",
   darkMode = false,
@@ -119,6 +128,11 @@ export default function CompanySubscriptionsSection({
 
   const [addons, setAddons] = useState([]);
   const [addonsLoading, setAddonsLoading] = useState(true);
+
+  // ✅ NEW: active subscription UI state
+  const [activePlanKey, setActivePlanKey] = useState("");
+  const [subInfo, setSubInfo] = useState(null); // optional, if you want to show expiry etc.
+  const [subInfoLoading, setSubInfoLoading] = useState(false);
 
   // ✅ Load Addons Catalog
   useEffect(() => {
@@ -176,6 +190,59 @@ export default function CompanySubscriptionsSection({
       alive = false;
     };
   }, [searchParams]);
+
+  // ✅ NEW: Load current subscription (active plan) for UI
+  useEffect(() => {
+    let alive = true;
+
+    async function loadSub() {
+      const id = (clientDocId || "").trim();
+      if (!id) return;
+
+      setSubInfoLoading(true);
+      try {
+        const subRef = doc(firestore, "companySubscriptions", id);
+        const snap = await getDoc(subRef);
+
+        if (!alive) return;
+
+        if (!snap.exists()) {
+          setSubInfo(null);
+          setActivePlanKey("");
+          return;
+        }
+
+        const data = snap.data() || {};
+        setSubInfo(data);
+
+        const now = new Date();
+        const status = String(data.status || "").toLowerCase();
+        const endDate = resolveEndDate(data);
+        const timeValid = !!endDate && endDate.getTime() > now.getTime();
+        const statusOk = status === "active" || status === "trial";
+
+        // ✅ الباقة الحالية فقط لو الاشتراك شغّال فعلاً (وقت + status)
+        if (statusOk && timeValid) {
+          const pk = String(data.planKey || data.subscriberPlanKey || "").trim();
+          setActivePlanKey(pk);
+        } else {
+          setActivePlanKey("");
+        }
+      } catch (e) {
+        console.error("load companySubscriptions failed:", e);
+        if (!alive) return;
+        setSubInfo(null);
+        setActivePlanKey("");
+      } finally {
+        if (alive) setSubInfoLoading(false);
+      }
+    }
+
+    loadSub();
+    return () => {
+      alive = false;
+    };
+  }, [clientDocId]);
 
   // ✅ Load plans
   useEffect(() => {
@@ -275,13 +342,11 @@ export default function CompanySubscriptionsSection({
           subscriptionName?.trim?.() ||
           (lang === "ar" ? `اشتراك ${planKey}` : `Subscription ${planKey}`);
 
-        // ✅ We calculate totals locally (processing + VAT) to send the correct amount to server
         const totals = buildGatewayTotals(basePrice);
 
-        // ✅ MATCH SERVER: send the FINAL amount to charge
         const payload = {
           requestType: "subscription",
-          amountAED: totals.finalPrice, // ✅ important: amount charged in Stripe
+          amountAED: totals.finalPrice,
 
           customerId: finalClientDocId,
           clientType: "company",
@@ -303,7 +368,6 @@ export default function CompanySubscriptionsSection({
           serviceId: `subscription_${planKey}`,
           serviceName: subName,
 
-          // ✅ optional: helpful metadata (non-breaking)
           baseAmountAED: totals.baseAmountAED,
           vatAED: totals.vatAED,
           processingFeeAED: totals.processingFeeAED,
@@ -318,7 +382,6 @@ export default function CompanySubscriptionsSection({
         const data = await r.json().catch(() => ({}));
         if (!r.ok || !data?.ok) throw new Error(data?.error || "Failed to create payment intent");
 
-        // ✅ UI paymentData (what /payment/service reads)
         const paymentDataForUI = {
           lang,
           requestType: "subscription",
@@ -334,17 +397,15 @@ export default function CompanySubscriptionsSection({
           pricingKey,
           subscriptionDays: days,
 
-          // ✅ breakdown fields expected by your payment page
-          price: totals.totalPrice,         // total before processing (base + vat)
-          totalPrice: totals.totalPrice,    // shown as "Total Before Discount"
-          finalPrice: totals.finalPrice,    // final charged
+          price: totals.totalPrice,
+          totalPrice: totals.totalPrice,
+          finalPrice: totals.finalPrice,
 
           printingFee: 0,
-          vat: totals.vatAED,               // ✅ NEW: VAT 5% on (base + processing)
+          vat: totals.vatAED,
           coinDiscount: 0,
-          processingFee: totals.processingFeeAED, // ✅ from calcStripeFees
+          processingFee: totals.processingFeeAED,
 
-          // keep for debugging if you like (non-breaking)
           breakdown: data?.breakdown || {
             baseAmountAED: totals.baseAmountAED,
             vatAED: totals.vatAED,
@@ -352,7 +413,6 @@ export default function CompanySubscriptionsSection({
             totalAED: totals.finalPrice,
           },
 
-          // help payment page derive base label correctly
           baseAmountAED: totals.baseAmountAED,
           userEmail: user.email,
         };
@@ -370,7 +430,7 @@ export default function CompanySubscriptionsSection({
   );
 
   // =========================
-  // ✅ Buy Addon (SERVER resolves price/qty from catalog)
+  // ✅ Buy Addon
   // =========================
   const handleBuyAddon = useCallback(
     async (addon) => {
@@ -414,13 +474,8 @@ export default function CompanySubscriptionsSection({
           titleEn ||
           (lang === "ar" ? "إضافة معاملات" : "Transaction Add-on");
 
-        // ✅ IMPORTANT:
-        // we need the base price to calculate fees + VAT.
-        // If your server returns the base in response only, we can fallback to addon.price from catalog here.
         const basePrice = round2(addon?.price ?? 0);
-
         if (!basePrice || basePrice <= 0) {
-          // if you want STRICT server pricing only, remove this check and make server return baseAmountAED.
           alert(lang === "ar" ? "سعر الإضافة غير متاح" : "Addon price not available");
           return;
         }
@@ -429,7 +484,7 @@ export default function CompanySubscriptionsSection({
 
         const payload = {
           requestType: "addon",
-          amountAED: totals.finalPrice, // ✅ charge amount
+          amountAED: totals.finalPrice,
 
           customerId: finalClientDocId,
           clientType: "company",
@@ -440,7 +495,6 @@ export default function CompanySubscriptionsSection({
           serviceId: `addon_${addonKey}`,
           serviceName: String(addonName),
 
-          // optional (non-breaking)
           baseAmountAED: totals.baseAmountAED,
           vatAED: totals.vatAED,
           processingFeeAED: totals.processingFeeAED,
@@ -474,9 +528,9 @@ export default function CompanySubscriptionsSection({
           finalPrice: totals.finalPrice,
 
           printingFee: 0,
-          vat: totals.vatAED,                   // ✅ VAT 5%
+          vat: totals.vatAED,
           coinDiscount: 0,
-          processingFee: totals.processingFeeAED, // ✅ calcStripeFees
+          processingFee: totals.processingFeeAED,
 
           breakdown: data?.breakdown || {
             baseAmountAED: totals.baseAmountAED,
@@ -529,6 +583,11 @@ export default function CompanySubscriptionsSection({
             darkMode={darkMode}
             onSubscribe={handleSubscribe}
             disabled={submitting}
+
+            // ✅ NEW props for UI states
+            activePlanKey={activePlanKey}
+            subInfo={subInfo}
+            subInfoLoading={subInfoLoading}
           />
         ))}
       </div>

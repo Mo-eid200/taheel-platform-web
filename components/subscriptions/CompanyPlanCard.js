@@ -191,11 +191,20 @@ const moLabel = (lang, n) =>
 /* =========================
    Component
 ========================= */
-export default function CompanyPlanCard({ plan, lang = "ar", darkMode = true, onSubscribe }) {
+export default function CompanyPlanCard({
+  plan,
+  lang = "ar",
+  darkMode = true,
+  onSubscribe,
+  disabled = false,
+  activePlanKey = "",
+}) {
+
   const dir = lang === "ar" ? "rtl" : "ltr";
 
   const planKeyRaw = (plan?.key || plan?.id || "starter").toString();
   const planKey = planKeyRaw.toLowerCase();
+  const isCurrentPlan = String(activePlanKey || "").trim().toLowerCase() === String(planKey || "").trim().toLowerCase();
   const theme = BRAND[planKey] || BRAND.starter;
   const Icon = theme.icon;
 
@@ -264,13 +273,15 @@ const defaultKey =
   return (
     <div dir={dir} className="w-full">
       <GlowWrap glow={theme.glow} radius="rounded-3xl" active={showMost || showOffer}>
-        <div
-          className={cn(
-            "relative rounded-3xl border bg-white/5 backdrop-blur-xl overflow-hidden",
-            theme.ring,
-            darkMode ? "" : "bg-black/5"
-          )}
-        >
+<div
+  className={cn(
+    "relative rounded-3xl border bg-white/5 backdrop-blur-xl overflow-hidden transition",
+    theme.ring,
+    darkMode ? "" : "bg-black/5",
+    isCurrentPlan ? "opacity-[0.78] grayscale-[0.15]" : ""
+  )}
+>
+
           {/* top gradient bar */}
           <div className={cn("absolute top-0 left-0 right-0 h-[5px] bg-gradient-to-r", theme.bar)} />
 
@@ -307,6 +318,12 @@ const defaultKey =
                           {lang === "ar" ? "الأكثر اختيارًا" : "Most chosen"}
                         </span>
                       ) : null}
+                      {isCurrentPlan ? (
+  <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-emerald-100 text-emerald-900 border border-emerald-200">
+    {lang === "ar" ? "الباقة الحالية" : "Current plan"}
+  </span>
+) : null}
+
                     </div>
                   </div>
 
@@ -452,7 +469,7 @@ const defaultKey =
             {/* subscribe */}
             <button
               type="button"
-              disabled={!canSubscribe}
+              disabled={!canSubscribe || disabled || isCurrentPlan}
               onClick={() =>
                 onSubscribe?.({
                   planKey: plan?.key || plan?.id || planKey,
@@ -467,12 +484,20 @@ const defaultKey =
                   subscriptionDays: monthsShown > 0 ? monthsShown * 30 : 0,
                 })
               }
-              className={cn(
-                "mt-6 w-full py-3 rounded-full font-extrabold shadow-lg transition hover:scale-[1.02] active:scale-[0.99]",
-                canSubscribe ? `cursor-pointer bg-gradient-to-r ${theme.btn}` : "cursor-not-allowed bg-gray-500/40 text-white/60"
-              )}
+className={cn(
+  "mt-6 w-full py-3 rounded-full font-extrabold shadow-lg transition",
+  isCurrentPlan
+    ? "cursor-not-allowed bg-white/10 text-white/55 border border-white/15 shadow-none"
+    : (canSubscribe && !disabled
+        ? `cursor-pointer bg-gradient-to-r ${theme.btn} hover:scale-[1.02] active:scale-[0.99]`
+        : "cursor-not-allowed bg-gray-500/40 text-white/60")
+)}
+
             >
-              {lang === "ar" ? "اشترك الآن" : "Subscribe Now"}
+              {isCurrentPlan
+                ? (lang === "ar" ? "مفعّلة الآن" : "Active Now")
+                : (lang === "ar" ? "قم بالترقية الآن" : "Upgrade Now")}
+
             </button>
           </div>
         </div>
