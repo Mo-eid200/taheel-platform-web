@@ -94,7 +94,7 @@ export default function MonthlyCreditsFloatingCounter({
   if (!mtc) return null;
 
   return (
-    <div className="fixed right-5 top-32 z-[80] hidden xl:block">
+    <div className="fixed right-5 top-40 z-[80] hidden xl:block">
       <div
         className={[
           "relative",
