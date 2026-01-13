@@ -3,13 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { doc, onSnapshot } from "firebase/firestore";
 import { firestore } from "@/lib/firebase.client";
-import {
-  FaCrown,
-  FaChartBar,
-  FaBolt,
-  FaCheckCircle,
-  FaSyncAlt,
-} from "react-icons/fa";
+import { FaCrown } from "react-icons/fa";
 
 function safeNum(v) {
   const n = Number(v);
@@ -17,8 +11,7 @@ function safeNum(v) {
 }
 
 function monthName(key, lang) {
-  // key = "YYYY-MM"
-  if (!key) return lang === "en" ? "—" : "—";
+  if (!key) return "—";
   const [y, m] = key.split("-").map((x) => Number(x));
   const d = new Date(y, (m || 1) - 1, 1);
   try {
@@ -32,9 +25,9 @@ function monthName(key, lang) {
 }
 
 export default function MonthlyCreditsFloatingCounter({
-  companyDocId, // مثال: "COM-400-0106"
+  companyDocId,
   lang = "ar",
-  compact = false, // لو حابب نسخة أصغر للموبايل
+  compact = false,
 }) {
   const [mtc, setMtc] = useState(null);
   const [sub, setSub] = useState(null);
@@ -48,7 +41,6 @@ export default function MonthlyCreditsFloatingCounter({
       setMtc(d.monthlyTxCredits || null);
     });
 
-    // (اختياري) لو عايز تعرض حالة الاشتراك isActive / endAt
     const subRef = doc(firestore, "companySubscriptions", String(companyDocId));
     const unsubSub = onSnapshot(subRef, (snap) => {
       setSub(snap.exists() ? snap.data() : null);
@@ -67,8 +59,7 @@ export default function MonthlyCreditsFloatingCounter({
     const addonsRemaining = safeNum(mtc?.addonsRemaining);
     const totalRemaining = baseRemaining + addonsRemaining;
 
-    const isActive = !!sub?.isActive; // منطقك الجديد (وقت + رصيد)
-    const endAtISO = sub?.endAtISO || "";
+    const isActive = !!sub?.isActive;
     const planName = sub?.planName || sub?.planKey || "";
 
     return {
@@ -78,203 +69,169 @@ export default function MonthlyCreditsFloatingCounter({
       addonsRemaining,
       totalRemaining,
       isActive,
-      endAtISO,
       planName,
     };
   }, [mtc, sub]);
 
   const t = {
     ar: {
-      title: "رصيدك",
-      month: "شهر الرصيد:",
-      monthly: "الطلبات الشهرية المتاحة",
-      addons: "الباقات الإضافية (Add-ons)",
-      total: "الإجمالي المتبقي",
+      topLabel: "الطلبات الشهرية المتاحة",
+      bottomLabel: "الإضافات (Add-ons)",
+      month: "شهر الرصيد",
       active: "اشتراك فعّال",
       inactive: "غير فعّال",
-      until: "حتى",
-      noData: "لا توجد بيانات رصيد",
     },
     en: {
-      title: "Your Credits",
-      month: "Billing month:",
-      monthly: "Monthly available requests",
-      addons: "Add-ons balance",
-      total: "Total remaining",
+      topLabel: "Monthly requests",
+      bottomLabel: "Add-ons",
+      month: "Billing month",
       active: "Active",
       inactive: "Inactive",
-      until: "until",
-      noData: "No credits data",
     },
   }[lang === "en" ? "en" : "ar"];
 
-  // لو مفيش بيانات نهائي
-  if (!mtc) {
-    return (
-      <div className="fixed right-4 top-28 z-[60] hidden xl:block">
-        <div className="w-[280px] rounded-2xl border border-white/10 bg-slate-950/70 backdrop-blur-xl shadow-2xl p-4">
-          <div className="text-white/90 font-extrabold text-sm flex items-center gap-2">
-            <FaChartBar className="text-sky-300" />
-            {t.title}
-          </div>
-          <div className="mt-3 text-white/60 text-xs">{t.noData}</div>
-        </div>
-      </div>
-    );
-  }
+  // لو مفيش بيانات
+  if (!mtc) return null;
 
   return (
-    <div className="fixed right-4 top-24 z-[60] hidden xl:block">
+    <div className="fixed right-5 top-32 z-[80] hidden xl:block">
       <div
         className={[
-          "w-[300px] rounded-3xl overflow-hidden",
-          "border border-white/10",
-          "bg-gradient-to-b from-[#061a3a]/85 via-[#07142b]/80 to-slate-950/70",
-          "backdrop-blur-xl shadow-[0_20px_60px_rgba(0,0,0,0.55)]",
+          "relative",
+          "w-[270px]",
+          "select-none",
+          "animate-[mercFloat_4.8s_ease-in-out_infinite]",
           compact ? "scale-95" : "",
         ].join(" ")}
+        style={{
+          filter: "drop-shadow(0 24px 60px rgba(0,0,0,0.55))",
+        }}
       >
-        {/* Header */}
-        <div className="px-4 pt-4 pb-3 border-b border-white/10">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="h-9 w-9 rounded-2xl bg-white/10 flex items-center justify-center">
-                <FaChartBar className="text-sky-300" />
+        {/* Frame */}
+        <div className="relative rounded-[22px] p-[10px] bg-gradient-to-b from-white/15 via-white/5 to-black/30 border border-white/15 backdrop-blur-xl">
+          {/* Inner screen */}
+          <div className="relative rounded-[16px] overflow-hidden bg-gradient-to-b from-[#0a1b3a]/95 via-[#08142a]/95 to-[#050a12]/95 border border-white/10">
+            {/* Top small header */}
+            <div className="px-4 pt-3 pb-2 flex items-center justify-between">
+              <div className="text-white/70 text-[11px] font-bold">
+                {t.month}:{" "}
+                <span className="text-white/90 font-extrabold">
+                  {monthName(view.monthKey, lang)}
+                </span>
               </div>
-              <div>
-                <div className="text-white font-extrabold text-[14px] leading-tight">
-                  {t.title}
-                </div>
-                <div className="text-white/60 text-[11px] mt-0.5">
-                  {t.month}{" "}
-                  <span className="text-white/85 font-bold">
-                    {monthName(view.monthKey, lang)}
-                  </span>
-                </div>
-              </div>
-            </div>
 
-            {/* Status pill */}
-            <div
-              className={[
-                "px-2.5 py-1 rounded-full text-[10px] font-extrabold",
-                view.isActive
-                  ? "bg-emerald-400/15 text-emerald-200 border border-emerald-300/20"
-                  : "bg-rose-400/15 text-rose-200 border border-rose-300/20",
-              ].join(" ")}
-              title={view.endAtISO ? `${t.until} ${view.endAtISO}` : ""}
-            >
-              <span className="inline-flex items-center gap-1">
-                {view.isActive ? <FaCheckCircle /> : <FaSyncAlt />}
-                {view.isActive ? t.active : t.inactive}
-              </span>
-            </div>
-          </div>
-
-          {view.planName ? (
-            <div className="mt-2 text-[11px] text-white/70 flex items-center gap-2">
-              <FaCrown className="text-yellow-300" />
-              <span className="font-bold text-white/85">{view.planName}</span>
-            </div>
-          ) : null}
-        </div>
-
-        {/* Body */}
-        <div className="p-4">
-          {/* Total Gauge */}
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-3">
-            <div className="flex items-center justify-between">
-              <div className="text-white/80 text-[12px] font-bold">
-                {t.total}
-              </div>
-              <div className="text-white font-extrabold text-[16px]">
-                {view.totalRemaining}
-              </div>
-            </div>
-
-            {/* progress bar */}
-            <div className="mt-2 h-2 rounded-full bg-white/10 overflow-hidden">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-sky-400 to-indigo-400"
-                style={{
-                  width:
-                    view.baseLimit > 0
-                      ? `${Math.min(
-                          100,
-                          Math.round((view.totalRemaining / (view.baseLimit + 0.0001)) * 100)
-                        )}%`
-                      : view.totalRemaining > 0
-                      ? "100%"
-                      : "0%",
-                }}
-              />
-            </div>
-            <div className="mt-2 text-[10px] text-white/55">
-              {lang === "en"
-                ? "Updates in real-time after every order."
-                : "يتحدث تلقائيًا بعد كل طلب."}
-            </div>
-          </div>
-
-          {/* Two counters */}
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            {/* Monthly */}
-            <div className="rounded-2xl bg-gradient-to-b from-sky-500/15 to-white/5 border border-sky-300/15 p-3">
-              <div className="text-[11px] text-white/80 font-bold leading-snug">
-                {t.monthly}
+                className={[
+                  "text-[10px] font-extrabold px-2 py-1 rounded-full border",
+                  view.isActive
+                    ? "text-emerald-200 border-emerald-300/20 bg-emerald-400/10"
+                    : "text-rose-200 border-rose-300/20 bg-rose-400/10",
+                ].join(" ")}
+              >
+                {view.isActive ? t.active : t.inactive}
               </div>
-              <div className="mt-2 flex items-end justify-between">
-                <div className="text-white font-extrabold text-[22px]">
+            </div>
+
+            {/* Odometer body */}
+            <div className="px-4 pb-4">
+              {/* TOP number */}
+              <div className="text-white/75 text-[11px] font-bold mb-1">
+                {t.topLabel}
+              </div>
+
+              <div className="flex items-end justify-between">
+                <div
+                  className="text-white font-black tracking-[0.08em] text-[44px] leading-none"
+                  style={{
+                    fontFamily:
+                      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+                    textShadow: "0 2px 10px rgba(0,0,0,0.35)",
+                  }}
+                >
                   {view.baseRemaining}
                 </div>
-                <div className="text-white/50 text-[11px] font-bold">
-                  / {view.baseLimit}
+
+                <div className="text-white/55 text-[13px] font-extrabold pb-1">
+                  / {view.baseLimit || 0}
                 </div>
               </div>
-              <div className="mt-2 h-2 rounded-full bg-white/10 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-sky-400 to-cyan-300"
-                  style={{
-                    width:
-                      view.baseLimit > 0
-                        ? `${Math.min(100, Math.round((view.baseRemaining / view.baseLimit) * 100))}%`
-                        : "0%",
-                  }}
-                />
-              </div>
-            </div>
 
-            {/* Add-ons */}
-            <div className="rounded-2xl bg-gradient-to-b from-violet-500/15 to-white/5 border border-violet-300/15 p-3">
-              <div className="text-[11px] text-white/80 font-bold leading-snug flex items-center gap-1">
-                <FaBolt className="text-violet-200" />
-                {t.addons}
+              {/* Red divider line (like Mercedes) */}
+              <div className="relative my-3">
+                <div className="h-[2px] bg-gradient-to-r from-transparent via-red-500/80 to-transparent" />
               </div>
-              <div className="mt-2 flex items-end justify-between">
-                <div className="text-white font-extrabold text-[22px]">
+
+              {/* BOTTOM number */}
+              <div className="text-white/75 text-[11px] font-bold mb-1 flex items-center justify-between">
+                <span>{t.bottomLabel}</span>
+                {view.planName ? (
+                  <span className="inline-flex items-center gap-1 text-[10px] text-yellow-200/90 font-extrabold">
+                    <FaCrown className="text-yellow-300" /> {view.planName}
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="flex items-end justify-between">
+                <div
+                  className="text-white font-black tracking-[0.08em] text-[40px] leading-none"
+                  style={{
+                    fontFamily:
+                      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+                    textShadow: "0 2px 10px rgba(0,0,0,0.35)",
+                  }}
+                >
                   {view.addonsRemaining}
                 </div>
-                <div className="text-white/50 text-[11px] font-bold">TX</div>
+
+                <div className="text-white/55 text-[12px] font-extrabold pb-1">
+                  TX
+                </div>
               </div>
-              <div className="mt-2 h-2 rounded-full bg-white/10 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-violet-400 to-fuchsia-300"
-                  style={{
-                    width: view.addonsRemaining > 0 ? "100%" : "0%",
-                  }}
-                />
+
+              {/* tiny hint */}
+              <div className="mt-3 text-[10px] text-white/45">
+                {lang === "en"
+                  ? "Updates automatically after each order."
+                  : "يتحدث تلقائيًا بعد كل طلب."}
               </div>
             </div>
-          </div>
 
-          {/* Foot note */}
-          <div className="mt-3 text-[10px] text-white/55 leading-relaxed">
-            {lang === "en"
-              ? "Monthly credits reset automatically each new month. Add-ons follow their usable month rules."
-              : "الرصيد الشهري يتصفّر تلقائيًا أول كل شهر. والإضافات تُحسب حسب شهر الاستخدام (usableMonthKey)."}
+            {/* soft scanline effect */}
+            <div
+              className="pointer-events-none absolute inset-0 opacity-[0.12]"
+              style={{
+                backgroundImage:
+                  "linear-gradient(to bottom, rgba(255,255,255,0.10) 1px, rgba(0,0,0,0) 1px)",
+                backgroundSize: "100% 4px",
+                mixBlendMode: "overlay",
+              }}
+            />
           </div>
         </div>
+
+        {/* floating glow */}
+        <div
+          className="pointer-events-none absolute -inset-1 rounded-[26px]"
+          style={{
+            boxShadow: "0 0 0 1px rgba(59,130,246,0.18), 0 0 30px rgba(59,130,246,0.12)",
+          }}
+        />
       </div>
+
+      {/* Keyframes */}
+      <style jsx>{`
+        @keyframes mercFloat {
+          0% {
+            transform: translateY(0px);
+          }
+          50% {
+            transform: translateY(-10px);
+          }
+          100% {
+            transform: translateY(0px);
+          }
+        }
+      `}</style>
     </div>
   );
 }
