@@ -87,51 +87,52 @@ export default function MonthlyCreditsFloatingCounter({
     };
   }, [companyDocId]);
 
-  const view = useMemo(() => {
-    const monthKey = mtc?.monthKey || "";
+const view = useMemo(() => {
+  const monthKey = mtc?.monthKey || "";
 
-    const baseLimit = safeNum(mtc?.baseLimit);
-    const baseRemaining = safeNum(mtc?.baseRemaining);
-    const addonsRemaining = safeNum(mtc?.addonsRemaining);
+  const baseLimit = safeNum(mtc?.baseLimit);
+  const baseRemaining = safeNum(mtc?.baseRemaining);
+  const addonsRemaining = safeNum(mtc?.addonsRemaining);
 
-    const planName = sub?.planName || sub?.planKey || "";
+  const planName = sub?.planName || sub?.planKey || "";
 
-    const startAt = toDateSafe(sub?.startAt);
-    const endAt = toDateSafe(sub?.endAt);
+  const startAt = toDateSafe(sub?.startAt);
+  const endAt = toDateSafe(sub?.endAt);
 
-    const now = new Date();
+  const now = new Date();
 
-    // ✅ time validity depends on endAt, if missing => not active
-    const notExpired = endAt ? endAt.getTime() > now.getTime() : false;
+  // ✅ ظهور/اختفاء العداد: مربوط فقط بتاريخ endAt
+  // لو مفيش endAt => اعتبره غير صالح (مايظهرش)
+  const timeActive = !!endAt && endAt.getTime() > now.getTime();
 
-    // ✅ show/hide (timer): timeActive only
-    const timeActive = !!sub?.timeActive && notExpired;
+  // ✅ isActive (المزايا) = ما يتحكمش في الظهور، ده بس للـ fees
+  // ويتقفل لما الرصيد (الاشتراك + الاداونز) يبقى صفر
+  const totalRemaining = baseRemaining + addonsRemaining;
+  const benefitsActive = timeActive && totalRemaining > 0;
 
-    // ✅ benefits (fees waiver): isActive may become false when credits = 0
-    const benefitsActive = !!sub?.isActive;
+  // ✅ alias لو عندك كود قديم بيستخدم isActive
+  const isActive = benefitsActive;
 
-    // ✅ alias to avoid breaking old code
-    const isActive = benefitsActive;
+  const monthlyExhausted = baseLimit > 0 && baseRemaining <= 0;
+  const addonsEmpty = addonsRemaining <= 0;
 
-    const monthlyExhausted = baseLimit > 0 && baseRemaining <= 0;
-    const addonsEmpty = addonsRemaining <= 0;
+  return {
+    monthKey,
+    baseLimit,
+    baseRemaining,
+    addonsRemaining,
+    totalRemaining,
+    planName,
+    startAt,
+    endAt,
+    timeActive,
+    benefitsActive,
+    isActive,
+    monthlyExhausted,
+    addonsEmpty,
+  };
+}, [mtc, sub]);
 
-    return {
-      monthKey,
-      baseLimit,
-      baseRemaining,
-      addonsRemaining,
-      planName,
-      startAt,
-      endAt,
-      notExpired,
-      timeActive,
-      benefitsActive,
-      isActive,
-      monthlyExhausted,
-      addonsEmpty,
-    };
-  }, [mtc, sub]);
 
   const t = {
     ar: {
@@ -161,8 +162,12 @@ export default function MonthlyCreditsFloatingCounter({
   }[lang === "en" ? "en" : "ar"];
 
   // لازم يكون عندنا بيانات الشهر + لازم نكون قرينا الاشتراك
-  if (!mtc) return null;
-  if (!subLoaded) return null;
+if (!mtc) return null;
+if (!subLoaded) return null;
+
+// ✅ الإخفاء مربوط بالوقت فقط
+if (!view.timeActive) return null;
+
 
   // ✅ الإخفاء مربوط بوقت الاشتراك فقط
   if (!view.timeActive) return null;
