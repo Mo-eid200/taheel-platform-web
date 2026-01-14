@@ -247,13 +247,15 @@ export default function ServicePayModal({
 
       // If not company => ignore
       if (!isCompany) {
-        if (mounted) setSubBalance({ remainingTransactions: 0, addonTransactions: 0, loading: false });
+        if (mounted)
+          setSubBalance({ remainingTransactions: 0, addonTransactions: 0, loading: false });
         return;
       }
 
       // If freePrinting passed explicitly => treat as available
       if (freePrinting) {
-        if (mounted) setSubBalance({ remainingTransactions: 1, addonTransactions: 0, loading: false });
+        if (mounted)
+          setSubBalance({ remainingTransactions: 1, addonTransactions: 0, loading: false });
         return;
       }
 
@@ -273,7 +275,8 @@ export default function ServicePayModal({
   const hasFreeTxn =
     isCompany &&
     !subBalance.loading &&
-    (toNumberSafe(subBalance.addonTransactions, 0) > 0 || toNumberSafe(subBalance.remainingTransactions, 0) > 0);
+    (toNumberSafe(subBalance.addonTransactions, 0) > 0 ||
+      toNumberSafe(subBalance.remainingTransactions, 0) > 0);
 
   // --------------------
   // ✅ Build totals (Source of Truth)
@@ -323,10 +326,10 @@ export default function ServicePayModal({
   const effectiveVatTotal = waiverActive
     ? 0
     : Number.isFinite(toNumberSafe(vatTotal, NaN))
-      ? +toNumberSafe(vatTotal, 0).toFixed(2)
-      : effectivePrintingTotal > 0
-        ? +(effectivePrintingTotal * 0.05).toFixed(2)
-        : 0;
+    ? +toNumberSafe(vatTotal, 0).toFixed(2)
+    : effectivePrintingTotal > 0
+    ? +(effectivePrintingTotal * 0.05).toFixed(2)
+    : 0;
 
   // ✅ Total before VAT (after waiver enforcement)
   const cleanTotalBeforeVat = waiverActive
@@ -359,9 +362,10 @@ export default function ServicePayModal({
 
   const stripeFeeValue = payMethod === "gateway" ? +stripeFeesResult.stripeFee.toFixed(2) : 0;
 
-  const finalPriceWithFees = payMethod === "gateway"
-    ? +stripeFeesResult.totalAmount.toFixed(2)
-    : finalPriceNoGateway;
+  const finalPriceWithFees =
+    payMethod === "gateway"
+      ? +stripeFeesResult.totalAmount.toFixed(2)
+      : finalPriceNoGateway;
 
   async function getServiceData() {
     if (!serviceName && !serviceId) return {};
@@ -384,7 +388,11 @@ export default function ServicePayModal({
 
     try {
       if (!customerId || !userEmail || !serviceName) {
-        setPayMsg(lang === "ar" ? "بيانات العميل أو البريد أو الخدمة ناقصة." : "Customer ID, email or service name missing.");
+        setPayMsg(
+          lang === "ar"
+            ? "بيانات العميل أو البريد أو الخدمة ناقصة."
+            : "Customer ID, email or service name missing."
+        );
         return;
       }
 
@@ -422,16 +430,24 @@ export default function ServicePayModal({
       const providers = Array.isArray(serviceData?.providers)
         ? serviceData.providers
         : serviceData?.providers
-          ? [serviceData.providers]
-          : Array.isArray(provider)
-            ? provider
-            : provider
-              ? [provider]
-              : [];
+        ? [serviceData.providers]
+        : Array.isArray(provider)
+        ? provider
+        : provider
+        ? [provider]
+        : [];
 
       const statusHistory = [
-        { status: "awaiting_payment", timestamp: new Date().toISOString(), updatedBy: assignedToName || "System" },
-        { status: "completed", timestamp: new Date().toISOString(), updatedBy: assignedToName || "System" },
+        {
+          status: "awaiting_payment",
+          timestamp: new Date().toISOString(),
+          updatedBy: assignedToName || "System",
+        },
+        {
+          status: "completed",
+          timestamp: new Date().toISOString(),
+          updatedBy: assignedToName || "System",
+        },
       ];
 
       // ✅ Save request (same shape)
@@ -615,10 +631,10 @@ export default function ServicePayModal({
   const isWallet = payMethod === "wallet";
   const isGateway = payMethod === "gateway";
 
-  // ✅ Smaller + fits your theme
+  // ✅ Themes (unchanged logic, just styles)
   const headerTheme = isWallet
-    ? "from-emerald-800 via-emerald-700 to-green-800"
-    : "from-indigo-800 via-blue-800 to-cyan-700";
+    ? "from-emerald-900 via-emerald-800 to-green-900"
+    : "from-[#0b1f3a] via-[#123a6b] to-[#0b1f3a]";
 
   const payBtnTheme = isWallet
     ? "from-emerald-500 via-emerald-600 to-green-600 hover:from-emerald-600 hover:to-green-700"
@@ -640,29 +656,29 @@ export default function ServicePayModal({
         exit={{ opacity: 0 }}
       >
         <motion.div
-          className="relative w-full max-w-sm rounded-[22px] overflow-hidden shadow-2xl border border-white/15"
-          initial={{ scale: 0.98, opacity: 0, y: 22 }}
+          className="relative w-full max-w-4xl rounded-[22px] overflow-hidden shadow-2xl border border-white/15"
+          initial={{ scale: 0.98, opacity: 0, y: 18 }}
           animate={{ scale: 1, opacity: 1, y: 0 }}
-          exit={{ scale: 0.98, opacity: 0, y: 22 }}
-          transition={{ duration: 0.22, ease: "easeOut" }}
+          exit={{ scale: 0.98, opacity: 0, y: 18 }}
+          transition={{ duration: 0.20, ease: "easeOut" }}
         >
-          {/* Header */}
-          <div className={`px-5 pt-5 pb-4 bg-gradient-to-r ${headerTheme}`}>
+          {/* Header (smaller) */}
+          <div className={`px-4 pt-4 pb-3 bg-gradient-to-r ${headerTheme}`}>
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-2xl bg-white/10 border border-white/15 flex items-center justify-center shadow">
+                <div className="w-10 h-10 rounded-2xl bg-white/10 border border-white/15 flex items-center justify-center shadow">
                   {isWallet ? (
-                    <FaWallet className="text-white text-[18px]" />
+                    <FaWallet className="text-white text-[16px]" />
                   ) : (
-                    <FaCreditCard className="text-white text-[18px]" />
+                    <FaCreditCard className="text-white text-[16px]" />
                   )}
                 </div>
 
                 <div className="flex flex-col">
-                  <div className="text-white font-black text-[16px] leading-tight">
-                    {lang === "ar" ? "بوابة الدفع" : "Payment"}
+                  <div className="text-white font-black text-[15px] leading-tight">
+                    {lang === "ar" ? "الدفع" : "Payment"}
                   </div>
-                  <div className="text-white/85 text-[11px] font-semibold">
+                  <div className="text-white/80 text-[10px] font-semibold">
                     {lang === "ar" ? "عملية مشفّرة وآمنة" : "Secure & Encrypted"}
                   </div>
                 </div>
@@ -677,239 +693,256 @@ export default function ServicePayModal({
               </button>
             </div>
 
-            {/* Service name */}
+            {/* Service name row (compact) */}
             <div className="mt-3 rounded-2xl bg-white/10 border border-white/15 p-3">
-              <div className="text-white/75 text-[11px] font-bold">
-                {lang === "ar" ? "الخدمة" : "Service"}
-              </div>
-              <div className="text-white font-extrabold text-[13px] leading-snug">
-                {serviceName}
-              </div>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-white/70 text-[10px] font-bold">
+                    {lang === "ar" ? "الخدمة" : "Service"}
+                  </div>
+                  <div className="text-white font-extrabold text-[12px] leading-snug truncate">
+                    {serviceName}
+                  </div>
+                </div>
 
-              {/* Badges */}
-              <div className="mt-2 flex flex-wrap gap-2">
-                {waiverActive && (
-                  <span className={`${badgeBase} bg-emerald-200/15 text-emerald-50 border-emerald-200/25`}>
-                    {lang === "ar"
-                      ? "اشتراك/إضافات فعّالة: طباعة + ضريبة مجانًا"
-                      : "Active Plan/Add-ons: Printing + VAT waived"}
+                <div className="flex flex-wrap gap-2 justify-end">
+                  {waiverActive && (
+                    <span
+                      className={`${badgeBase} bg-white/10 text-emerald-100 border-emerald-200/25`}
+                    >
+                      {lang === "ar"
+                        ? "مجانًا: طباعة + ضريبة"
+                        : "Free: Printing + VAT"}
+                    </span>
+                  )}
+                  <span className={`${badgeBase} bg-white/10 text-white/90 border-white/15`}>
+                    {lang === "ar" ? "VAT 5% على الطباعة" : "VAT 5% on printing"}
                   </span>
-                )}
-                <span className={`${badgeBase} bg-white/10 text-white/90 border-white/15`}>
-                  {lang === "ar" ? "VAT 5% على الطباعة فقط" : "VAT 5% on printing only"}
-                </span>
-                <span className={`${badgeBase} bg-white/10 text-white/90 border-white/15`}>
-                  🔒 {lang === "ar" ? "Secure" : "Secure"}
-                </span>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Body */}
-          <div className="px-5 pt-4 pb-5 bg-gradient-to-b from-white via-emerald-50 to-white">
-            {/* Invoice */}
-            <div className="rounded-2xl border border-emerald-100 bg-white shadow-sm p-4">
-              <div className="flex items-center justify-between mb-2">
-                <div className="font-black text-emerald-900 text-[13px]">
-                  {lang === "ar" ? "ملخص الدفع" : "Payment Summary"}
-                </div>
-                <div className="text-[10px] font-bold text-gray-500">
-                  {totals.usedCardTotals ? (lang === "ar" ? "قيم دقيقة" : "Exact") : (lang === "ar" ? "قيم تقديرية" : "Fallback")}
-                </div>
-              </div>
+          {/* Body (LANDSCAPE) */}
+          <div className="px-4 py-4 bg-gradient-to-b from-white via-emerald-50 to-white">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {/* LEFT: coins + methods */}
+              <div className="space-y-3">
+                {/* Coins toggle (compact) */}
+                <div className="rounded-2xl border border-yellow-100 bg-white p-3 shadow-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="flex items-center gap-2 font-black text-[12px] text-emerald-900 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={useCoins}
+                        onChange={(e) => setUseCoins(e.target.checked)}
+                        disabled={(coinsBalance || 0) < 1 || maxCoinDiscountPoints <= 0}
+                        className="accent-yellow-500"
+                      />
+                      <FaCoins className="text-yellow-500" />
+                      {lang === "ar" ? "استخدم الكوينات" : "Use coins"}
+                      <span className="text-[10px] font-bold text-gray-500">
+                        ({lang === "ar" ? "حتى 10% من الطباعة" : "up to 10% of printing"})
+                      </span>
+                    </label>
 
-              <div className="space-y-2 text-[12px] font-bold text-gray-700">
-                <div className="flex justify-between">
-                  <span>{lang === "ar" ? "الإجمالي قبل خصم الكوينات" : "Total Before Coins"}</span>
-                  <span>{totalWithVatFinal.toFixed(2)} د.إ</span>
-                </div>
+                    <div className="text-[11px] font-black text-yellow-700">
+                      {lang === "ar" ? "رصيدك:" : "Balance:"} {coinsBalance || 0}
+                    </div>
+                  </div>
 
-                <div className="flex justify-between">
-                  <span>{lang === "ar" ? "رسوم الطباعة (إجمالي)" : "Printing Total"}</span>
-                  <span>
-                    {effectivePrintingTotal > 0 ? (
-                      `${effectivePrintingTotal.toFixed(2)} د.إ`
+                  <div className="mt-2 text-[11px] font-semibold text-gray-600">
+                    {!useCoins ? (
+                      <span className="flex items-center gap-2">
+                        <span className="inline-flex w-2 h-2 rounded-full bg-emerald-500" />
+                        {lang === "ar"
+                          ? `مكافأة: ${cashbackCoins} كوين`
+                          : `Cashback: ${cashbackCoins} coins`}
+                      </span>
                     ) : (
-                      <span className="text-emerald-700 font-black">
-                        {lang === "ar" ? "0 (مجانًا)" : "0 (Waived)"}
+                      <span className="flex items-center gap-2">
+                        <span className="inline-flex w-2 h-2 rounded-full bg-gray-400" />
+                        {lang === "ar" ? "لا مكافأة عند الخصم" : "No cashback with discount"}
                       </span>
                     )}
-                  </span>
+                  </div>
                 </div>
 
-                <div className="flex justify-between">
-                  <span>{lang === "ar" ? "ضريبة 5% على الطباعة" : "VAT 5% on Printing"}</span>
-                  <span>
-                    {effectiveVatTotal > 0 ? (
-                      `${effectiveVatTotal.toFixed(2)} د.إ`
-                    ) : (
-                      <span className="text-emerald-700 font-black">
-                        {lang === "ar" ? "0 (مجانًا)" : "0 (Waived)"}
-                      </span>
+                {/* Pay methods (compact) */}
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setPayMethod("wallet")}
+                    disabled={(Number(userWallet) || 0) < finalPriceNoGateway}
+                    className={`text-left rounded-2xl p-3 bg-white border transition relative ${
+                      (Number(userWallet) || 0) < finalPriceNoGateway
+                        ? "opacity-50 cursor-not-allowed border-gray-200"
+                        : `cursor-pointer ${methodRing(isWallet)} border-emerald-100 hover:shadow`
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center">
+                        <FaWallet className="text-emerald-700" />
+                      </div>
+                      {isWallet && <FaCheckCircle className="text-emerald-600" />}
+                    </div>
+
+                    <div className="mt-2 font-black text-emerald-900 text-[12px]">
+                      {lang === "ar" ? "المحفظة" : "Wallet"}
+                    </div>
+                    <div className="text-[10px] font-bold text-gray-600 mt-1">
+                      {lang === "ar" ? "الرصيد:" : "Balance:"}{" "}
+                      {Number(userWallet || 0).toFixed(2)} د.إ
+                    </div>
+
+                    {(Number(userWallet) || 0) < finalPriceNoGateway && (
+                      <div className="mt-2 text-[10px] font-black text-red-600">
+                        {lang === "ar" ? "الرصيد غير كافي" : "Insufficient balance"}
+                      </div>
                     )}
-                  </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPayMethod("gateway")}
+                    className={`text-left rounded-2xl p-3 bg-white border border-blue-100 transition cursor-pointer ${methodRing(
+                      isGateway
+                    )} hover:shadow`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center">
+                        <FaCreditCard className="text-blue-700" />
+                      </div>
+                      {isGateway && <FaCheckCircle className="text-emerald-600" />}
+                    </div>
+
+                    <div className="mt-2 font-black text-blue-900 text-[12px]">
+                      {lang === "ar" ? "البوابة" : "Gateway"}
+                    </div>
+                    <div className="text-[10px] font-bold text-gray-600 mt-1">
+                      Stripe / Cards
+                    </div>
+                  </button>
                 </div>
 
-                <div className="flex justify-between">
-                  <span className="flex items-center gap-1">
-                    <FaCoins className="text-yellow-500" size={12} />
-                    {lang === "ar" ? "خصم الكوينات" : "Coins Discount"}
-                  </span>
-                  <span className="text-yellow-700">
-                    {useCoins ? `-${coinDiscountValueAed.toFixed(2)} د.إ` : "0 د.إ"}
-                  </span>
-                </div>
-
-                <div className="flex justify-between">
-                  <span>{lang === "ar" ? "رسوم المعالجة" : "Processing Fee"}</span>
-                  <span>{isGateway ? stripeFeeValue.toFixed(2) : "0.00"} د.إ</span>
-                </div>
-
-                <div className="h-px bg-emerald-100 my-2" />
-
-                <div className="flex justify-between text-[13px]">
-                  <span className="font-extrabold text-emerald-900">
-                    {lang === "ar" ? "السعر النهائي" : "Final Total"}
-                  </span>
-                  <span className="font-black text-emerald-800">
-                    {finalPriceWithFees.toFixed(2)} د.إ
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Coins toggle */}
-            <div className="mt-3 rounded-2xl border border-yellow-100 bg-white p-4 shadow-sm">
-              <div className="flex items-center justify-between gap-3">
-                <label className="flex items-center gap-2 font-black text-[12px] text-emerald-900 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={useCoins}
-                    onChange={(e) => setUseCoins(e.target.checked)}
-                    disabled={(coinsBalance || 0) < 1 || maxCoinDiscountPoints <= 0}
-                    className="accent-yellow-500"
-                  />
-                  <FaCoins className="text-yellow-500" />
-                  {lang === "ar" ? "استخدم الكوينات" : "Use coins"}
-                  <span className="text-[10px] font-bold text-gray-500">
-                    ({lang === "ar" ? "حتى 10% من الطباعة" : "up to 10% of printing"})
-                  </span>
-                </label>
-
-                <div className="text-[11px] font-black text-yellow-700">
-                  {lang === "ar" ? "رصيدك:" : "Balance:"} {coinsBalance || 0}
+                <div className="text-center text-[10px] font-semibold text-gray-500">
+                  🔒 {lang === "ar" ? "بيانات الدفع مشفرة بالكامل" : "Payment data is fully encrypted"}
                 </div>
               </div>
 
-              <div className="mt-2 text-[11px] font-semibold text-gray-600">
-                {!useCoins ? (
-                  <span className="flex items-center gap-2">
-                    <span className="inline-flex w-2 h-2 rounded-full bg-emerald-500" />
-                    {lang === "ar"
-                      ? `ستحصل على ${cashbackCoins} كوين مكافأة`
-                      : `You’ll get ${cashbackCoins} coins cashback`}
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-2">
-                    <span className="inline-flex w-2 h-2 rounded-full bg-gray-400" />
-                    {lang === "ar" ? "لا مكافأة عند استخدام الكوينات" : "No cashback when using coins"}
-                  </span>
+              {/* RIGHT: invoice + pay */}
+              <div className="space-y-3">
+                {/* Invoice (compact) */}
+                <div className="rounded-2xl border border-emerald-100 bg-white shadow-sm p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="font-black text-emerald-900 text-[13px]">
+                      {lang === "ar" ? "ملخص الدفع" : "Summary"}
+                    </div>
+                    <div className="text-[10px] font-bold text-gray-500">
+                      {totals.usedCardTotals
+                        ? lang === "ar"
+                          ? "قيم دقيقة"
+                          : "Exact"
+                        : lang === "ar"
+                        ? "تقديري"
+                        : "Fallback"}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 text-[12px] font-bold text-gray-700">
+                    <div className="flex justify-between">
+                      <span>{lang === "ar" ? "الإجمالي قبل خصم الكوينات" : "Total Before Coins"}</span>
+                      <span>{totalWithVatFinal.toFixed(2)} د.إ</span>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span>{lang === "ar" ? "رسوم الطباعة" : "Printing"}</span>
+                      <span>
+                        {effectivePrintingTotal > 0 ? (
+                          `${effectivePrintingTotal.toFixed(2)} د.إ`
+                        ) : (
+                          <span className="text-emerald-700 font-black">
+                            {lang === "ar" ? "0 (مجانًا)" : "0 (Waived)"}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span>{lang === "ar" ? "VAT على الطباعة" : "VAT on Printing"}</span>
+                      <span>
+                        {effectiveVatTotal > 0 ? (
+                          `${effectiveVatTotal.toFixed(2)} د.إ`
+                        ) : (
+                          <span className="text-emerald-700 font-black">
+                            {lang === "ar" ? "0 (مجانًا)" : "0 (Waived)"}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span className="flex items-center gap-1">
+                        <FaCoins className="text-yellow-500" size={12} />
+                        {lang === "ar" ? "خصم الكوينات" : "Coins Discount"}
+                      </span>
+                      <span className="text-yellow-700">
+                        {useCoins ? `-${coinDiscountValueAed.toFixed(2)} د.إ` : "0 د.إ"}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span>{lang === "ar" ? "رسوم المعالجة" : "Processing Fee"}</span>
+                      <span>{isGateway ? stripeFeeValue.toFixed(2) : "0.00"} د.إ</span>
+                    </div>
+
+                    <div className="h-px bg-emerald-100 my-2" />
+
+                    <div className="flex justify-between text-[13px]">
+                      <span className="font-extrabold text-emerald-900">
+                        {lang === "ar" ? "السعر النهائي" : "Final Total"}
+                      </span>
+                      <span className="font-black text-emerald-800">
+                        {finalPriceWithFees.toFixed(2)} د.إ
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Pay button */}
+                <button
+                  onClick={onPayClick}
+                  disabled={isPaying}
+                  className={`w-full py-3 rounded-full font-black text-[14px] text-white shadow-lg transition bg-gradient-to-r ${payBtnTheme} ${
+                    isPaying ? "opacity-50 cursor-wait" : "hover:scale-[1.01]"
+                  }`}
+                >
+                  {isPaying ? (
+                    <span className="flex items-center justify-center gap-2 text-[13px]">
+                      <FaSpinner className="animate-spin" />
+                      {lang === "ar" ? "جاري الدفع..." : "Processing..."}
+                    </span>
+                  ) : (
+                    <span>
+                      {lang === "ar"
+                        ? `ادفع الآن (${finalPriceWithFees.toFixed(2)} د.إ)`
+                        : `Pay Now (${finalPriceWithFees.toFixed(2)} AED)`}
+                    </span>
+                  )}
+                </button>
+
+                {/* Message */}
+                {payMsg && (
+                  <div
+                    className={`text-center font-black text-xs flex items-center justify-center gap-2 ${
+                      msgSuccess ? "text-emerald-700" : "text-red-600"
+                    }`}
+                  >
+                    {msgSuccess ? <FaCheckCircle /> : <FaExclamationCircle />}
+                    <span>{payMsg}</span>
+                  </div>
                 )}
               </div>
-            </div>
-
-            {/* Pay method cards */}
-            <div className="mt-3 grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => setPayMethod("wallet")}
-                disabled={(Number(userWallet) || 0) < finalPriceNoGateway}
-                className={`text-left rounded-2xl p-3 bg-white border transition relative ${
-                  (Number(userWallet) || 0) < finalPriceNoGateway
-                    ? "opacity-50 cursor-not-allowed border-gray-200"
-                    : `cursor-pointer ${methodRing(isWallet)} border-emerald-100 hover:shadow`
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center">
-                    <FaWallet className="text-emerald-700" />
-                  </div>
-                  {isWallet && <FaCheckCircle className="text-emerald-600" />}
-                </div>
-
-                <div className="mt-2 font-black text-emerald-900 text-[13px]">
-                  {lang === "ar" ? "المحفظة" : "Wallet"}
-                </div>
-                <div className="text-[11px] font-bold text-gray-600 mt-1">
-                  {lang === "ar" ? "الرصيد:" : "Balance:"} {Number(userWallet || 0).toFixed(2)} د.إ
-                </div>
-
-                {(Number(userWallet) || 0) < finalPriceNoGateway && (
-                  <div className="mt-2 text-[10px] font-black text-red-600">
-                    {lang === "ar" ? "الرصيد غير كافي" : "Insufficient balance"}
-                  </div>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setPayMethod("gateway")}
-                className={`text-left rounded-2xl p-3 bg-white border border-blue-100 transition cursor-pointer ${methodRing(
-                  isGateway
-                )} hover:shadow`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center">
-                    <FaCreditCard className="text-blue-700" />
-                  </div>
-                  {isGateway && <FaCheckCircle className="text-emerald-600" />}
-                </div>
-
-                <div className="mt-2 font-black text-blue-900 text-[13px]">
-                  {lang === "ar" ? "بوابة الدفع" : "Gateway"}
-                </div>
-                <div className="text-[11px] font-bold text-gray-600 mt-1">
-                  {lang === "ar" ? "Stripe / Cards" : "Stripe / Cards"}
-                </div>
-              </button>
-            </div>
-
-            {/* Pay button */}
-            <button
-              onClick={onPayClick}
-              disabled={isPaying}
-              className={`mt-4 w-full py-3 rounded-full font-black text-[14px] text-white shadow-lg transition bg-gradient-to-r ${payBtnTheme} ${
-                isPaying ? "opacity-50 cursor-wait" : "hover:scale-[1.01]"
-              }`}
-            >
-              {isPaying ? (
-                <span className="flex items-center justify-center gap-2 text-[13px]">
-                  <FaSpinner className="animate-spin" />
-                  {lang === "ar" ? "جاري الدفع..." : "Processing..."}
-                </span>
-              ) : (
-                <span>
-                  {lang === "ar"
-                    ? `ادفع الآن (${finalPriceWithFees.toFixed(2)} د.إ)`
-                    : `Pay Now (${finalPriceWithFees.toFixed(2)} AED)`}
-                </span>
-              )}
-            </button>
-
-            {/* Message */}
-            {payMsg && (
-              <div
-                className={`mt-3 text-center font-black text-xs flex items-center justify-center gap-2 ${
-                  msgSuccess ? "text-emerald-700" : "text-red-600"
-                }`}
-              >
-                {msgSuccess ? <FaCheckCircle /> : <FaExclamationCircle />}
-                <span>{payMsg}</span>
-              </div>
-            )}
-
-            <div className="mt-3 text-center text-[11px] font-semibold text-gray-500">
-              🔒 {lang === "ar" ? "بيانات الدفع مشفرة بالكامل" : "Payment data is fully encrypted"}
             </div>
           </div>
         </motion.div>

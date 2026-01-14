@@ -411,15 +411,17 @@ export default function ServiceProfileCard({
 
           {docsForUI.length > 0 && (
             <>
-              <div className="font-bold text-emerald-600 mb-1 text-xs text-center">
-                <FaFileAlt className="inline mr-1" />
-                {lang === "ar" ? "المستندات المطلوبة" : "Required Documents"}
-              </div>
-              <ul className="list-inside list-disc text-xs text-gray-700 mb-2 text-right">
-                {docsForUI.map((doc, i) => (
-                  <li key={i}>{doc}</li>
-                ))}
-              </ul>
+<div className="font-extrabold text-blue-100 mb-1 text-xs text-center">
+  <FaFileAlt className="inline mr-1 text-blue-200" />
+  {lang === "ar" ? "المستندات المطلوبة" : "Required Documents"}
+</div>
+
+<ul className="list-inside list-disc text-xs text-blue-100/90 mb-2 text-right">
+  {docsForUI.map((doc, i) => (
+    <li key={i} className="leading-5">{doc}</li>
+  ))}
+</ul>
+
             </>
           )}
 
