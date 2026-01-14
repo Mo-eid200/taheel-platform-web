@@ -99,10 +99,11 @@ export default function MonthlyCreditsFloatingCounter({
     const startAt = toDateSafe(sub?.startAt);
     const endAt = toDateSafe(sub?.endAt);
 
-    const now = new Date();
-    const notExpired = endAt ? endAt.getTime() > now.getTime() : true;
+const now = new Date();
+const notExpired = endAt ? endAt.getTime() > now.getTime() : false; // لو مفيش endAt يبقى مش timeActive
+const timeActive = !!sub?.timeActive && notExpired; // ✅ timer validity (UI show/hide)
+const benefitsActive = !!sub?.isActive;             // ✅ benefits validity (fees waiver)
 
-    const isActive = !!sub?.isActive && notExpired;
 
     const monthlyExhausted = baseLimit > 0 && baseRemaining <= 0;
     const addonsEmpty = addonsRemaining <= 0;
@@ -118,6 +119,9 @@ export default function MonthlyCreditsFloatingCounter({
       isActive,
       monthlyExhausted,
       addonsEmpty,
+      timeActive,
+      benefitsActive,
+      notExpired,
     };
   }, [mtc, sub]);
 
@@ -153,7 +157,7 @@ export default function MonthlyCreditsFloatingCounter({
   if (!subLoaded) return null;
 
   // ✅ يختفي لو الاشتراك مش فعّال أو منتهي
-  if (!view.isActive) return null;
+  if (!view.timeActive) return null;
 
   const baseNumberCls = view.monthlyExhausted ? "text-rose-300" : "text-white";
   const addOnNumberCls = view.addonsEmpty ? "text-rose-300" : "text-white";
