@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   FaFileAlt,
@@ -200,6 +201,8 @@ export default function ServiceProfileCard({
   const [translatedDescription, setTranslatedDescription] = useState("");
   const [translatedLongDescription, setTranslatedLongDescription] = useState("");
   const [docsForUI, setDocsForUI] = useState([]);
+  const router = useRouter();
+  const [consuming, setConsuming] = useState(false);
 
   useEffect(() => setWallet(userWallet), [userWallet]);
   useEffect(() => setCoinsBalance(userCoins), [userCoins]);
@@ -652,35 +655,115 @@ export default function ServiceProfileCard({
           )}
 
         {/* ✅ Apply button ONLY */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
+<button
+  onClick={async (e) => {
+    e.stopPropagation();
+    if (!canPay || isPaid || consuming) return;
+
+    // ✅ Company + subscription active:
+    // 1) consume TX + create request (pending_payment)
+    // 2) then open pay modal to pay (gov + processing)
+    if (isSubscriptionActive) {
+      setConsuming(true);
+
+      try {
+        const consumeKey = `CONS_${customerId}_${serviceId}_${Date.now()}_${Math.random()
+          .toString(16)
+          .slice(2)}`;
+
+        const payload = {
+          customerId,            // COM-...
+          clientType: "company",
+          lang,
+
+          serviceId,
+          serviceName:
+            (lang === "en"
+              ? name_en || translatedName || name
+              : name) || name || "",
+
+          // ✅ IMPORTANT: API expects these (NOT only metadata)
+          govAmountAED: govTotal,
+          processingFeeAED: processingFee,
+
+          // ✅ optional
+          attachments: uploadedDocs || {},
+          metadata: {
+            category,
+            // للعرض فقط
+            printingTotal: 0,
+            vatTotal: 0,
+            finalDisplayTotal, // preview
+          },
+
+          consumeKey,
+        };
+
+        const r = await fetch("/api/consume-tx-and-create-request", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await r.json().catch(() => ({}));
+
+        // ✅ لو مفيش رصيد أو الاشتراك منتهي => ارجع للدفع الطبيعي
+        if (!r.ok || !data?.ok) {
+          const err = String(data?.error || "unknown_error");
+
+          if (err === "no_credits" || err === "subscription_expired" || err === "no_subscription") {
             setShowPayModal(true);
-          }}
-          className={`
-            w-full py-1 rounded-full font-black shadow text-xs transition
-            bg-gradient-to-r from-emerald-400 via-emerald-600 to-emerald-400 text-white
-            hover:from-emerald-600 hover:to-emerald-500 hover:shadow-emerald-200/90
-            hover:scale-105 duration-150
-            focus:outline-none focus:ring-2 focus:ring-emerald-400
-            cursor-pointer
-            ${!canPay || isPaid ? "opacity-40 pointer-events-none" : ""}
-            mt-1
-          `}
-          disabled={!canPay || isPaid}
-        >
-          {isPaid
-            ? lang === "ar"
-              ? "تم الدفع"
-              : "Paid"
-            : !active
-            ? lang === "ar"
-              ? "غير متاحة"
-              : "Unavailable"
-            : lang === "ar"
-            ? "تقدم الآن"
-            : "Apply Now"}
-        </button>
+            return;
+          }
+
+          throw new Error(err);
+        }
+
+        // ✅ نجاح: request اتعمل + TX اتخصم
+        // دلوقتي لازم يدفع gov + processing في البوابة
+        setShowPayModal(true);
+
+        // optional callback
+        if (typeof onPaid === "function") {
+          // هنا مش "paid" فعليًا، ده "request created"
+          // لو عندك callback تاني اسمه onRequestCreated يبقى أفضل
+          onPaid(data.requestId);
+        }
+
+      } catch (err) {
+        console.error("consume failed:", err);
+        alert(lang === "ar" ? "حصل خطأ أثناء خصم الاشتراك" : "Failed to consume subscription");
+      } finally {
+        setConsuming(false);
+      }
+
+      return;
+    }
+
+    // ✅ غير كده: الدفع الطبيعي
+    setShowPayModal(true);
+  }}
+  className={`
+    w-full py-1 rounded-full font-black shadow text-xs transition
+    bg-gradient-to-r from-emerald-400 via-emerald-600 to-emerald-400 text-white
+    hover:from-emerald-600 hover:to-emerald-500 hover:shadow-emerald-200/90
+    hover:scale-105 duration-150
+    focus:outline-none focus:ring-2 focus:ring-emerald-400
+    cursor-pointer
+    ${(!canPay || isPaid || consuming) ? "opacity-40 pointer-events-none" : ""}
+    mt-1
+  `}
+  disabled={!canPay || isPaid || consuming}
+>
+  {consuming
+    ? (lang === "ar" ? "جاري الخصم..." : "Consuming...")
+    : isPaid
+    ? (lang === "ar" ? "تم التنفيذ" : "Done")
+    : !active
+    ? (lang === "ar" ? "غير متاحة" : "Unavailable")
+    : (lang === "ar" ? "تقدم الآن" : "Apply Now")}
+</button>
+
       </div>
 
       {/* ✅ Pay Modal */}
