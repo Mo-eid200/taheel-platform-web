@@ -36,7 +36,7 @@ import calcStripeFees from "@/utils/calcStripeFees";
  */
 
 // --------------------
-// Generate tracking number
+// Helpers
 // --------------------
 function generateOrderNumber() {
   const part1 = Math.floor(100 + Math.random() * 900);
@@ -57,10 +57,12 @@ function toNumberSafe(v, fallback = 0) {
 // --------------------
 async function getCompanySubscriptionBalance(companyId) {
   if (!companyId) return { remainingTransactions: 0, addonTransactions: 0 };
+
   try {
     const subRef = doc(firestore, "companySubscriptions", String(companyId));
     const snap = await getDoc(subRef);
     if (!snap.exists()) return { remainingTransactions: 0, addonTransactions: 0 };
+
     const d = snap.data() || {};
     return {
       remainingTransactions: toNumberSafe(d.remainingTransactions, 0),
@@ -134,8 +136,7 @@ async function saveRequestToFirestore({
   const ref = doc(firestore, "requests", finalId);
   const snap = await getDoc(ref);
 
-  const safeUploads =
-    uploadedDocs && typeof uploadedDocs === "object" ? uploadedDocs : {};
+  const safeUploads = uploadedDocs && typeof uploadedDocs === "object" ? uploadedDocs : {};
   const hasUploads = Object.keys(safeUploads).length > 0;
 
   const payload = {
@@ -200,7 +201,7 @@ export default function ServicePayModal({
 
   lang = "ar",
   customerId,
-  userId,
+  userId, // unused but kept
   userEmail,
   uploadedDocs,
   onPaid,
@@ -242,31 +243,24 @@ export default function ServicePayModal({
     let mounted = true;
 
     async function load() {
-      // keep legacy freePrinting support
       if (!open) return;
 
       // If not company => ignore
       if (!isCompany) {
-        if (mounted) {
-          setSubBalance({ remainingTransactions: 0, addonTransactions: 0, loading: false });
-        }
+        if (mounted) setSubBalance({ remainingTransactions: 0, addonTransactions: 0, loading: false });
         return;
       }
 
       // If freePrinting passed explicitly => treat as available
       if (freePrinting) {
-        if (mounted) {
-          setSubBalance({ remainingTransactions: 1, addonTransactions: 0, loading: false });
-        }
+        if (mounted) setSubBalance({ remainingTransactions: 1, addonTransactions: 0, loading: false });
         return;
       }
 
       // Else fetch from companySubscriptions
       const cid = String(companyId || customerId || "").trim();
       const b = await getCompanySubscriptionBalance(cid);
-      if (mounted) {
-        setSubBalance({ ...b, loading: false });
-      }
+      if (mounted) setSubBalance({ ...b, loading: false });
     }
 
     load();
@@ -279,8 +273,7 @@ export default function ServicePayModal({
   const hasFreeTxn =
     isCompany &&
     !subBalance.loading &&
-    (toNumberSafe(subBalance.addonTransactions, 0) > 0 ||
-      toNumberSafe(subBalance.remainingTransactions, 0) > 0);
+    (toNumberSafe(subBalance.addonTransactions, 0) > 0 || toNumberSafe(subBalance.remainingTransactions, 0) > 0);
 
   // --------------------
   // ✅ Build totals (Source of Truth)
@@ -329,9 +322,11 @@ export default function ServicePayModal({
 
   const effectiveVatTotal = waiverActive
     ? 0
-    : (Number.isFinite(toNumberSafe(vatTotal, NaN))
-        ? +toNumberSafe(vatTotal, 0).toFixed(2)
-        : (effectivePrintingTotal > 0 ? +(effectivePrintingTotal * 0.05).toFixed(2) : 0));
+    : Number.isFinite(toNumberSafe(vatTotal, NaN))
+      ? +toNumberSafe(vatTotal, 0).toFixed(2)
+      : effectivePrintingTotal > 0
+        ? +(effectivePrintingTotal * 0.05).toFixed(2)
+        : 0;
 
   // ✅ Total before VAT (after waiver enforcement)
   const cleanTotalBeforeVat = waiverActive
@@ -364,8 +359,9 @@ export default function ServicePayModal({
 
   const stripeFeeValue = payMethod === "gateway" ? +stripeFeesResult.stripeFee.toFixed(2) : 0;
 
-  const finalPriceWithFees =
-    payMethod === "gateway" ? +stripeFeesResult.totalAmount.toFixed(2) : finalPriceNoGateway;
+  const finalPriceWithFees = payMethod === "gateway"
+    ? +stripeFeesResult.totalAmount.toFixed(2)
+    : finalPriceNoGateway;
 
   async function getServiceData() {
     if (!serviceName && !serviceId) return {};
@@ -388,11 +384,7 @@ export default function ServicePayModal({
 
     try {
       if (!customerId || !userEmail || !serviceName) {
-        setPayMsg(
-          lang === "ar"
-            ? "بيانات العميل أو البريد أو الخدمة ناقصة."
-            : "Customer ID, email or service name missing."
-        );
+        setPayMsg(lang === "ar" ? "بيانات العميل أو البريد أو الخدمة ناقصة." : "Customer ID, email or service name missing.");
         return;
       }
 
@@ -472,9 +464,7 @@ export default function ServicePayModal({
       // ✅ consume subscription/add-on ONLY if waiver was applied (printing/vat canceled)
       if (waiverActive && !freePrinting) {
         const cid = String(companyId || customerId || "").trim();
-        if (cid) {
-          await consumeCompanyTransaction(cid);
-        }
+        if (cid) await consumeCompanyTransaction(cid);
       }
 
       // ✅ notification (unchanged logic)
@@ -639,8 +629,7 @@ export default function ServicePayModal({
       ? "ring-2 ring-offset-2 ring-emerald-400 shadow-emerald-200/60"
       : "ring-1 ring-white/30 hover:ring-emerald-200/70";
 
-  const badgeBase =
-    "px-2 py-1 rounded-full text-[10px] font-black border backdrop-blur";
+  const badgeBase = "px-2 py-1 rounded-full text-[10px] font-black border backdrop-blur";
 
   return (
     <AnimatePresence>
@@ -700,9 +689,7 @@ export default function ServicePayModal({
               {/* Badges */}
               <div className="mt-2 flex flex-wrap gap-2">
                 {waiverActive && (
-                  <span
-                    className={`${badgeBase} bg-emerald-200/15 text-emerald-50 border-emerald-200/25`}
-                  >
+                  <span className={`${badgeBase} bg-emerald-200/15 text-emerald-50 border-emerald-200/25`}>
                     {lang === "ar"
                       ? "اشتراك/إضافات فعّالة: طباعة + ضريبة مجانًا"
                       : "Active Plan/Add-ons: Printing + VAT waived"}
@@ -727,13 +714,7 @@ export default function ServicePayModal({
                   {lang === "ar" ? "ملخص الدفع" : "Payment Summary"}
                 </div>
                 <div className="text-[10px] font-bold text-gray-500">
-                  {totals.usedCardTotals
-                    ? lang === "ar"
-                      ? "قيم دقيقة"
-                      : "Exact"
-                    : lang === "ar"
-                      ? "قيم تقديرية"
-                      : "Fallback"}
+                  {totals.usedCardTotals ? (lang === "ar" ? "قيم دقيقة" : "Exact") : (lang === "ar" ? "قيم تقديرية" : "Fallback")}
                 </div>
               </div>
 
