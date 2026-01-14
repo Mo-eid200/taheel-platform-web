@@ -191,6 +191,7 @@ export default function ServiceProfileCard({
   const [wallet, setWallet] = useState(userWallet);
   const [coinsBalance, setCoinsBalance] = useState(userCoins);
   const [showPayModal, setShowPayModal] = useState(false);
+  const [pendingRequestId, setPendingRequestId] = useState("");
   const [isPaid, setIsPaid] = useState(false);
   const [quantity, setQuantity] = useState(1);
   const [paperCount, setPaperCount] = useState(1);
@@ -721,14 +722,8 @@ export default function ServiceProfileCard({
 
         // ✅ نجاح: request اتعمل + TX اتخصم
         // دلوقتي لازم يدفع gov + processing في البوابة
-        setShowPayModal(true);
-
-        // optional callback
-        if (typeof onPaid === "function") {
-          // هنا مش "paid" فعليًا، ده "request created"
-          // لو عندك callback تاني اسمه onRequestCreated يبقى أفضل
-          onPaid(data.requestId);
-        }
+setPendingRequestId(String(data?.requestId || "").trim()); // ✅ احفظ requestId
+setShowPayModal(true); 
 
       } catch (err) {
         console.error("consume failed:", err);
@@ -775,7 +770,7 @@ export default function ServiceProfileCard({
             onClose={() => setShowPayModal(false)}
             serviceName={name}
             serviceId={serviceId}
-
+            requestId={pendingRequestId}
             // ✅ Fallback only
             totalPrice={payTotalBeforeVat}
             printingFee={rawPrintingPerUnit} // per unit
