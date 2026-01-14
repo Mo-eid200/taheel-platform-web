@@ -6,11 +6,16 @@ import { firestore } from "@/lib/firebase.client";
 import MonthlyCreditsFloatingCounter from "@/components/subscriptions/MonthlyCreditsFloatingCounter";
 import SectionTitle from "@/components/services/SectionTitle";
 import ServiceProfileCard from "@/components/services/ServiceProfileCard";
-import { computeSubscriptionActive } from "@/utils/subscription";
 
 const EMPTY_SUB = {
   loading: false,
-  active: false,
+
+  // ✅ isActive الحقيقي حسب اتفاقنا: مربوط بالوقت فقط
+  isActive: false,
+
+  // ✅ timeActive: للعداد (نفس isActive)
+  timeActive: false,
+
   status: "none",
   planKey: "",
   planName: "",
@@ -93,8 +98,9 @@ export default function ServiceSection({
           return;
         }
 
-        const active = computeSubscriptionActive(found);
-
+        // ==========================
+        // ✅ الوقت فقط = مصدر الحقيقة
+        // ==========================
         const startMs =
           found.startAt?.toMillis?.() ??
           (found.startAt?.seconds ? found.startAt.seconds * 1000 : 0) ??
@@ -106,14 +112,17 @@ export default function ServiceSection({
           (found.endAtISO ? Date.parse(found.endAtISO) : 0);
 
         const now = Date.now();
-        const withinWindow = (!startMs || now >= startMs) && (!endMs || now < endMs);
+        const timeActive = (!startMs || now >= startMs) && (!endMs || now < endMs);
 
-        
+        // ✅ حسب اتفاقنا: isActive = timeActive (حتى لو العدادات 0)
+        const isActive = Boolean(timeActive);
 
         if (mounted) {
           setSubInfo({
             loading: false,
-            active,
+            isActive,
+            timeActive, // للعداد
+
             status: found.status || "none",
             planKey: found.planKey || "",
             planName: found.planName || "",
@@ -132,9 +141,11 @@ export default function ServiceSection({
     return () => {
       mounted = false;
     };
-  }, [isCompany, candidateKey]);
+  }, [isCompany, candidateKey, candidateIds]);
 
-  const subscriptionActive = isCompany && Boolean(subInfo.active);
+  // ✅ مصدر واحد واضح
+  const subscriptionTimeActive = isCompany && Boolean(subInfo.timeActive); // للعداد (ظهور/اختفاء)
+  const subscriptionActive = isCompany && Boolean(subInfo.isActive); // للكارت (إعفاءات)
 
   if (!filteredServices.length) {
     return (
@@ -150,52 +161,34 @@ export default function ServiceSection({
         {title}
       </SectionTitle>
 
-       {/* ✅ يظهر فقط في خدمات الشركات + لو الاشتراك Active */}
-    {isCompany && subscriptionActive && (
-      <MonthlyCreditsFloatingCounter
-        companyDocId={client?.customerId}
-        lang={lang}
-      />
-    )}
+      {/* ✅ العداد يظهر طول ما وقت الاشتراك شغال فقط */}
+      {isCompany && subscriptionTimeActive && (
+        <MonthlyCreditsFloatingCounter companyDocId={client?.customerId} lang={lang} />
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
         {filteredServices.map((srv, i) => (
           <ServiceProfileCard
             key={(srv.serviceId || srv.name || "srv") + "-" + i}
-
-            // ✅ مهم: عشان زر "تقدم الآن" يقفل لو الخدمة مش مفعلة
             active={typeof srv.active === "boolean" ? srv.active : true}
-
             category={category}
             name={srv.name}
             name_en={srv.name_en}
             description={srv.description}
             description_en={srv.description_en}
-
-            // ✅ price = الرسوم الحكومية
             price={srv.price}
-
-            // ✅ printingFee = رسوم الطباعة
             printingFee={srv.printingFee}
-
-            // ❌ شيل tax: الكارت بيحسب 5% على الطباعة تلقائيًا
-            // tax={srv.tax}
-
-            // clientPrice موجود بس الحساب النهائي داخل الكارت على القواعد المتفق عليها
             clientPrice={srv.clientPrice}
-
             duration={srv.duration}
             requiredDocuments={srv.requiredDocuments || srv.documents || []}
             requireUpload={srv.requireUpload}
             coins={srv.coins || 0}
             lang={lang}
-
             userId={client?.userId}
             userWallet={client?.walletBalance || 0}
             userCoins={client?.coins || 0}
             userEmail={client?.email}
             customerId={client?.customerId}
-
             longDescription={srv.longDescription}
             longDescription_en={srv.longDescription_en}
             onPaid={onPaid}
@@ -205,7 +198,7 @@ export default function ServiceSection({
             allowPaperCount={srv.allowPaperCount}
             provider={srv.provider}
 
-            // ✅ الاشتراك: لو Active => الطباعة والضرائب = 0 داخل الكارت
+            // ✅ الإعفاءات داخل الكارت = isActive (حتى لو العدادات 0)
             subscriptionActive={subscriptionActive}
           />
         ))}

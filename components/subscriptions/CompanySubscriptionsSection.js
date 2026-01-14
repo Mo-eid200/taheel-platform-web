@@ -129,9 +129,9 @@ export default function CompanySubscriptionsSection({
   const [addons, setAddons] = useState([]);
   const [addonsLoading, setAddonsLoading] = useState(true);
 
-  // ✅ NEW: active subscription UI state
+  // ✅ Active subscription UI state
   const [activePlanKey, setActivePlanKey] = useState("");
-  const [subInfo, setSubInfo] = useState(null); // optional, if you want to show expiry etc.
+  const [subInfo, setSubInfo] = useState(null);
   const [subInfoLoading, setSubInfoLoading] = useState(false);
 
   // ✅ Load Addons Catalog
@@ -144,11 +144,23 @@ export default function CompanySubscriptionsSection({
         const snap = await getDocs(collection(firestore, "companyAddonsCatalog"));
         const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-        // ✅ active only + popular first
-        const filtered = arr
-          .filter((a) => a?.isActive !== false)
-          .sort((a, b) => (b?.popular === true ? 1 : 0) - (a?.popular === true ? 1 : 0))
-          .reverse();
+        // ✅ active only
+        const filtered = arr.filter((a) => a?.isActive !== false);
+
+        // ✅ popular first, then sortIndex, then title
+        filtered.sort((a, b) => {
+          const ap = a?.popular === true ? 1 : 0;
+          const bp = b?.popular === true ? 1 : 0;
+          if (bp !== ap) return bp - ap;
+
+          const as = Number(a?.sortIndex ?? 9999);
+          const bs = Number(b?.sortIndex ?? 9999);
+          if (as !== bs) return as - bs;
+
+          const at = String(a?.title?.en || a?.title?.ar || a?.id || "");
+          const bt = String(b?.title?.en || b?.title?.ar || b?.id || "");
+          return at.localeCompare(bt);
+        });
 
         if (alive) setAddons(filtered);
       } catch (e) {
@@ -191,13 +203,20 @@ export default function CompanySubscriptionsSection({
     };
   }, [searchParams]);
 
-  // ✅ NEW: Load current subscription (active plan) for UI
+  // ✅ Load current subscription (active plan) for UI
   useEffect(() => {
     let alive = true;
 
     async function loadSub() {
       const id = (clientDocId || "").trim();
-      if (!id) return;
+
+      // ✅ reset if no id
+      if (!id) {
+        if (!alive) return;
+        setSubInfo(null);
+        setActivePlanKey("");
+        return;
+      }
 
       setSubInfoLoading(true);
       try {
@@ -218,12 +237,13 @@ export default function CompanySubscriptionsSection({
         const now = new Date();
         const status = String(data.status || "").toLowerCase();
         const endDate = resolveEndDate(data);
+
         const timeValid = !!endDate && endDate.getTime() > now.getTime();
         const statusOk = status === "active" || status === "trial";
 
-        // ✅ الباقة الحالية فقط لو الاشتراك شغّال فعلاً (وقت + status)
+        // ✅ activePlanKey normalized to lowercase
         if (statusOk && timeValid) {
-          const pk = String(data.planKey || data.subscriberPlanKey || "").trim();
+          const pk = String(data.planKey || data.subscriberPlanKey || "").trim().toLowerCase();
           setActivePlanKey(pk);
         } else {
           setActivePlanKey("");
@@ -256,7 +276,7 @@ export default function CompanySubscriptionsSection({
 
         const filtered = arr
           .filter((p) => p?.isActive !== false)
-          .sort((a, b) => (a?.sortIndex ?? 999) - (b?.sortIndex ?? 999));
+          .sort((a, b) => (Number(a?.sortIndex ?? 999) - Number(b?.sortIndex ?? 999)));
 
         if (alive) setPlans(filtered);
       } catch (e) {
@@ -583,8 +603,7 @@ export default function CompanySubscriptionsSection({
             darkMode={darkMode}
             onSubscribe={handleSubscribe}
             disabled={submitting}
-
-            // ✅ NEW props for UI states
+            // ✅ pass normalized lowercase planKey to avoid mismatch
             activePlanKey={activePlanKey}
             subInfo={subInfo}
             subInfoLoading={subInfoLoading}

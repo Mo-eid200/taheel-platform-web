@@ -114,6 +114,8 @@ function pricingEntries(pricing) {
       best: !!val?.best,
       tag: String(val?.tag || "").trim().toLowerCase(),
       title: isPlainObject(val?.title) ? val.title : { ar: "", en: "" },
+      // ✅ optional: if you ever store explicit days
+      subscriptionDays: Number(val?.subscriptionDays ?? 0) || 0,
     }));
 
   list.sort(
@@ -145,12 +147,7 @@ function isMost(p) {
 /* =========================
    Glow wrapper
 ========================= */
-function GlowWrap({
-  active = false,
-  radius = "rounded-3xl",
-  glow = "rgba(16,185,129,0.35)",
-  children,
-}) {
+function GlowWrap({ active = false, radius = "rounded-3xl", glow = "rgba(16,185,129,0.35)", children }) {
   return (
     <div className={cn("relative group", radius)}>
       <div
@@ -162,10 +159,7 @@ function GlowWrap({
         }}
       />
       <div
-        className={cn(
-          "absolute -inset-[2px] z-0 opacity-0 group-hover:opacity-55 transition-opacity duration-300",
-          radius
-        )}
+        className={cn("absolute -inset-[2px] z-0 opacity-0 group-hover:opacity-55 transition-opacity duration-300", radius)}
         style={{
           background: `linear-gradient(90deg, ${glow}, rgba(56,189,248,0.20), rgba(168,85,247,0.16))`,
           filter: "blur(14px)",
@@ -185,8 +179,7 @@ const DURATION_LABELS = {
   semiannual: { ar: "نصف سنوي", en: "Semiannual" },
   yearly: { ar: "سنوي", en: "Yearly" },
 };
-const moLabel = (lang, n) =>
-  lang === "ar" ? (n === 1 ? "شهر" : "شهور") : n === 1 ? "month" : "months";
+const moLabel = (lang, n) => (lang === "ar" ? (n === 1 ? "شهر" : "شهور") : n === 1 ? "month" : "months");
 
 /* =========================
    Component
@@ -198,38 +191,45 @@ export default function CompanyPlanCard({
   onSubscribe,
   disabled = false,
   activePlanKey = "",
+  subInfo = null,
+  subInfoLoading = false,
 }) {
-
   const dir = lang === "ar" ? "rtl" : "ltr";
 
   const planKeyRaw = (plan?.key || plan?.id || "starter").toString();
   const planKey = planKeyRaw.toLowerCase();
-  const isCurrentPlan = String(activePlanKey || "").trim().toLowerCase() === String(planKey || "").trim().toLowerCase();
+
+  // ✅ “الباقة الحالية” = activePlanKey match (normalized) — and avoid showing during loading
+  const isCurrentPlan =
+    !subInfoLoading &&
+    String(activePlanKey || "").trim().toLowerCase() === String(planKey || "").trim().toLowerCase();
+
   const theme = BRAND[planKey] || BRAND.starter;
   const Icon = theme.icon;
 
-  // ✅ plan chip (colored by plan)
   const chipTheme = PLAN_CHIP[planKey] || PLAN_CHIP.starter;
   const planChipText = planKey.toUpperCase();
 
   const pricingList = useMemo(() => {
-  const list = pricingEntries(plan?.pricing);
-  const allow = allowedDurationKeys(planKey);
-  return list.filter((x) => allow.has(x.key));
-}, [plan?.pricing, planKey]);
+    const list = pricingEntries(plan?.pricing);
+    const allow = allowedDurationKeys(planKey);
+    return list.filter((x) => allow.has(x.key));
+  }, [plan?.pricing, planKey]);
 
+  // ✅ better defaultKey logic
+  const defaultKey = useMemo(() => {
+    if (!pricingList.length) return "";
+    if (planKey === "starter") return pricingList.find((x) => x.key === "yearly")?.key || pricingList[0]?.key || "";
 
-  // ✅ default: "most" OR best OR yearly OR last
-const defaultKey =
-  (planKey === "starter" ? "yearly" : "") ||
-  pricingList.find((x) => isMost(x) && x.key === "yearly")?.key ||
-  pricingList.find((x) => x?.best)?.key ||
-  pricingList.find((x) => x?.key === "yearly")?.key ||
-  pricingList.find((x) => x?.key === "semiannual")?.key ||
-  pricingList[pricingList.length - 1]?.key ||
-  pricingList[0]?.key ||
-  "";
-
+    return (
+      pricingList.find((x) => isMost(x) && x.key === "yearly")?.key ||
+      pricingList.find((x) => x?.best)?.key ||
+      pricingList.find((x) => x?.key === "yearly")?.key ||
+      pricingList.find((x) => x?.key === "semiannual")?.key ||
+      pricingList[0]?.key ||
+      ""
+    );
+  }, [pricingList, planKey]);
 
   const [selectedKey, setSelectedKey] = useState(defaultKey);
 
@@ -270,23 +270,23 @@ const defaultKey =
   const showOffer = isOffer(selected);
   const showMost = isMost(selected) && selected?.key === "yearly";
 
+  // ✅ subscriptionDays: send explicit if exists, else 0 and let caller calc from monthsShown
+  const selectedDays = Number(selected?.subscriptionDays ?? 0) || 0;
+
   return (
     <div dir={dir} className="w-full">
       <GlowWrap glow={theme.glow} radius="rounded-3xl" active={showMost || showOffer}>
-<div
-  className={cn(
-    "relative rounded-3xl border bg-white/5 backdrop-blur-xl overflow-hidden transition",
-    theme.ring,
-    darkMode ? "" : "bg-black/5",
-    isCurrentPlan ? "opacity-[0.78] grayscale-[0.15]" : ""
-  )}
->
-
-          {/* top gradient bar */}
+        <div
+          className={cn(
+            "relative rounded-3xl border bg-white/5 backdrop-blur-xl overflow-hidden transition",
+            theme.ring,
+            darkMode ? "" : "bg-black/5",
+            isCurrentPlan ? "opacity-[0.78] grayscale-[0.15]" : ""
+          )}
+        >
           <div className={cn("absolute top-0 left-0 right-0 h-[5px] bg-gradient-to-r", theme.bar)} />
 
           <div className={cn("p-6", lang === "ar" ? "text-right" : "text-left")}>
-            {/* header */}
             <div className={cn("flex items-start justify-between gap-4", lang === "ar" && "flex-row-reverse")}>
               <div className={cn("flex items-center gap-3 min-w-0", lang === "ar" && "flex-row-reverse")}>
                 <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-white/10 border border-white/10">
@@ -297,7 +297,6 @@ const defaultKey =
                   <div className={cn("flex items-center gap-2 flex-wrap", lang === "ar" && "flex-row-reverse")}>
                     <span className={cn("w-2 h-2 rounded-full", theme.dot)} />
 
-                    {/* ✅ Title + plan colored chip */}
                     <div className="flex items-center gap-2 min-w-0 flex-wrap">
                       <div className="text-white font-extrabold text-xl truncate">{title}</div>
 
@@ -312,18 +311,17 @@ const defaultKey =
                         {planChipText}
                       </span>
 
-                      {/* ✅ Most chosen chip only when yearly is best/most */}
                       {showMost ? (
                         <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-white text-black border border-white/50">
                           {lang === "ar" ? "الأكثر اختيارًا" : "Most chosen"}
                         </span>
                       ) : null}
-                      {isCurrentPlan ? (
-  <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-emerald-100 text-emerald-900 border border-emerald-200">
-    {lang === "ar" ? "الباقة الحالية" : "Current plan"}
-  </span>
-) : null}
 
+                      {isCurrentPlan ? (
+                        <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-emerald-100 text-emerald-900 border border-emerald-200">
+                          {lang === "ar" ? "الباقة الحالية" : "Current plan"}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
 
@@ -332,7 +330,6 @@ const defaultKey =
               </div>
             </div>
 
-            {/* price row */}
             <div className={cn("mt-5 flex items-end gap-2 flex-wrap", lang === "ar" && "flex-row-reverse")}>
               <div className="text-4xl font-black text-white">{price.toLocaleString()}</div>
               <div className="text-sm text-white/75 font-bold">{lang === "ar" ? "درهم" : "AED"}</div>
@@ -343,7 +340,6 @@ const defaultKey =
                 </div>
               ) : null}
 
-              {/* ✅ Offer pill only when offer */}
               {showOffer ? (
                 <div className={cn("text-xs px-2 py-1 rounded-full border font-extrabold", theme.offerChip)}>
                   {lang === "ar" ? "عرض" : "Offer"}
@@ -351,7 +347,6 @@ const defaultKey =
               ) : null}
             </div>
 
-            {/* ✅ Offer line EXACT format */}
             <div className={cn("mt-3 text-[12px] text-white/70 font-semibold", lang === "ar" ? "leading-6" : "")}>
               {showOffer ? (
                 lang === "ar" ? (
@@ -374,7 +369,6 @@ const defaultKey =
               )}
             </div>
 
-            {/* duration selector */}
             <div className="mt-4">
               <div className="text-xs text-white/55 font-extrabold mb-2">
                 {lang === "ar" ? "اختر المدة" : "Choose duration"}
@@ -399,15 +393,12 @@ const defaultKey =
                       className={cn(
                         "relative cursor-pointer rounded-2xl border p-3 bg-white/6 backdrop-blur-xl transition",
                         lang === "ar" ? "text-right" : "text-left",
-                        active
-                          ? "border-emerald-400/60 bg-white/8"
-                          : "border-white/10 hover:border-white/20 hover:bg-white/7",
+                        active ? "border-emerald-400/60 bg-white/8" : "border-white/10 hover:border-white/20 hover:bg-white/7",
                         offer && active
                           ? "shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_18px_40px_-26px_rgba(16,185,129,0.55)]"
                           : ""
                       )}
                     >
-                      {/* ✅ chips: Offer + Most (only if true) */}
                       <div className={cn("absolute -top-2 flex items-center gap-1", lang === "ar" ? "left-3" : "right-3")}>
                         {offer ? (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold border bg-white/10 text-white border-white/10">
@@ -429,7 +420,6 @@ const defaultKey =
                         <span className="text-white/50">{lang === "ar" ? "درهم" : "AED"}</span>
                       </div>
 
-                      {/* ✅ offer micro line (only if offer) */}
                       {offer ? (
                         <div className={cn("mt-2 text-[11px] font-extrabold", theme.offerLine)}>
                           {lang === "ar"
@@ -450,7 +440,6 @@ const defaultKey =
               </div>
             </div>
 
-            {/* perks */}
             {perks?.length > 0 ? (
               <>
                 <div className="h-px w-full bg-white/10 my-5" />
@@ -466,13 +455,12 @@ const defaultKey =
               </>
             ) : null}
 
-            {/* subscribe */}
             <button
               type="button"
               disabled={!canSubscribe || disabled || isCurrentPlan}
               onClick={() =>
                 onSubscribe?.({
-                  planKey: plan?.key || plan?.id || planKey,
+                  planKey, // ✅ normalized lowercase
                   pricingKey: selectedKey,
                   price,
                   monthsShown,
@@ -481,27 +469,23 @@ const defaultKey =
                   isOffer: showOffer,
                   isMost: showMost,
                   subscriptionName: title,
-                  subscriptionDays: monthsShown > 0 ? monthsShown * 30 : 0,
+                  subscriptionDays: selectedDays, // ✅ explicit if exists, else 0
                 })
               }
-className={cn(
-  "mt-6 w-full py-3 rounded-full font-extrabold shadow-lg transition",
-  isCurrentPlan
-    ? "cursor-not-allowed bg-white/10 text-white/55 border border-white/15 shadow-none"
-    : (canSubscribe && !disabled
-        ? `cursor-pointer bg-gradient-to-r ${theme.btn} hover:scale-[1.02] active:scale-[0.99]`
-        : "cursor-not-allowed bg-gray-500/40 text-white/60")
-)}
-
+              className={cn(
+                "mt-6 w-full py-3 rounded-full font-extrabold shadow-lg transition",
+                isCurrentPlan
+                  ? "cursor-not-allowed bg-white/10 text-white/55 border border-white/15 shadow-none"
+                  : canSubscribe && !disabled
+                  ? `cursor-pointer bg-gradient-to-r ${theme.btn} hover:scale-[1.02] active:scale-[0.99]`
+                  : "cursor-not-allowed bg-gray-500/40 text-white/60"
+              )}
             >
-              {isCurrentPlan
-                ? (lang === "ar" ? "مفعّلة الآن" : "Active Now")
-                : (lang === "ar" ? "قم بالترقية الآن" : "Upgrade Now")}
-
+              {isCurrentPlan ? (lang === "ar" ? "مفعّلة الآن" : "Active Now") : lang === "ar" ? "قم بالترقية الآن" : "Upgrade Now"}
             </button>
           </div>
         </div>
       </GlowWrap>
     </div>
   );
-} 
+}
