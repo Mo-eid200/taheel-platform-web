@@ -162,9 +162,10 @@ export default function ServiceSection({
       </SectionTitle>
 
       {/* ✅ العداد يظهر طول ما وقت الاشتراك شغال فقط */}
-      {isCompany && subscriptionTimeActive && (
-        <MonthlyCreditsFloatingCounter companyDocId={client?.customerId} lang={lang} />
-      )}
+{isCompany && subscriptionTimeActive && (
+  <MonthlyCreditsFloatingCounter companyDocId={client?.customerId} lang={lang} />
+)}
+
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
         {filteredServices.map((srv, i) => (

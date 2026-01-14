@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { firestore } from "@/lib/firebase.client";
 import { FaCrown, FaPlusCircle } from "react-icons/fa";
 import { useRouter } from "next/navigation";
@@ -13,14 +13,8 @@ function safeNum(v) {
 
 function toDateSafe(v) {
   if (!v) return null;
-
-  // Firestore Timestamp object
   if (typeof v === "object" && typeof v.toDate === "function") return v.toDate();
-
-  // Raw timestamp-like
   if (typeof v === "object" && typeof v.seconds === "number") return new Date(v.seconds * 1000);
-
-  // ISO string / date string
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? null : d;
 }
@@ -87,13 +81,11 @@ export default function MonthlyCreditsFloatingCounter({
     };
   }, [companyDocId]);
 
-  // ✅ IMPORTANT: use safe fallback so UI never disappears due to mtc momentarily null
+  // ✅ safe fallback
   const mtcSafe = mtc || { monthKey: "", baseLimit: 0, baseRemaining: 0, addonsRemaining: 0 };
 
   const view = useMemo(() => {
-    // ✅ USE mtcSafe not mtc
     const monthKey = mtcSafe?.monthKey || "";
-
     const baseLimit = safeNum(mtcSafe?.baseLimit);
     const baseRemaining = safeNum(mtcSafe?.baseRemaining);
     const addonsRemaining = safeNum(mtcSafe?.addonsRemaining);
@@ -105,14 +97,16 @@ export default function MonthlyCreditsFloatingCounter({
 
     const now = new Date();
 
-    // ✅ counter visibility depends ONLY on time (endAt)
-    const timeActive = !!endAt && endAt.getTime() > now.getTime();
+    // ✅ ظهور/اختفاء العداد = وقت الاشتراك فقط
+    const timeActive =
+      (!!endAt && endAt.getTime() > now.getTime()) &&
+      (!startAt || startAt.getTime() <= now.getTime());
 
-    // ✅ benefits / fees depends on remaining credits (NOT visibility)
+    // ✅ isActive (المميزات) = وقت الاشتراك + وجود رصيد
     const totalRemaining = baseRemaining + addonsRemaining;
     const benefitsActive = timeActive && totalRemaining > 0;
 
-    // ✅ alias for old code
+    // ✅ ده اللي انت عايزه في الداتا: لما صفر يبقى false
     const isActive = benefitsActive;
 
     const monthlyExhausted = baseLimit > 0 && baseRemaining <= 0;
@@ -133,15 +127,39 @@ export default function MonthlyCreditsFloatingCounter({
       monthlyExhausted,
       addonsEmpty,
     };
-  }, [mtcSafe, sub]);
+  }, [mtcSafe, sub, lang]);
+
+  // ✅ sync companySubscriptions.isActive مع الواقع (رصيد صفر => false)
+  useEffect(() => {
+    if (!companyDocId || !subLoaded || !sub) return;
+
+    const currentStored = typeof sub.isActive === "boolean" ? sub.isActive : null;
+    const next = Boolean(view.isActive);
+
+    // لو نفس القيمة مفيش شغل
+    if (currentStored === next) return;
+
+    // اكتبها مرة واحدة فقط لما تختلف (لتفادي loop)
+    updateDoc(doc(firestore, "companySubscriptions", String(companyDocId)), {
+      isActive: next,
+      // ممكن كمان تحافظ على وقت التحديث
+      isActiveUpdatedAt: new Date().toISOString(),
+    }).catch(() => {});
+  }, [companyDocId, subLoaded, sub, view.isActive]);
+
+  // ✅ wait until subscription doc is read
+  if (!subLoaded) return null;
+
+  // ✅ العداد يختفي فقط لو الوقت خلص
+  if (!view.timeActive) return null;
 
   const t = {
     ar: {
       topLabel: "المعاملات الشهرية",
       bottomLabel: "الإضافات (Add-ons)",
       month: "شهر الرصيد",
-      active: "اشتراك فعّال",
-      inactive: "غير فعّال",
+      active: "مميزات فعّالة",
+      inactive: "المميزات متوقفة (رصيد 0)",
       start: "بداية الاشتراك",
       end: "انتهاء الاشتراك",
       exhausted: "لقد استهلكت معاملاتك الشهرية كاملة",
@@ -152,8 +170,8 @@ export default function MonthlyCreditsFloatingCounter({
       topLabel: "Monthly requests",
       bottomLabel: "Add-ons",
       month: "Billing month",
-      active: "Active subscription",
-      inactive: "Inactive",
+      active: "Benefits ON",
+      inactive: "Benefits OFF (0 credits)",
       start: "Start",
       end: "End",
       exhausted: "You have used all your monthly transactions.",
@@ -161,12 +179,6 @@ export default function MonthlyCreditsFloatingCounter({
       hint: "Updates automatically after each order.",
     },
   }[lang === "en" ? "en" : "ar"];
-
-  // ✅ wait until subscription doc is read
-  if (!subLoaded) return null;
-
-  // ✅ hide only if time is not valid
-  if (!view.timeActive) return null;
 
   const baseNumberCls = view.monthlyExhausted ? "text-rose-300" : "text-white";
   const addOnNumberCls = view.addonsEmpty ? "text-rose-300" : "text-white";
@@ -183,53 +195,41 @@ export default function MonthlyCreditsFloatingCounter({
         ].join(" ")}
         style={{ filter: "drop-shadow(0 24px 60px rgba(0,0,0,0.55))" }}
       >
-        {/* Frame */}
         <div className="relative rounded-[22px] p-[10px] bg-gradient-to-b from-white/15 via-white/5 to-black/30 border border-white/15 backdrop-blur-xl">
-          {/* Inner screen */}
           <div className="relative rounded-[16px] overflow-hidden bg-gradient-to-b from-[#0a1b3a]/95 via-[#08142a]/95 to-[#050a12]/95 border border-white/10">
-            {/* Top header */}
             <div className="px-4 pt-3 pb-2">
               <div className="flex items-center justify-between">
                 <div className="text-white/70 text-[11px] font-bold">
                   {t.month}:{" "}
-                  <span className="text-white/90 font-extrabold">
-                    {monthName(view.monthKey, lang)}
-                  </span>
+                  <span className="text-white/90 font-extrabold">{monthName(view.monthKey, lang)}</span>
                 </div>
 
-                {/* ✅ badge depends on benefitsActive (NOT visibility) */}
+                {/* ✅ البادچ يعتمد على isActive (الرصيد) */}
                 <div
                   className={[
                     "text-[10px] font-extrabold px-2 py-1 rounded-full border",
-                    view.benefitsActive
+                    view.isActive
                       ? "text-emerald-200 border-emerald-300/20 bg-emerald-400/10"
                       : "text-rose-200 border-rose-300/25 bg-rose-400/10",
                   ].join(" ")}
                 >
-                  {view.benefitsActive ? t.active : t.inactive}
+                  {view.isActive ? t.active : t.inactive}
                 </div>
               </div>
 
-              {/* Start/End dates */}
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <div className="rounded-xl bg-white/5 border border-white/10 px-2 py-1">
                   <div className="text-[10px] text-white/60 font-bold">{t.start}</div>
-                  <div className="text-[10px] text-white/90 font-extrabold">
-                    {fmtDate(view.startAt, lang)}
-                  </div>
+                  <div className="text-[10px] text-white/90 font-extrabold">{fmtDate(view.startAt, lang)}</div>
                 </div>
                 <div className="rounded-xl bg-white/5 border border-white/10 px-2 py-1">
                   <div className="text-[10px] text-white/60 font-bold">{t.end}</div>
-                  <div className="text-[10px] text-white/90 font-extrabold">
-                    {fmtDate(view.endAt, lang)}
-                  </div>
+                  <div className="text-[10px] text-white/90 font-extrabold">{fmtDate(view.endAt, lang)}</div>
                 </div>
               </div>
             </div>
 
-            {/* Odometer body */}
             <div className="px-4 pb-4">
-              {/* TOP number */}
               <div className="text-white/75 text-[11px] font-bold mb-1 flex items-center justify-between">
                 <span>{t.topLabel}</span>
                 {view.planName ? (
@@ -251,22 +251,15 @@ export default function MonthlyCreditsFloatingCounter({
                   {Math.max(0, view.baseRemaining)}
                 </div>
 
-                <div className="text-white/55 text-[13px] font-extrabold pb-1">
-                  / {view.baseLimit || 0}
-                </div>
+                <div className="text-white/55 text-[13px] font-extrabold pb-1">/ {view.baseLimit || 0}</div>
               </div>
 
-              {/* Monthly exhausted message */}
-              {view.monthlyExhausted && (
-                <div className="mt-2 text-[11px] font-black text-rose-300">{t.exhausted}</div>
-              )}
+              {view.monthlyExhausted && <div className="mt-2 text-[11px] font-black text-rose-300">{t.exhausted}</div>}
 
-              {/* Divider line */}
               <div className="relative my-3">
                 <div className="h-[2px] bg-gradient-to-r from-transparent via-red-500/80 to-transparent" />
               </div>
 
-              {/* BOTTOM number */}
               <div className="text-white/75 text-[11px] font-bold mb-1 flex items-center justify-between">
                 <span>{t.bottomLabel}</span>
                 {view.addonsEmpty ? (
@@ -297,11 +290,9 @@ export default function MonthlyCreditsFloatingCounter({
                 <div className="text-white/55 text-[12px] font-extrabold pb-1">TX</div>
               </div>
 
-              {/* hint */}
               <div className="mt-3 text-[10px] text-white/45">{t.hint}</div>
             </div>
 
-            {/* soft scanline effect */}
             <div
               className="pointer-events-none absolute inset-0 opacity-[0.12]"
               style={{
@@ -314,7 +305,6 @@ export default function MonthlyCreditsFloatingCounter({
           </div>
         </div>
 
-        {/* floating glow */}
         <div
           className="pointer-events-none absolute -inset-1 rounded-[26px]"
           style={{
@@ -323,18 +313,11 @@ export default function MonthlyCreditsFloatingCounter({
         />
       </div>
 
-      {/* Keyframes */}
       <style jsx>{`
         @keyframes mercFloat {
-          0% {
-            transform: translateY(0px);
-          }
-          50% {
-            transform: translateY(-10px);
-          }
-          100% {
-            transform: translateY(0px);
-          }
+          0% { transform: translateY(0px); }
+          50% { transform: translateY(-10px); }
+          100% { transform: translateY(0px); }
         }
       `}</style>
     </div>
