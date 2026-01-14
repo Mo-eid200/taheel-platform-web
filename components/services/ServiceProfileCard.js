@@ -395,11 +395,19 @@ export default function ServiceProfileCard({
           boxShadow: "0 2px 24px 0 rgba(16,185,129,0.18)",
         }}
       >
-        <div className="bg-white rounded-xl border border-emerald-400 shadow-lg p-4 w-full text-sm">
-          <h3 className="text-base font-extrabold text-emerald-700 mb-1 text-center">
+        <div
+  className="
+    rounded-2xl border border-blue-300/30 shadow-2xl p-4 w-full text-sm
+    bg-gradient-to-br from-[#0b1f3a] via-[#123a6b] to-[#0b1f3a]
+    text-blue-50
+  "
+  style={{ boxShadow: "0 10px 40px rgba(11,31,58,0.45)" }}
+>
+
+          <h3 className="text-base font-extrabold text-blue-100 mb-1 text-center">
             {titleTxt}
           </h3>
-          <div className="text-gray-800 text-xs mb-2 text-center">{descTxt}</div>
+          <div className="text-blue-100/90 text-xs mb-2 text-center">{descTxt}</div>
 
           {docsForUI.length > 0 && (
             <>
@@ -415,7 +423,7 @@ export default function ServiceProfileCard({
             </>
           )}
 
-          <table className="w-full text-xs text-emerald-900 font-bold border border-emerald-200 rounded-xl shadow mb-2 bg-emerald-50 overflow-hidden">
+          <table className="w-full text-xs font-bold border border-blue-300/20 rounded-xl shadow mb-2 bg-white/10 overflow-hidden text-blue-50">
             <tbody>
               <tr>
                 <td>{lang === "ar" ? "الرسوم الحكومية" : "Government Fees"}</td>
@@ -655,90 +663,18 @@ export default function ServiceProfileCard({
             document.body
           )}
 
-        {/* ✅ Apply button ONLY */}
+{/* ✅ Apply button ONLY */}
 <button
   onClick={async (e) => {
     e.stopPropagation();
     if (!canPay || isPaid || consuming) return;
 
     // ✅ Company + subscription active:
-    // 1) consume TX + create request (pending_payment)
-    // 2) then open pay modal to pay (gov + processing)
+    // ✅ المطلوب: لا خصم ولا إنشاء طلب هنا
+    // ✅ فقط افتح نافذة الدفع، والخصم/الإنشاء يحصل بعد نجاح الدفع داخل ServicePayModal / webhook
     if (isSubscriptionActive) {
-      setConsuming(true);
-
-      try {
-        const consumeKey = `CONS_${customerId}_${serviceId}_${Date.now()}_${Math.random()
-          .toString(16)
-          .slice(2)}`;
-
-        const payload = {
-          customerId,            // COM-...
-          clientType: "company",
-          lang,
-
-          serviceId,
-          serviceName:
-            (lang === "en"
-              ? name_en || translatedName || name
-              : name) || name || "",
-
-          // ✅ IMPORTANT: API expects these (NOT only metadata)
-          govAmountAED: govTotal,
-          processingFeeAED: processingFee,
-
-          // ✅ optional
-          attachments: uploadedDocs || {},
-          metadata: {
-            category,
-            // للعرض فقط
-            printingTotal: 0,
-            vatTotal: 0,
-            finalDisplayTotal, // preview
-          },
-
-          consumeKey,
-        };
-
-        const r = await fetch("/api/consume-tx-and-create-request", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-
-        const text = await r.text();
-console.log("consume status:", r.status);
-console.log("consume raw response:", text);
-
-const data = (() => { try { return JSON.parse(text); } catch { return {}; } })();
-
-
-        
-
-        // ✅ لو مفيش رصيد أو الاشتراك منتهي => ارجع للدفع الطبيعي
-        if (!r.ok || !data?.ok) {
-          const err = String(data?.error || "unknown_error");
-
-          if (err === "no_credits" || err === "subscription_expired" || err === "no_subscription") {
-            setShowPayModal(true);
-            return;
-          }
-
-          throw new Error(err);
-        }
-
-        // ✅ نجاح: request اتعمل + TX اتخصم
-        // دلوقتي لازم يدفع gov + processing في البوابة
-setPendingRequestId(String(data?.requestId || "").trim()); // ✅ احفظ requestId
-setShowPayModal(true); 
-
-      } catch (err) {
-        console.error("consume failed:", err);
-        setShowPayModal(true);
-      } finally {
-        setConsuming(false);
-      }
-
+      setPendingRequestId("");   // مفيش request لسه
+      setShowPayModal(true);     // افتح الدفع
       return;
     }
 
@@ -765,6 +701,7 @@ setShowPayModal(true);
     ? (lang === "ar" ? "غير متاحة" : "Unavailable")
     : (lang === "ar" ? "تقدم الآن" : "Apply Now")}
 </button>
+
 
       </div>
 
