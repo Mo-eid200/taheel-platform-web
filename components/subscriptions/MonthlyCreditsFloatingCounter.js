@@ -58,7 +58,7 @@ export default function MonthlyCreditsFloatingCounter({
   companyDocId,
   lang = "ar",
   compact = false,
-  subscriptionsPath = "/subscriptions", // ✅ غيرها لو عندك مسار مختلف
+  subscriptionsPath = "/subscriptions",
 }) {
   const router = useRouter();
 
@@ -99,11 +99,19 @@ export default function MonthlyCreditsFloatingCounter({
     const startAt = toDateSafe(sub?.startAt);
     const endAt = toDateSafe(sub?.endAt);
 
-const now = new Date();
-const notExpired = endAt ? endAt.getTime() > now.getTime() : false; // لو مفيش endAt يبقى مش timeActive
-const timeActive = !!sub?.timeActive && notExpired; // ✅ timer validity (UI show/hide)
-const benefitsActive = !!sub?.isActive;             // ✅ benefits validity (fees waiver)
+    const now = new Date();
 
+    // ✅ time validity depends on endAt, if missing => not active
+    const notExpired = endAt ? endAt.getTime() > now.getTime() : false;
+
+    // ✅ show/hide (timer): timeActive only
+    const timeActive = !!sub?.timeActive && notExpired;
+
+    // ✅ benefits (fees waiver): isActive may become false when credits = 0
+    const benefitsActive = !!sub?.isActive;
+
+    // ✅ alias to avoid breaking old code
+    const isActive = benefitsActive;
 
     const monthlyExhausted = baseLimit > 0 && baseRemaining <= 0;
     const addonsEmpty = addonsRemaining <= 0;
@@ -116,12 +124,12 @@ const benefitsActive = !!sub?.isActive;             // ✅ benefits validity (fe
       planName,
       startAt,
       endAt,
+      notExpired,
+      timeActive,
+      benefitsActive,
       isActive,
       monthlyExhausted,
       addonsEmpty,
-      timeActive,
-      benefitsActive,
-      notExpired,
     };
   }, [mtc, sub]);
 
@@ -152,11 +160,11 @@ const benefitsActive = !!sub?.isActive;             // ✅ benefits validity (fe
     },
   }[lang === "en" ? "en" : "ar"];
 
-  // ✅ لازم يكون عندنا بيانات الشهر + لازم نكون قرينا الاشتراك
+  // لازم يكون عندنا بيانات الشهر + لازم نكون قرينا الاشتراك
   if (!mtc) return null;
   if (!subLoaded) return null;
 
-  // ✅ يختفي لو الاشتراك مش فعّال أو منتهي
+  // ✅ الإخفاء مربوط بوقت الاشتراك فقط
   if (!view.timeActive) return null;
 
   const baseNumberCls = view.monthlyExhausted ? "text-rose-300" : "text-white";
@@ -188,12 +196,20 @@ const benefitsActive = !!sub?.isActive;             // ✅ benefits validity (fe
                   </span>
                 </div>
 
-                <div className="text-[10px] font-extrabold px-2 py-1 rounded-full border text-emerald-200 border-emerald-300/20 bg-emerald-400/10">
-                  {t.active}
+                {/* ✅ badge depends on benefitsActive */}
+                <div
+                  className={[
+                    "text-[10px] font-extrabold px-2 py-1 rounded-full border",
+                    view.benefitsActive
+                      ? "text-emerald-200 border-emerald-300/20 bg-emerald-400/10"
+                      : "text-rose-200 border-rose-300/25 bg-rose-400/10",
+                  ].join(" ")}
+                >
+                  {view.benefitsActive ? t.active : t.inactive}
                 </div>
               </div>
 
-              {/* ✅ Start/End dates */}
+              {/* Start/End dates */}
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <div className="rounded-xl bg-white/5 border border-white/10 px-2 py-1">
                   <div className="text-[10px] text-white/60 font-bold">{t.start}</div>
@@ -239,11 +255,9 @@ const benefitsActive = !!sub?.isActive;             // ✅ benefits validity (fe
                 </div>
               </div>
 
-              {/* ✅ Monthly exhausted message */}
+              {/* Monthly exhausted message */}
               {view.monthlyExhausted && (
-                <div className="mt-2 text-[11px] font-black text-rose-300">
-                  {t.exhausted}
-                </div>
+                <div className="mt-2 text-[11px] font-black text-rose-300">{t.exhausted}</div>
               )}
 
               {/* Divider line */}
