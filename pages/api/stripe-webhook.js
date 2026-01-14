@@ -437,6 +437,17 @@ export default async function handler(req, res) {
             },
             { merge: true }
           );
+          // ✅ NEW: reflect expiry in user doc too
+tx.set(
+  userRef,
+  {
+    subscriptionActive: false,
+    subscriptionStatus: "expired",
+    subscriptionUpdatedAtISO: nowISO(),
+  },
+  { merge: true }
+);
+
         }
       }
 
@@ -889,6 +900,20 @@ export default async function handler(req, res) {
           },
           { merge: true }
         );
+
+        // ✅ NEW: user-level subscription validity (time only)
+tx.set(
+  userRef,
+  {
+    subscriptionActive: timeValid,               // ✅ time validity only
+    subscriptionStatus: statusNow,               // optional but useful
+    subscriptionEndAtISO: endDate.toISOString(), // optional
+    subscriptionPlanKey: planKey || "",          // optional
+    subscriptionUpdatedAtISO: nowISO(),          // optional
+  },
+  { merge: true }
+);
+
 
         let startDate = now;
         let baseEnd = now;
