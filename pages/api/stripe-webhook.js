@@ -89,7 +89,9 @@ function isInLast7DaysOfMonth(d = new Date()) {
 
 // ✅ Add-on purchase rule (month-based):
 function computeAddonUsableMonthKey(purchasedAtDate) {
-  return isInLast7DaysOfMonth(purchasedAtDate) ? nextMonthKeyOf(purchasedAtDate) : monthKeyOf(purchasedAtDate);
+  return isInLast7DaysOfMonth(purchasedAtDate)
+    ? nextMonthKeyOf(purchasedAtDate)
+    : monthKeyOf(purchasedAtDate);
 }
 
 /**
@@ -405,34 +407,40 @@ export default async function handler(req, res) {
       addonBuckets = norm0.keep;
       let addonsRemaining = Number(norm0.sum || 0);
 
-      // حالة الاشتراك الحالية (ميزة الإعفاء) مرتبطة بالوقت + الرصيد
-      let subTimeValidNow = false; // صلاحية الوقت فقط
-      let subBenefitsActiveNow = false; // الإعفاء شغال الآن؟ (وقت + رصيد)
+      // =============================
+      // ✅ Subscription State Split:
+      // timeActive = صلاحية الوقت (Timer/UI)
+      // isActive   = صلاحية الإعفاء (وقت + رصيد معاملات)
+      // =============================
+      let timeActiveNow = false;      // time only
+      let benefitsActiveNow = false;  // time + credits
 
       if (isCompany && subSnap && subSnap.exists) {
         const sub = subSnap.data() || {};
         const status = normLower(sub.status || "");
         const endAt = toDateSafe(sub.endAt) || (sub.endAtISO ? new Date(sub.endAtISO) : null);
 
-        subTimeValidNow =
+        timeActiveNow =
           (status === "active" || status === "trial") &&
           !!endAt &&
           endAt.getTime() > now.getTime();
 
-        // ✅ لو الاشتراك منتهي بالفعل => اجبره expired + isActive false
-        if (!subTimeValidNow && endAt && endAt.getTime() <= now.getTime()) {
+        // لو منتهي بالفعل => اجبره expired + اقفل كله
+        if (!timeActiveNow && endAt && endAt.getTime() <= now.getTime()) {
           tx.set(
             subRef,
             {
               status: "expired",
+              timeActive: false,
               isActive: false,
+              benefitsState: "off",
               expiredAtISO: now.toISOString(),
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             },
             { merge: true }
           );
 
-          // ✅ reflect expiry in user doc too (time-only mirror)
+          // user mirror (time only)
           tx.set(
             userRef,
             {
@@ -448,16 +456,18 @@ export default async function handler(req, res) {
       // الرصيد الحالي (Base + Addons) بعد normalize/reset الشهري
       const hasCreditsNow = (Number(baseRemaining || 0) + Number(addonsRemaining || 0)) > 0;
 
-      // ✅ المعنى الجديد لـ isActive (ميزة الإعفاء)
-      subBenefitsActiveNow = subTimeValidNow && hasCreditsNow;
+      // ✅ benefits (الإعفاء) = وقت صالح + رصيد
+      benefitsActiveNow = timeActiveNow && hasCreditsNow;
 
       // ✅ منطق إخفاء رسوم الطباعة للشركات:
+      // - خدمات فقط (مش addon ولا subscription)
+      // - الإعفاء شغال => hide printingFee
       const shouldHidePrintingFee =
         isCompany &&
         requestTypeMeta === "service" &&
         !isAddon &&
         !isSubscription &&
-        (subBenefitsActiveNow || Number(addonsRemaining || 0) > 0);
+        (benefitsActiveNow === true);
 
       // --------- PREPARE request update/create (NO WRITES YET) ---------
       let finalRequestId = reqId || null;
@@ -477,7 +487,7 @@ export default async function handler(req, res) {
         tx.set(userRef, { monthlyTxCredits: monthlyTxCreditsPatch }, { merge: true });
       }
 
-      // (B) request update/create (زي ما هو عندك)
+      // (B) request update/create
       if (requestRef && rDoc && rDoc.exists) {
         finalRequestId = String(rDoc.id);
         const rdata = rDoc.data() || {};
@@ -495,9 +505,7 @@ export default async function handler(req, res) {
 
           baseAmountAED: baseAmountFromMeta || safeNum(rdata.baseAmountAED || 0),
           processingFee:
-            typeof rdata.processingFee !== "undefined"
-              ? rdata.processingFee
-              : processingFeeMeta || 0,
+            typeof rdata.processingFee !== "undefined" ? rdata.processingFee : processingFeeMeta || 0,
           totalAED: totalAEDFromMeta || amountAED,
 
           assignedTo: rdata.assignedTo || assignedToMeta || "",
@@ -539,6 +547,7 @@ export default async function handler(req, res) {
           updates.serviceId = svc.serviceId;
           updates.providers = svc.providers;
 
+          // ✅ printingFee = 0 لو benefitsActiveNow شغال
           updates.printingFee = shouldHidePrintingFee
             ? 0
             : (typeof rdata.printingFee !== "undefined"
@@ -572,9 +581,7 @@ export default async function handler(req, res) {
         tx.update(requestRef, updates);
       } else {
         if (!finalRequestId) {
-          finalRequestId = `REQ-${Math.floor(100 + Math.random() * 900)}-${Math.floor(
-            1000 + Math.random() * 9000
-          )}`;
+          finalRequestId = `REQ-${Math.floor(100 + Math.random() * 900)}-${Math.floor(1000 + Math.random() * 9000)}`;
         }
 
         const newReqRef = db.collection("requests").doc(finalRequestId);
@@ -666,6 +673,7 @@ export default async function handler(req, res) {
 
         const totalRemainingAfterSpend = Number(baseRemaining || 0) + Number(addonsRemaining || 0);
 
+        // update user monthlyTxCredits after spend
         tx.set(
           userRef,
           {
@@ -682,14 +690,17 @@ export default async function handler(req, res) {
           { merge: true }
         );
 
-        // mirror in companySubscriptions (benefit flag only)
+        // mirror into companySubscriptions: timeActive ثابت بالوقت / isActive يتأثر بالرصيد
         if (subSnap && subSnap.exists) {
-          const benefitsActiveNow = (subTimeValidNow === true) && (totalRemainingAfterSpend > 0);
+          const benefitsActiveAfterSpend = (timeActiveNow === true) && (totalRemainingAfterSpend > 0);
 
           tx.set(
             subRef,
             {
-              isActive: benefitsActiveNow,
+              status: timeActiveNow ? "active" : "expired", // time-based
+              timeActive: !!timeActiveNow,                  // ✅ timer/UI
+              isActive: !!benefitsActiveAfterSpend,         // ✅ benefits/fees
+              benefitsState: benefitsActiveAfterSpend ? "on" : "off",
               txCredits: {
                 monthKey,
                 baseLimit: Number(baseLimit || 0),
@@ -728,7 +739,6 @@ export default async function handler(req, res) {
         if (qtyToAdd > 0) {
           const purchasedAt = new Date();
           const purchasedMonthKey = monthKeyOf(purchasedAt);
-
           const usableMonthKey = computeAddonUsableMonthKey(purchasedAt);
 
           addonBuckets = [...addonBuckets];
@@ -746,11 +756,13 @@ export default async function handler(req, res) {
           addonBuckets = normAfterAdd.keep;
           const addonsRemainingAfter = Number(normAfterAdd.sum || 0);
 
+          // time validity from existing subscription
           let timeValidFromOld = false;
+          let statusFromOld = "expired";
 
           if (subSnap && subSnap.exists) {
             const old = subSnap.data() || {};
-            const statusFromOld = normLower(old.status || "");
+            statusFromOld = normLower(old.status || "") || "expired";
             const endAtFromOld = toDateSafe(old.endAt) || (old.endAtISO ? new Date(old.endAtISO) : null);
 
             timeValidFromOld =
@@ -762,6 +774,7 @@ export default async function handler(req, res) {
           const hasCreditsAfterAddon = (Number(baseRemaining || 0) + Number(addonsRemainingAfter || 0)) > 0;
           const benefitsActiveAfterAddon = timeValidFromOld && hasCreditsAfterAddon;
 
+          // update user credits
           tx.set(
             userRef,
             {
@@ -788,7 +801,11 @@ export default async function handler(req, res) {
               companyId: companyPublicId,
               email: companyEmail,
 
-              isActive: benefitsActiveAfterAddon,
+              // ✅ split states
+              status: timeValidFromOld ? "active" : "expired",
+              timeActive: !!timeValidFromOld,
+              isActive: !!benefitsActiveAfterAddon,
+              benefitsState: benefitsActiveAfterAddon ? "on" : "off",
 
               txCredits: {
                 monthKey,
@@ -873,7 +890,7 @@ export default async function handler(req, res) {
           { merge: true }
         );
 
-        // ---- compute subscription dates FIRST (bugfix only) ----
+        // ---- compute subscription dates ----
         let startDate = now;
         let baseEnd = now;
 
@@ -896,13 +913,15 @@ export default async function handler(req, res) {
 
         const endDate = addDays(baseEnd, daysToApply);
 
+        // ✅ time-based validity (Timer/UI)
         const timeValid = endDate.getTime() > now.getTime();
         const statusNow = timeValid ? "active" : "expired";
 
+        // ✅ benefits validity (Fees)
         const hasCreditsAfterSub = (Number(baseRemaining || 0) + Number(addonsRemainingAfterSub || 0)) > 0;
-        const isActiveNow = timeValid && hasCreditsAfterSub;
+        const benefitsActive = timeValid && hasCreditsAfterSub;
 
-        // ✅ user-level subscription validity (time only) — نفس نيتك بس بدون ReferenceError
+        // user mirror (time only)
         tx.set(
           userRef,
           {
@@ -940,8 +959,11 @@ export default async function handler(req, res) {
             startAtISO: startDate.toISOString(),
             endAtISO: endDate.toISOString(),
 
-            status: statusNow,
-            isActive: isActiveNow,
+            // ✅ split states
+            status: statusNow,              // time-based
+            timeActive: !!timeValid,        // timer/UI
+            isActive: !!benefitsActive,     // benefits/fees
+            benefitsState: benefitsActive ? "on" : "off",
 
             txCredits: {
               monthKey,
@@ -983,7 +1005,9 @@ export default async function handler(req, res) {
           endAt: admin.firestore.Timestamp.fromDate(endDate),
 
           status: statusNow,
-          isActive: isActiveNow,
+          timeActive: !!timeValid,
+          isActive: !!benefitsActive,
+          benefitsState: benefitsActive ? "on" : "off",
 
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });

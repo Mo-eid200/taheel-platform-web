@@ -26,11 +26,13 @@ import admin from "firebase-admin";
  * - carry-over
  */
 
+// -------- Firebase Admin init (idempotent) --------
 if (!admin.apps.length) {
   try {
     const sa = process.env.GOOGLE_SERVICE_ACCOUNT_KEY
       ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY)
       : null;
+
     if (sa && sa.private_key) {
       sa.private_key = sa.private_key.replace(/\\n/g, "\n");
       admin.initializeApp({ credential: admin.credential.cert(sa) });
@@ -129,6 +131,7 @@ async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFa
       for (const k of Object.keys(all)) {
         const s = all[k];
         if (!s) continue;
+
         if (
           (s.serviceId && String(s.serviceId) === String(serviceId)) ||
           (serviceId && String(k) === String(serviceId)) ||
@@ -141,6 +144,7 @@ async function fetchServiceFromByClientType(serviceId, clientType, serviceNameFa
       console.warn("fetchServiceFromByClientType error for", ct, e?.message || e);
     }
   }
+
   return null;
 }
 
@@ -151,8 +155,10 @@ async function fetchAddonFromCatalog(addonKey) {
     const ref = db.collection("companyAddonsCatalog").doc(String(addonKey));
     const snap = await ref.get();
     if (!snap.exists) return null;
+
     const d = snap.data() || {};
     if (d.isActive === false) return null;
+
     return { id: snap.id, ...d };
   } catch (e) {
     console.warn("fetchAddonFromCatalog error:", e?.message || e);
@@ -167,6 +173,7 @@ async function fetchPlanMonthlyLimit(planKey) {
     const ref = db.collection("companySubscriptionPlans").doc(String(planKey));
     const snap = await ref.get();
     if (!snap.exists) return 0;
+
     const d = snap.data() || {};
     const lim = Number(d.monthlyIncludedTxLimit || 0);
     return Number.isFinite(lim) ? lim : 0;
@@ -178,7 +185,7 @@ async function fetchPlanMonthlyLimit(planKey) {
 
 /**
  * ✅ Determine if printing fee should be waived for SERVICE:
- * Company + (Active subscription OR addonsRemaining > 0)
+ * Company + (Active Subscription OR addonsRemaining > 0)
  */
 async function shouldWaivePrintingFeeForCompany({ customerId, clientType }) {
   try {
@@ -203,14 +210,17 @@ async function shouldWaivePrintingFeeForCompany({ customerId, clientType }) {
     try {
       const subRef = db.collection("companySubscriptions").doc(String(customerId));
       const subSnap = await subRef.get();
+
       if (subSnap.exists) {
         const sub = subSnap.data() || {};
         const status = normLower(sub.status || "");
         const isActive = !!sub.isActive || status === "active" || status === "trial";
+
         const endAt =
           toDateSafe(sub.endAt) ||
           toDateSafe(sub.expiresAt) ||
           (sub.endAtISO ? new Date(sub.endAtISO) : null);
+
         subValid = isActive && endAt && endAt.getTime() > Date.now();
       }
     } catch (e) {
@@ -231,17 +241,13 @@ async function shouldWaivePrintingFeeForCompany({ customerId, clientType }) {
  */
 function calcStripeFees(amount, options = {}) {
   const percentFee = 0.029; // 2.9%
-  const fixedFee = 1;       // 1 AED
+  const fixedFee = 1; // 1 AED
   const intlFee = options.isInternational ? amount * 0.01 : 0;
   const currencyFee = options.isCurrencyConversion ? amount * 0.01 : 0;
 
-  const stripeFee = (amount * percentFee) + fixedFee + intlFee + currencyFee;
-
-  return {
-    stripeFee: Number(stripeFee.toFixed(2)),
-  };
+  const stripeFee = amount * percentFee + fixedFee + intlFee + currencyFee;
+  return { stripeFee: Number(stripeFee.toFixed(2)) };
 }
-
 
 // ✅ VAT 5%
 function calcVatAED(amountAED) {
@@ -288,9 +294,10 @@ export default async function handler(req, res) {
 
     if (!customerId) return res.status(400).json({ ok: false, error: "Missing customerId" });
 
-    const userRef = db.collection("users").doc(customerId);
+    const userRef = db.collection("users").doc(String(customerId));
     const userSnap = await userRef.get();
     if (!userSnap.exists) return res.status(400).json({ ok: false, error: "User not found" });
+    const userData = userSnap.data() || {};
 
     // --------------------------------
     // Amount + Fee calc (server truth)
@@ -314,19 +321,16 @@ export default async function handler(req, res) {
       printingFeeAED = 0;
 
       resolvedAddonQty = safeNum(addonDoc.qty || 0);
-
-      if (baseAmountAED <= 0) return res.status(400).json({ ok: false, error: "Invalid addon price" });
-      if (resolvedAddonQty <= 0) return res.status(400).json({ ok: false, error: "Invalid addon qty" });
+      if (!(baseAmountAED > 0)) return res.status(400).json({ ok: false, error: "Invalid addon price" });
+      if (!(resolvedAddonQty > 0)) return res.status(400).json({ ok: false, error: "Invalid addon qty" });
     }
 
     // SERVICE: resolve from catalog if missing
     if (requestType === "service") {
       serviceDoc = await fetchServiceFromByClientType(serviceId, clientType, serviceName);
 
-      if (!(baseAmountAED > 0)) {
-        if (serviceDoc) {
-          baseAmountAED = safeNum(serviceDoc.clientPrice ?? serviceDoc.price ?? 0);
-        }
+      if (!(baseAmountAED > 0) && serviceDoc) {
+        baseAmountAED = safeNum(serviceDoc.clientPrice ?? serviceDoc.price ?? 0);
       }
 
       // printingFee always from catalog if exists
@@ -349,7 +353,8 @@ export default async function handler(req, res) {
       printingFeeAED = 0;
 
       if (!planKey) return res.status(400).json({ ok: false, error: "Missing planKey for subscription" });
-      if (!(baseAmountAED > 0)) return res.status(400).json({ ok: false, error: "Missing/invalid amountAED for subscription" });
+      if (!(baseAmountAED > 0))
+        return res.status(400).json({ ok: false, error: "Missing/invalid amountAED for subscription" });
 
       if (!(resolvedMonthlyIncludedTxLimit > 0)) {
         resolvedMonthlyIncludedTxLimit = await fetchPlanMonthlyLimit(planKey);
@@ -367,45 +372,48 @@ export default async function handler(req, res) {
     if (!(baseAmountAED > 0)) return res.status(400).json({ ok: false, error: "Invalid base amount (0)" });
 
     // --------------------------------
-    // ✅ Fee + VAT logic
+    // ✅ Fee + VAT logic (as per header rules)
     // --------------------------------
-const applyVat = requestType === "subscription" || requestType === "addon";
+    const applyVat = requestType === "subscription" || requestType === "addon";
 
-const feeOpts = {
-  isInternational: !!body.isInternational,
-  isCurrencyConversion: !!body.isCurrencyConversion,
-};
+    const feeOpts = {
+      isInternational: !!body.isInternational,
+      isCurrencyConversion: !!body.isCurrencyConversion,
+    };
 
-let processingFeeAED = 0;
-let vatAED = 0;
-let totalPriceAED = 0;
-let totalAED = 0;
+    let processingFeeAED = 0;
+    let vatAED = 0;
+    let totalPriceAED = 0;
+    let totalAED = 0;
 
-if (!applyVat) {
-  processingFeeAED = calcStripeFees(baseAmountAED + printingFeeAED, feeOpts).stripeFee;
-  vatAED = 0;
+    if (!applyVat) {
+      // SERVICE/WALLET => no VAT
+      totalPriceAED = Number((baseAmountAED + printingFeeAED).toFixed(2));
+      processingFeeAED = calcStripeFees(totalPriceAED, feeOpts).stripeFee;
+      vatAED = 0;
+      totalAED = Number((totalPriceAED + processingFeeAED).toFixed(2));
+    } else {
+      // VAT is on (baseAmount + processingFee) ✅ requested
+      // Pass 1
+      const fee1 = calcStripeFees(baseAmountAED, feeOpts).stripeFee; // fee depends on amount
+      const vat1 = calcVatAED(baseAmountAED + fee1);
 
-  totalPriceAED = Number((baseAmountAED + printingFeeAED).toFixed(2));
-  totalAED = Number((totalPriceAED + processingFeeAED).toFixed(2));
-} else {
-  // Pass 1
-  const fee1 = calcStripeFees(baseAmountAED + printingFeeAED, feeOpts).stripeFee;
-  const vat1 = calcVatAED(baseAmountAED + printingFeeAED + fee1);
+      // Pass 2 (stabilize)
+      const fee2 = calcStripeFees(baseAmountAED + vat1, feeOpts).stripeFee;
+      const vat2 = calcVatAED(baseAmountAED + fee2);
 
-  // Pass 2 (stabilize)
-  const fee2 = calcStripeFees(baseAmountAED + printingFeeAED + vat1, feeOpts).stripeFee;
-  const vat2 = calcVatAED(baseAmountAED + printingFeeAED + fee2);
+      processingFeeAED = fee2;
+      vatAED = vat2;
 
-  processingFeeAED = fee2;
-  vatAED = vat2;
+      // final totals
+      totalPriceAED = Number((baseAmountAED + vatAED).toFixed(2));
+      totalAED = Number((totalPriceAED + processingFeeAED).toFixed(2));
+    }
 
-  totalPriceAED = Number((baseAmountAED + printingFeeAED + vatAED).toFixed(2));
-  totalAED = Number((totalPriceAED + processingFeeAED).toFixed(2));
-}
-
-
+    // ---- order/meta/helpers ----
     const amountSmallest = Math.round(totalAED * 100);
     const orderNumber = safeStr(body.requestId || body.orderNumber || generateOrderNumber()).trim();
+    const monthKey = getMonthKey(new Date());
 
     // attachments safe
     const attachments = body.attachments || null;
@@ -417,8 +425,6 @@ if (!applyVat) {
         attachmentsJson = "";
       }
     }
-
-    const monthKey = getMonthKey(new Date());
 
     // ----------------- Create PaymentIntent -----------------
     const pi = await stripe.paymentIntents.create({
@@ -486,7 +492,7 @@ if (!applyVat) {
       clientSecret: pi.client_secret || null,
 
       customerId,
-      userEmail: safeStr(userSnap.data()?.email || ""),
+      userEmail: safeStr(userData?.email || ""),
 
       requestType,
       clientType,
