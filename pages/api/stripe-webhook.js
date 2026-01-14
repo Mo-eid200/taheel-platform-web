@@ -88,8 +88,6 @@ function isInLast7DaysOfMonth(d = new Date()) {
 }
 
 // ✅ Add-on purchase rule (month-based):
-// - لو اتشترى آخر 7 أيام من الشهر => usableMonthKey = الشهر القادم فقط
-// - غير كده => usableMonthKey = الشهر الحالي
 function computeAddonUsableMonthKey(purchasedAtDate) {
   return isInLast7DaysOfMonth(purchasedAtDate) ? nextMonthKeyOf(purchasedAtDate) : monthKeyOf(purchasedAtDate);
 }
@@ -254,7 +252,6 @@ export default async function handler(req, res) {
 
     const isSubscription = requestTypeMeta === "subscription" || planKey.length > 0;
 
-    // لو مش مرسولة من create-payment-intent هنقرأها من companySubscriptionPlans/<planKey>
     const planMonthlyLimitMeta = safeNum(md.monthlyIncludedTxLimit || md.monthlyTxLimit || md.monthlyLimit || 0);
 
     // attachments
@@ -398,18 +395,15 @@ export default async function handler(req, res) {
         baseRemaining = baseLimit;
         usedThisMonth = 0;
       } else if (monthKey0 !== currentMonthKey) {
-        // ✅ reset كل أول شهر
         monthKey = currentMonthKey;
         baseRemaining = baseLimit;
         usedThisMonth = 0;
       }
 
       // ✅ فلترة حقيقية للبكتس + حساب الرصيد
-      {
-        const { keep, sum } = normalizeBucketsForMonth(addonBuckets, monthKey);
-        addonBuckets = keep;
-        var addonsRemaining = sum; // eslint-disable-line no-var
-      }
+      const norm0 = normalizeBucketsForMonth(addonBuckets, monthKey);
+      addonBuckets = norm0.keep;
+      let addonsRemaining = Number(norm0.sum || 0);
 
       // حالة الاشتراك الحالية (ميزة الإعفاء) مرتبطة بالوقت + الرصيد
       let subTimeValidNow = false; // صلاحية الوقت فقط
@@ -437,17 +431,17 @@ export default async function handler(req, res) {
             },
             { merge: true }
           );
-          // ✅ NEW: reflect expiry in user doc too
-tx.set(
-  userRef,
-  {
-    subscriptionActive: false,
-    subscriptionStatus: "expired",
-    subscriptionUpdatedAtISO: nowISO(),
-  },
-  { merge: true }
-);
 
+          // ✅ reflect expiry in user doc too (time-only mirror)
+          tx.set(
+            userRef,
+            {
+              subscriptionActive: false,
+              subscriptionStatus: "expired",
+              subscriptionUpdatedAtISO: nowISO(),
+            },
+            { merge: true }
+          );
         }
       }
 
@@ -469,8 +463,6 @@ tx.set(
       let finalRequestId = reqId || null;
 
       // --------- WRITES start هنا ---------
-
-      // (A) write/reset monthlyTxCredits fields (للـ service فقط زي ما انت عامل)
       const monthlyTxCreditsPatch = {
         monthKey,
         baseLimit: Number(baseLimit || 0),
@@ -485,7 +477,7 @@ tx.set(
         tx.set(userRef, { monthlyTxCredits: monthlyTxCreditsPatch }, { merge: true });
       }
 
-      // (B) request update/create  (زي ما هو عندك)
+      // (B) request update/create (زي ما هو عندك)
       if (requestRef && rDoc && rDoc.exists) {
         finalRequestId = String(rDoc.id);
         const rdata = rDoc.data() || {};
@@ -645,8 +637,6 @@ tx.set(
 
       // =============================
       // (X) DECREMENT monthly tx credits AFTER successful SERVICE payment
-      // - Only for companies
-      // - Only for "service" (not wallet, not addon, not subscription)
       // =============================
       const shouldDecrementCredits =
         isCompany &&
@@ -655,37 +645,27 @@ tx.set(
         !isSubscription;
 
       if (shouldDecrementCredits) {
-        // 1) decrement from baseRemaining first, else from addon buckets
         if (Number(baseRemaining || 0) > 0) {
           baseRemaining = Math.max(0, Number(baseRemaining || 0) - 1);
           usedThisMonth = Number(usedThisMonth || 0) + 1;
         } else {
           addonBuckets = Array.isArray(addonBuckets) ? [...addonBuckets] : [];
-          let decDone = false;
-
           for (let i = 0; i < addonBuckets.length; i++) {
             const qty = Number(addonBuckets[i]?.qtyRemaining || 0);
             if (qty > 0) {
-              addonBuckets[i] = {
-                ...addonBuckets[i],
-                qtyRemaining: Math.max(0, qty - 1),
-              };
-              decDone = true;
+              addonBuckets[i] = { ...addonBuckets[i], qtyRemaining: Math.max(0, qty - 1) };
               usedThisMonth = Number(usedThisMonth || 0) + 1;
               break;
             }
           }
-          // لو مفيش رصيد فعلياً خلاص مفيش خصم
         }
 
-        // 2) re-normalize buckets for current month + compute addonsRemaining
-        const { keep, sum: addonsRemainingAfterSpend } = normalizeBucketsForMonth(addonBuckets, monthKey);
-        addonBuckets = keep;
-        addonsRemaining = Number(addonsRemainingAfterSpend || 0);
+        const normAfter = normalizeBucketsForMonth(addonBuckets, monthKey);
+        addonBuckets = normAfter.keep;
+        addonsRemaining = Number(normAfter.sum || 0);
 
         const totalRemainingAfterSpend = Number(baseRemaining || 0) + Number(addonsRemaining || 0);
 
-        // 3) update user monthlyTxCredits
         tx.set(
           userRef,
           {
@@ -702,8 +682,7 @@ tx.set(
           { merge: true }
         );
 
-        // 4) update companySubscriptions mirror + isActive (benefit flag)
-        // isActive = timeValid (subTimeValidNow) + credits > 0
+        // mirror in companySubscriptions (benefit flag only)
         if (subSnap && subSnap.exists) {
           const benefitsActiveNow = (subTimeValidNow === true) && (totalRemainingAfterSpend > 0);
 
@@ -750,7 +729,6 @@ tx.set(
           const purchasedAt = new Date();
           const purchasedMonthKey = monthKeyOf(purchasedAt);
 
-          // ✅ usableMonthKey للشهر القادم فقط لو آخر 7 أيام
           const usableMonthKey = computeAddonUsableMonthKey(purchasedAt);
 
           addonBuckets = [...addonBuckets];
@@ -759,19 +737,15 @@ tx.set(
             addonKey: String(addonKey || ""),
             qtyRemaining: qtyToAdd,
             purchasedAt: admin.firestore.Timestamp.fromDate(purchasedAt),
-
             purchasedMonthKey,
-
             usableMonthKey,
-
-            // للتوافق
             expiresMonthKey: usableMonthKey,
           });
 
-          const { keep, sum: addonsRemainingAfter } = normalizeBucketsForMonth(addonBuckets, monthKey);
-          addonBuckets = keep;
+          const normAfterAdd = normalizeBucketsForMonth(addonBuckets, monthKey);
+          addonBuckets = normAfterAdd.keep;
+          const addonsRemainingAfter = Number(normAfterAdd.sum || 0);
 
-          // ✅ لو الاشتراك الزمني ساري، وجود رصيد بعد الاضافة يفعّل الإعفاء
           let timeValidFromOld = false;
 
           if (subSnap && subSnap.exists) {
@@ -860,8 +834,6 @@ tx.set(
 
       // (E) SUBSCRIPTION ... + ✅ rule: renew last 7 days => carry addons to next month, else clear addons
       if (isSubscription && isCompany) {
-        // ✅ rule: لو الاشتراك اتدفع آخر 7 أيام من الشهر => ترحيل الـ addons للشهر الجديد
-        // لو قبل آخر 7 أيام => إلغاء الـ addons
         const renewInLast7DaysOfMonth = isInLast7DaysOfMonth(now);
 
         if (renewInLast7DaysOfMonth) {
@@ -871,19 +843,19 @@ tx.set(
             expiresMonthKey: nextMonthKeyOf(now),
           }));
         } else {
-          addonBuckets = []; // ✅ يتلغى الاد اونز
+          addonBuckets = [];
           addonsRemaining = 0;
         }
 
         const lim = Number(planMonthlyLimitResolved || 0);
 
-        // ✅ نزّل الرصيد الشهري بتاع الاشتراك (reset)
         baseLimit = lim;
         baseRemaining = lim;
         usedThisMonth = 0;
 
-        const { keep, sum: addonsRemainingAfterSub } = normalizeBucketsForMonth(addonBuckets, monthKey);
-        addonBuckets = keep;
+        const normAfterSubBuckets = normalizeBucketsForMonth(addonBuckets, monthKey);
+        addonBuckets = normAfterSubBuckets.keep;
+        const addonsRemainingAfterSub = Number(normAfterSubBuckets.sum || 0);
 
         tx.set(
           userRef,
@@ -901,20 +873,7 @@ tx.set(
           { merge: true }
         );
 
-        // ✅ NEW: user-level subscription validity (time only)
-tx.set(
-  userRef,
-  {
-    subscriptionActive: timeValid,               // ✅ time validity only
-    subscriptionStatus: statusNow,               // optional but useful
-    subscriptionEndAtISO: endDate.toISOString(), // optional
-    subscriptionPlanKey: planKey || "",          // optional
-    subscriptionUpdatedAtISO: nowISO(),          // optional
-  },
-  { merge: true }
-);
-
-
+        // ---- compute subscription dates FIRST (bugfix only) ----
         let startDate = now;
         let baseEnd = now;
 
@@ -941,9 +900,20 @@ tx.set(
         const statusNow = timeValid ? "active" : "expired";
 
         const hasCreditsAfterSub = (Number(baseRemaining || 0) + Number(addonsRemainingAfterSub || 0)) > 0;
-
-        // ✅ لو انتهى الاشتراك => isActive false مهما كان
         const isActiveNow = timeValid && hasCreditsAfterSub;
+
+        // ✅ user-level subscription validity (time only) — نفس نيتك بس بدون ReferenceError
+        tx.set(
+          userRef,
+          {
+            subscriptionActive: timeValid,
+            subscriptionStatus: statusNow,
+            subscriptionEndAtISO: endDate.toISOString(),
+            subscriptionPlanKey: planKey || "",
+            subscriptionUpdatedAtISO: nowISO(),
+          },
+          { merge: true }
+        );
 
         const companyPublicId = safeStr(udata.companyId || udata.customerId || udata.userId || customerIdMeta);
         const companyEmail = safeStr(udata.email || md.userEmail || "");
@@ -1085,9 +1055,7 @@ tx.set(
         metadata: {
           orderId: finalRequestId,
           paymentIntentId,
-          ...(isSubscription
-            ? { type: "subscription", planKey, planName, pricingKey, subscriptionDays: daysToApply }
-            : {}),
+          ...(isSubscription ? { type: "subscription", planKey, planName, pricingKey, subscriptionDays: daysToApply } : {}),
           ...(isAddon ? { type: "addon", addonKey: addonKey || "", addonQty: Number(resolvedAddonQty || 0) } : {}),
         },
       });
