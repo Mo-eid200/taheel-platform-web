@@ -256,7 +256,7 @@ export default function ServicePayModal({
   }, [open, isCompany, freePrinting, companyId, customerId]);
 
   // ✅ Waiver active (only affects printing + VAT)
-  const waiverActive = isCompany && !waiverInfo.loading && waiverInfo.waiver;
+  const waiverActive = Boolean(freePrinting); // ✅ نفس قرار الكارت
 
   // --------------------
   // ✅ Build totals (Source of Truth)

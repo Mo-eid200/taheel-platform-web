@@ -720,6 +720,7 @@ export default function ServiceProfileCard({
             // ✅ Fallback only
             totalPrice={payTotalBeforeVat}
             printingFee={rawPrintingPerUnit} // per unit
+            companyId={String(customerId || "").trim()} // ✅ مهم
 
             // ✅ SOURCE OF TRUTH TOTALS
             serviceBase={govTotal}          // الرسوم الحكومية
