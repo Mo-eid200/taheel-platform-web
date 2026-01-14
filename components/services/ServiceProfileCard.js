@@ -706,7 +706,14 @@ export default function ServiceProfileCard({
           body: JSON.stringify(payload),
         });
 
-        const data = await r.json().catch(() => ({}));
+        const text = await r.text();
+console.log("consume status:", r.status);
+console.log("consume raw response:", text);
+
+const data = (() => { try { return JSON.parse(text); } catch { return {}; } })();
+
+
+        
 
         // ✅ لو مفيش رصيد أو الاشتراك منتهي => ارجع للدفع الطبيعي
         if (!r.ok || !data?.ok) {
@@ -727,7 +734,7 @@ setShowPayModal(true);
 
       } catch (err) {
         console.error("consume failed:", err);
-        alert(lang === "ar" ? "حصل خطأ أثناء خصم الاشتراك" : "Failed to consume subscription");
+        setShowPayModal(true);
       } finally {
         setConsuming(false);
       }
