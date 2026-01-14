@@ -684,13 +684,14 @@ export default function ServicePayModal({
                 </div>
               </div>
 
-              <button
-                onClick={onClose}
-                className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 border border-white/15 text-white flex items-center justify-center transition"
-                aria-label={lang === "ar" ? "إغلاق" : "Close"}
-              >
-                <FaTimes />
-              </button>
+<button
+  onClick={onClose}
+  className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 border border-white/15 text-white flex items-center justify-center transition cursor-pointer"
+  aria-label={lang === "ar" ? "إغلاق" : "Close"}
+>
+  <FaTimes />
+</button>
+
             </div>
 
             {/* Service name row (compact) */}
@@ -910,13 +911,14 @@ export default function ServicePayModal({
                 </div>
 
                 {/* Pay button */}
-                <button
-                  onClick={onPayClick}
-                  disabled={isPaying}
-                  className={`w-full py-3 rounded-full font-black text-[14px] text-white shadow-lg transition bg-gradient-to-r ${payBtnTheme} ${
-                    isPaying ? "opacity-50 cursor-wait" : "hover:scale-[1.01]"
-                  }`}
-                >
+<button
+  onClick={onPayClick}
+  disabled={isPaying}
+  className={`w-full py-3 rounded-full font-black text-[14px] text-white shadow-lg transition bg-gradient-to-r ${payBtnTheme}
+    ${isPaying ? "opacity-50 cursor-wait" : "cursor-pointer hover:scale-[1.01]"}
+  `}
+>
+
                   {isPaying ? (
                     <span className="flex items-center justify-center gap-2 text-[13px]">
                       <FaSpinner className="animate-spin" />
