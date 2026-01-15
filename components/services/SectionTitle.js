@@ -9,16 +9,12 @@ import ServiceProfileCard from "@/components/services/ServiceProfileCard";
 
 const EMPTY_SUB = {
   loading: false,
-
-  // ✅ إعفاءات الكارت (رصيد)
-  benefitsActive: false,
-
-  // ✅ ظهور/اختفاء العداد (وقت الاشتراك فقط من users)
-  timeActive: false,
-
+  benefitsActive: false, // من companySubscriptions.isActive (رصيد)
+  timeActive: false,     // من users.subscriptionActive + endAt (وقت الاشتراك)
   status: "none",
   planKey: "",
   planName: "",
+  resolvedCompanyId: "",
 };
 
 function toMs(v) {
@@ -47,7 +43,26 @@ export default function ServiceSection({
   );
 
   const isCompany = String(category || "").toLowerCase().includes("company");
-  const companyId = String(client?.customerId || "").trim(); // COM-xxx
+
+  const candidateIds = useMemo(() => {
+    const c = client || {};
+    const arr = [
+      c.customerId,      // COM-xxx
+      c.companyDocId,
+      c.companyId,
+      c.userId,
+      c.uid,
+      c.id,
+      c.userUid,
+      c.firebaseUid,
+    ]
+      .map((x) => (typeof x === "string" ? x.trim() : ""))
+      .filter(Boolean);
+
+    return Array.from(new Set(arr));
+  }, [client]);
+
+  const candidateKey = useMemo(() => candidateIds.join("|"), [candidateIds]);
 
   const [subInfo, setSubInfo] = useState(() => ({
     ...EMPTY_SUB,
@@ -58,7 +73,7 @@ export default function ServiceSection({
     let mounted = true;
 
     async function load() {
-      if (!isCompany || !companyId) {
+      if (!isCompany || candidateIds.length === 0) {
         if (mounted) setSubInfo({ ...EMPTY_SUB, loading: false });
         return;
       }
@@ -66,30 +81,51 @@ export default function ServiceSection({
       try {
         if (mounted) setSubInfo((p) => ({ ...p, loading: true }));
 
-        // =========================
-        // (1) timeActive من users (وقت الاشتراك فقط)
-        // =========================
-        const userSnap = await getDoc(doc(firestore, "users", companyId));
-        const userData = userSnap.exists() ? userSnap.data() : {};
+        // 1) لاقي ID شغال في users (لوقت الاشتراك)
+        let userData = null;
+        let resolvedId = "";
 
+        for (const id of candidateIds) {
+          const snap = await getDoc(doc(firestore, "users", id));
+          if (snap.exists()) {
+            userData = snap.data() || {};
+            resolvedId = id;
+            break;
+          }
+        }
+
+        // لو مفيش users doc بالمرشحّات، جرّب companySubscriptions على الأقل
+        if (!resolvedId) {
+          for (const id of candidateIds) {
+            const snap = await getDoc(doc(firestore, "companySubscriptions", id));
+            if (snap.exists()) {
+              resolvedId = id;
+              break;
+            }
+          }
+        }
+
+        if (!resolvedId) {
+          if (mounted) setSubInfo({ ...EMPTY_SUB, loading: false });
+          return;
+        }
+
+        // 2) timeActive من users (وقت الاشتراك فقط)
         const subFlag = Boolean(userData?.subscriptionActive);
         const endAtMs = toMs(userData?.subscriptionEndAtISO || userData?.subscriptionEndAt);
         const now = Date.now();
-
-        // ✅ العداد يظهر لو flag true ولسه ما انتهيش التاريخ (لو موجود)
         const timeActive = subFlag && (!endAtMs || now < endAtMs);
 
-        // =========================
-        // (2) benefitsActive من companySubscriptions (الرصيد)
-        // =========================
-        const subSnap = await getDoc(doc(firestore, "companySubscriptions", companyId));
+        // 3) benefitsActive من companySubscriptions.isActive (رصيد)
+        const subSnap = await getDoc(doc(firestore, "companySubscriptions", resolvedId));
         const subData = subSnap.exists() ? subSnap.data() : {};
 
-        const benefitsActive = Boolean(subData?.isActive); // الويبهوك يقلبه false لما الرصيد يخلص
+        const benefitsActive = Boolean(subData?.isActive);
 
         if (mounted) {
           setSubInfo({
             loading: false,
+            resolvedCompanyId: resolvedId,
             timeActive,
             benefitsActive,
             status: subData?.status || "none",
@@ -107,10 +143,15 @@ export default function ServiceSection({
     return () => {
       mounted = false;
     };
-  }, [isCompany, companyId]);
+  }, [isCompany, candidateKey, candidateIds]);
 
-  const subscriptionTimeActive = isCompany && subInfo.timeActive;      // ✅ للعداد
-  const subscriptionActive = isCompany && subInfo.benefitsActive;      // ✅ للإعفاءات داخل الكارت
+  const companyId = subInfo.resolvedCompanyId;
+
+  // ✅ العداد: وقت الاشتراك فقط
+  const subscriptionTimeActive = isCompany && Boolean(subInfo.timeActive);
+
+  // ✅ الكارت: إعفاءات حسب الرصيد فقط
+  const subscriptionActive = isCompany && Boolean(subInfo.benefitsActive);
 
   if (!filteredServices.length) {
     return (
@@ -126,8 +167,8 @@ export default function ServiceSection({
         {title}
       </SectionTitle>
 
-      {/* ✅ العداد يظهر بالوقت فقط (حتى لو الرصيد = 0) */}
-      {subscriptionTimeActive && (
+      {/* ✅ العداد يظهر بالوقت فقط */}
+      {subscriptionTimeActive && companyId && (
         <MonthlyCreditsFloatingCounter companyDocId={companyId} lang={lang} />
       )}
 
@@ -162,7 +203,6 @@ export default function ServiceSection({
             repeatable={srv.repeatable}
             allowPaperCount={srv.allowPaperCount}
             provider={srv.provider}
-            // ✅ إعفاءات الكارت = benefitsActive (رصيد)
             subscriptionActive={subscriptionActive}
           />
         ))}
