@@ -10,10 +10,10 @@ import ServiceProfileCard from "@/components/services/ServiceProfileCard";
 const EMPTY_SUB = {
   loading: false,
 
-  // ✅ isActive الحقيقي حسب اتفاقنا: مربوط بالوقت فقط
-  isActive: false,
+  // ✅ الإعفاءات داخل الكارت (يتغير حسب الرصيد: الويبهوك يقلبه false لو صفر)
+  benefitsActive: false,
 
-  // ✅ timeActive: للعداد (نفس isActive)
+  // ✅ ظهور/اختفاء العداد (يعتمد على وقت الاشتراك فقط)
   timeActive: false,
 
   status: "none",
@@ -99,7 +99,7 @@ export default function ServiceSection({
         }
 
         // ==========================
-        // ✅ الوقت فقط = مصدر الحقيقة
+        // ✅ (1) timeActive = بالوقت فقط (لظهور العداد)
         // ==========================
         const startMs =
           found.startAt?.toMillis?.() ??
@@ -114,14 +114,16 @@ export default function ServiceSection({
         const now = Date.now();
         const timeActive = (!startMs || now >= startMs) && (!endMs || now < endMs);
 
-        // ✅ حسب اتفاقنا: isActive = timeActive (حتى لو العدادات 0)
-        const isActive = Boolean(timeActive);
+        // ==========================
+        // ✅ (2) benefitsActive = isActive المخزن في doc (الويبهوك يقلبه حسب الرصيد)
+        // ==========================
+        const benefitsActive = Boolean(found.isActive);
 
         if (mounted) {
           setSubInfo({
             loading: false,
-            isActive,
-            timeActive, // للعداد
+            timeActive,
+            benefitsActive,
 
             status: found.status || "none",
             planKey: found.planKey || "",
@@ -143,9 +145,11 @@ export default function ServiceSection({
     };
   }, [isCompany, candidateKey, candidateIds]);
 
-  // ✅ مصدر واحد واضح
-  const subscriptionTimeActive = isCompany && Boolean(subInfo.timeActive); // للعداد (ظهور/اختفاء)
-  const subscriptionActive = isCompany && Boolean(subInfo.isActive); // للكارت (إعفاءات)
+  // ✅ (A) العداد يظهر/يختفي بالوقت فقط
+  const subscriptionTimeActive = isCompany && Boolean(subInfo.timeActive);
+
+  // ✅ (B) الكارت (إعفاءات) يعتمد على isActive (الرصيد)
+  const subscriptionActive = isCompany && Boolean(subInfo.benefitsActive);
 
   if (!filteredServices.length) {
     return (
@@ -161,11 +165,10 @@ export default function ServiceSection({
         {title}
       </SectionTitle>
 
-      {/* ✅ العداد يظهر طول ما وقت الاشتراك شغال فقط */}
-{isCompany && subscriptionTimeActive && (
-  <MonthlyCreditsFloatingCounter companyDocId={client?.customerId} lang={lang} />
-)}
-
+      {/* ✅ العداد يظهر طول ما وقت الاشتراك شغال (حتى لو الرصيد = 0) */}
+      {isCompany && subscriptionTimeActive && (
+        <MonthlyCreditsFloatingCounter companyDocId={client?.customerId} lang={lang} />
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
         {filteredServices.map((srv, i) => (
@@ -198,8 +201,7 @@ export default function ServiceSection({
             repeatable={srv.repeatable}
             allowPaperCount={srv.allowPaperCount}
             provider={srv.provider}
-
-            // ✅ الإعفاءات داخل الكارت = isActive (حتى لو العدادات 0)
+            // ✅ إعفاءات الكارت = benefitsActive (isActive من doc)
             subscriptionActive={subscriptionActive}
           />
         ))}
