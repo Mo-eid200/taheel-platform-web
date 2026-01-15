@@ -64,16 +64,24 @@ export default function MonthlyCreditsFloatingCounter({
     if (!companyDocId) return;
 
     const userRef = doc(firestore, "users", String(companyDocId));
-    const unsubUser = onSnapshot(userRef, (snap) => {
-      setLoaded((p) => ({ ...p, user: true }));
-      setUserDoc(snap.exists() ? snap.data() : null);
-    });
+    const unsubUser = onSnapshot(
+      userRef,
+      (snap) => {
+        setLoaded((p) => ({ ...p, user: true }));
+        setUserDoc(snap.exists() ? snap.data() : null);
+      },
+      () => setLoaded((p) => ({ ...p, user: true }))
+    );
 
     const subRef = doc(firestore, "companySubscriptions", String(companyDocId));
-    const unsubSub = onSnapshot(subRef, (snap) => {
-      setLoaded((p) => ({ ...p, sub: true }));
-      setSub(snap.exists() ? snap.data() : null);
-    });
+    const unsubSub = onSnapshot(
+      subRef,
+      (snap) => {
+        setLoaded((p) => ({ ...p, sub: true }));
+        setSub(snap.exists() ? snap.data() : null);
+      },
+      () => setLoaded((p) => ({ ...p, sub: true }))
+    );
 
     return () => {
       unsubUser?.();
@@ -90,20 +98,35 @@ export default function MonthlyCreditsFloatingCounter({
     const baseRemaining = safeNum(mtcSafe?.baseRemaining);
     const addonsRemaining = safeNum(mtcSafe?.addonsRemaining);
 
-    // ✅ ظهور/اختفاء العداد من users فقط
-    const subscriptionActive = Boolean(userDoc?.subscriptionActive);
-    const endAtUsers = toDateSafe(userDoc?.subscriptionEndAtISO || userDoc?.subscriptionEndAt);
+    // =========================================================
+    // ✅ (A) timeActive = وقت الاشتراك فقط (لا علاقة بـ isActive ولا subscriptionActive)
+    // مصدر الوقت: users أولًا، ولو ناقص fallback من companySubscriptions
+    // =========================================================
     const now = new Date();
 
-    const timeActive =
-      subscriptionActive && (!endAtUsers || endAtUsers.getTime() > now.getTime());
+    const startAtUsers =
+      toDateSafe(userDoc?.subscriptionStartAtISO || userDoc?.subscriptionStartAt) || null;
+    const endAtUsers =
+      toDateSafe(userDoc?.subscriptionEndAtISO || userDoc?.subscriptionEndAt) || null;
 
-    // ✅ مميزات/إعفاءات من companySubscriptions.isActive فقط (الرصيد)
+    const startAtSub = toDateSafe(sub?.startAt) || null;
+    const endAtSub = toDateSafe(sub?.endAt) || null;
+
+    const startAt = startAtUsers || startAtSub; // للعرض + للحكم
+    const endAt = endAtUsers || endAtSub;       // للعرض + للحكم
+
+    const startOk = !startAt || startAt.getTime() <= now.getTime();
+    const endOk = !endAt || endAt.getTime() > now.getTime();
+
+    // ✅ العداد يظهر طالما الوقت شغال
+    const timeActive = startOk && endOk;
+
+    // =========================================================
+    // ✅ (B) benefitsActive = isActive من companySubscriptions فقط (رصيد/مميزات)
+    // =========================================================
     const benefitsActive = Boolean(sub?.isActive);
 
     const planName = sub?.planName || sub?.planKey || "";
-    const startAt = toDateSafe(sub?.startAt) || toDateSafe(userDoc?.subscriptionStartAtISO || userDoc?.subscriptionStartAt);
-    const endAt = toDateSafe(sub?.endAt) || endAtUsers;
 
     const monthlyExhausted = baseLimit > 0 && baseRemaining <= 0;
     const addonsEmpty = addonsRemaining <= 0;
@@ -116,8 +139,8 @@ export default function MonthlyCreditsFloatingCounter({
       planName,
       startAt,
       endAt,
-      timeActive,        // ✅ للعداد
-      benefitsActive,    // ✅ للبادچ (مميزات)
+      timeActive,      // ✅ يتحكم في ظهور/اختفاء العداد فقط
+      benefitsActive,  // ✅ يتحكم في البادچ فقط (مميزات ON/OFF)
       monthlyExhausted,
       addonsEmpty,
     };
@@ -177,10 +200,12 @@ export default function MonthlyCreditsFloatingCounter({
               <div className="flex items-center justify-between">
                 <div className="text-white/70 text-[11px] font-bold">
                   {t.month}:{" "}
-                  <span className="text-white/90 font-extrabold">{monthName(view.monthKey, lang)}</span>
+                  <span className="text-white/90 font-extrabold">
+                    {monthName(view.monthKey, lang)}
+                  </span>
                 </div>
 
-                {/* ✅ البادچ يعتمد على benefitsActive (رصيد) */}
+                {/* ✅ البادچ يعتمد على benefitsActive فقط */}
                 <div
                   className={[
                     "text-[10px] font-extrabold px-2 py-1 rounded-full border",
@@ -196,11 +221,15 @@ export default function MonthlyCreditsFloatingCounter({
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <div className="rounded-xl bg-white/5 border border-white/10 px-2 py-1">
                   <div className="text-[10px] text-white/60 font-bold">{t.start}</div>
-                  <div className="text-[10px] text-white/90 font-extrabold">{fmtDate(view.startAt, lang)}</div>
+                  <div className="text-[10px] text-white/90 font-extrabold">
+                    {fmtDate(view.startAt, lang)}
+                  </div>
                 </div>
                 <div className="rounded-xl bg-white/5 border border-white/10 px-2 py-1">
                   <div className="text-[10px] text-white/60 font-bold">{t.end}</div>
-                  <div className="text-[10px] text-white/90 font-extrabold">{fmtDate(view.endAt, lang)}</div>
+                  <div className="text-[10px] text-white/90 font-extrabold">
+                    {fmtDate(view.endAt, lang)}
+                  </div>
                 </div>
               </div>
             </div>
@@ -226,7 +255,10 @@ export default function MonthlyCreditsFloatingCounter({
                 >
                   {Math.max(0, view.baseRemaining)}
                 </div>
-                <div className="text-white/55 text-[13px] font-extrabold pb-1">/ {view.baseLimit || 0}</div>
+
+                <div className="text-white/55 text-[13px] font-extrabold pb-1">
+                  / {view.baseLimit || 0}
+                </div>
               </div>
 
               {view.monthlyExhausted && (
@@ -263,6 +295,7 @@ export default function MonthlyCreditsFloatingCounter({
                 >
                   {Math.max(0, view.addonsRemaining)}
                 </div>
+
                 <div className="text-white/55 text-[12px] font-extrabold pb-1">TX</div>
               </div>
 

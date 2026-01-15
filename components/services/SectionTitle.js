@@ -35,39 +35,47 @@ export default function ServiceSection({
   const isCompany = String(category || "").toLowerCase().includes("company");
   const companyId = String(client?.customerId || "").trim(); // COM-xxx
 
-  // -----------------------------
-  // (A) subscriptionTimeActive => العداد (users only)
-  // -----------------------------
+  // ✅ (A) COUNTER visibility: by TIME ONLY (users start/end) - NOT by subscriptionActive
   const [subscriptionTimeActive, setSubscriptionTimeActive] = useState(false);
 
-  // -----------------------------
-  // (B) subscriptionBenefitsActive => الكروت (companySubscriptions.isActive)
-  // -----------------------------
+  // ✅ (B) BENEFITS: by CREDITS ONLY (companySubscriptions.isActive)
   const [subscriptionBenefitsActive, setSubscriptionBenefitsActive] = useState(false);
 
   useEffect(() => {
+    // reset if not a company
     if (!isCompany || !companyId) {
       setSubscriptionTimeActive(false);
       setSubscriptionBenefitsActive(false);
       return;
     }
 
-    // ✅ users doc => controls COUNTER visibility only
+    // -----------------------------
+    // (1) USERS => TIME WINDOW ONLY
+    // -----------------------------
     const unsubUser = onSnapshot(doc(firestore, "users", companyId), (snap) => {
       const u = snap.exists() ? snap.data() : null;
 
-      const flag = Boolean(u?.subscriptionActive);
+      // ✅ ONLY TIME WINDOW (start/end)
+      const startAtMs = toMs(u?.subscriptionStartAtISO || u?.subscriptionStartAt);
       const endAtMs = toMs(u?.subscriptionEndAtISO || u?.subscriptionEndAt);
       const now = Date.now();
 
-      const timeOk = flag && (!endAtMs || now < endAtMs);
+      // active if now within [start, end)
+      const timeOk =
+        (!startAtMs || now >= startAtMs) &&
+        (!endAtMs || now < endAtMs);
+
       setSubscriptionTimeActive(Boolean(timeOk));
     });
 
-    // ✅ companySubscriptions doc => controls SERVICE benefits only
+    // -----------------------------------------
+    // (2) companySubscriptions => CREDITS ONLY
+    // -----------------------------------------
     const unsubSub = onSnapshot(doc(firestore, "companySubscriptions", companyId), (snap) => {
       const s = snap.exists() ? snap.data() : null;
-      setSubscriptionBenefitsActive(Boolean(s?.isActive)); // الرصيد
+
+      // ✅ credits-driven benefits (webhook flips it false when credits = 0)
+      setSubscriptionBenefitsActive(Boolean(s?.isActive));
     });
 
     return () => {
@@ -90,8 +98,8 @@ export default function ServiceSection({
         {title}
       </SectionTitle>
 
-      {/* ✅ العداد: يظهر/يختفي بالوقت فقط (users.subscriptionActive) */}
-      {isCompany && subscriptionTimeActive && companyId && (
+      {/* ✅ COUNTER: show/hide by TIME ONLY (even if credits = 0) */}
+      {isCompany && companyId && subscriptionTimeActive && (
         <MonthlyCreditsFloatingCounter companyDocId={companyId} lang={lang} />
       )}
 
@@ -127,7 +135,7 @@ export default function ServiceSection({
             allowPaperCount={srv.allowPaperCount}
             provider={srv.provider}
 
-            // ✅ الكارت: الإعفاءات فقط حسب الرصيد (companySubscriptions.isActive)
+            // ✅ BENEFITS on cards: credits ONLY
             subscriptionActive={isCompany && subscriptionBenefitsActive}
           />
         ))}
