@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { doc, onSnapshot, updateDoc } from "firebase/firestore";
+import { doc, onSnapshot } from "firebase/firestore";
 import { firestore } from "@/lib/firebase.client";
 import { FaCrown, FaPlusCircle } from "react-icons/fa";
 import { useRouter } from "next/navigation";
@@ -56,22 +56,22 @@ export default function MonthlyCreditsFloatingCounter({
 }) {
   const router = useRouter();
 
-  const [mtc, setMtc] = useState(null);
+  const [userDoc, setUserDoc] = useState(null);
   const [sub, setSub] = useState(null);
-  const [subLoaded, setSubLoaded] = useState(false);
+  const [loaded, setLoaded] = useState({ user: false, sub: false });
 
   useEffect(() => {
     if (!companyDocId) return;
 
     const userRef = doc(firestore, "users", String(companyDocId));
     const unsubUser = onSnapshot(userRef, (snap) => {
-      const d = snap.data() || {};
-      setMtc(d.monthlyTxCredits || null);
+      setLoaded((p) => ({ ...p, user: true }));
+      setUserDoc(snap.exists() ? snap.data() : null);
     });
 
     const subRef = doc(firestore, "companySubscriptions", String(companyDocId));
     const unsubSub = onSnapshot(subRef, (snap) => {
-      setSubLoaded(true);
+      setLoaded((p) => ({ ...p, sub: true }));
       setSub(snap.exists() ? snap.data() : null);
     });
 
@@ -81,33 +81,29 @@ export default function MonthlyCreditsFloatingCounter({
     };
   }, [companyDocId]);
 
-  // ✅ safe fallback
-  const mtcSafe = mtc || { monthKey: "", baseLimit: 0, baseRemaining: 0, addonsRemaining: 0 };
-
   const view = useMemo(() => {
+    const mtc = userDoc?.monthlyTxCredits || null;
+    const mtcSafe = mtc || { monthKey: "", baseLimit: 0, baseRemaining: 0, addonsRemaining: 0 };
+
     const monthKey = mtcSafe?.monthKey || "";
     const baseLimit = safeNum(mtcSafe?.baseLimit);
     const baseRemaining = safeNum(mtcSafe?.baseRemaining);
     const addonsRemaining = safeNum(mtcSafe?.addonsRemaining);
 
-    const planName = sub?.planName || sub?.planKey || "";
-
-    const startAt = toDateSafe(sub?.startAt);
-    const endAt = toDateSafe(sub?.endAt);
-
+    // ✅ ظهور/اختفاء العداد من users فقط
+    const subscriptionActive = Boolean(userDoc?.subscriptionActive);
+    const endAtUsers = toDateSafe(userDoc?.subscriptionEndAtISO || userDoc?.subscriptionEndAt);
     const now = new Date();
 
-    // ✅ ظهور/اختفاء العداد = وقت الاشتراك فقط
     const timeActive =
-      (!!endAt && endAt.getTime() > now.getTime()) &&
-      (!startAt || startAt.getTime() <= now.getTime());
+      subscriptionActive && (!endAtUsers || endAtUsers.getTime() > now.getTime());
 
-    // ✅ isActive (المميزات) = وقت الاشتراك + وجود رصيد
-    const totalRemaining = baseRemaining + addonsRemaining;
-    const benefitsActive = timeActive && totalRemaining > 0;
+    // ✅ مميزات/إعفاءات من companySubscriptions.isActive فقط (الرصيد)
+    const benefitsActive = Boolean(sub?.isActive);
 
-    // ✅ ده اللي انت عايزه في الداتا: لما صفر يبقى false
-    const isActive = benefitsActive;
+    const planName = sub?.planName || sub?.planKey || "";
+    const startAt = toDateSafe(sub?.startAt) || toDateSafe(userDoc?.subscriptionStartAtISO || userDoc?.subscriptionStartAt);
+    const endAt = toDateSafe(sub?.endAt) || endAtUsers;
 
     const monthlyExhausted = baseLimit > 0 && baseRemaining <= 0;
     const addonsEmpty = addonsRemaining <= 0;
@@ -117,41 +113,15 @@ export default function MonthlyCreditsFloatingCounter({
       baseLimit,
       baseRemaining,
       addonsRemaining,
-      totalRemaining,
       planName,
       startAt,
       endAt,
-      timeActive,
-      benefitsActive,
-      isActive,
+      timeActive,        // ✅ للعداد
+      benefitsActive,    // ✅ للبادچ (مميزات)
       monthlyExhausted,
       addonsEmpty,
     };
-  }, [mtcSafe, sub, lang]);
-
-  // ✅ sync companySubscriptions.isActive مع الواقع (رصيد صفر => false)
-  useEffect(() => {
-    if (!companyDocId || !subLoaded || !sub) return;
-
-    const currentStored = typeof sub.isActive === "boolean" ? sub.isActive : null;
-    const next = Boolean(view.isActive);
-
-    // لو نفس القيمة مفيش شغل
-    if (currentStored === next) return;
-
-    // اكتبها مرة واحدة فقط لما تختلف (لتفادي loop)
-    updateDoc(doc(firestore, "companySubscriptions", String(companyDocId)), {
-      isActive: next,
-      // ممكن كمان تحافظ على وقت التحديث
-      isActiveUpdatedAt: new Date().toISOString(),
-    }).catch(() => {});
-  }, [companyDocId, subLoaded, sub, view.isActive]);
-
-  // ✅ wait until subscription doc is read
-  if (!subLoaded) return null;
-
-  // ✅ العداد يختفي فقط لو الوقت خلص
-  if (!view.timeActive) return null;
+  }, [userDoc, sub]);
 
   const t = {
     ar: {
@@ -159,7 +129,7 @@ export default function MonthlyCreditsFloatingCounter({
       bottomLabel: "الإضافات (Add-ons)",
       month: "شهر الرصيد",
       active: "مميزات فعّالة",
-      inactive: "المميزات متوقفة (رصيد 0)",
+      inactive: "انتهت المعاملات (رصيد 0)",
       start: "بداية الاشتراك",
       end: "انتهاء الاشتراك",
       exhausted: "لقد استهلكت معاملاتك الشهرية كاملة",
@@ -171,7 +141,7 @@ export default function MonthlyCreditsFloatingCounter({
       bottomLabel: "Add-ons",
       month: "Billing month",
       active: "Benefits ON",
-      inactive: "Benefits OFF (0 credits)",
+      inactive: "0 credits (Benefits OFF)",
       start: "Start",
       end: "End",
       exhausted: "You have used all your monthly transactions.",
@@ -179,6 +149,12 @@ export default function MonthlyCreditsFloatingCounter({
       hint: "Updates automatically after each order.",
     },
   }[lang === "en" ? "en" : "ar"];
+
+  // ✅ استنى الاتنين
+  if (!loaded.user || !loaded.sub) return null;
+
+  // ✅ العداد يختفي فقط لما وقت الاشتراك يخلص
+  if (!view.timeActive) return null;
 
   const baseNumberCls = view.monthlyExhausted ? "text-rose-300" : "text-white";
   const addOnNumberCls = view.addonsEmpty ? "text-rose-300" : "text-white";
@@ -204,16 +180,16 @@ export default function MonthlyCreditsFloatingCounter({
                   <span className="text-white/90 font-extrabold">{monthName(view.monthKey, lang)}</span>
                 </div>
 
-                {/* ✅ البادچ يعتمد على isActive (الرصيد) */}
+                {/* ✅ البادچ يعتمد على benefitsActive (رصيد) */}
                 <div
                   className={[
                     "text-[10px] font-extrabold px-2 py-1 rounded-full border",
-                    view.isActive
+                    view.benefitsActive
                       ? "text-emerald-200 border-emerald-300/20 bg-emerald-400/10"
                       : "text-rose-200 border-rose-300/25 bg-rose-400/10",
                   ].join(" ")}
                 >
-                  {view.isActive ? t.active : t.inactive}
+                  {view.benefitsActive ? t.active : t.inactive}
                 </div>
               </div>
 
@@ -250,11 +226,12 @@ export default function MonthlyCreditsFloatingCounter({
                 >
                   {Math.max(0, view.baseRemaining)}
                 </div>
-
                 <div className="text-white/55 text-[13px] font-extrabold pb-1">/ {view.baseLimit || 0}</div>
               </div>
 
-              {view.monthlyExhausted && <div className="mt-2 text-[11px] font-black text-rose-300">{t.exhausted}</div>}
+              {view.monthlyExhausted && (
+                <div className="mt-2 text-[11px] font-black text-rose-300">{t.exhausted}</div>
+              )}
 
               <div className="relative my-3">
                 <div className="h-[2px] bg-gradient-to-r from-transparent via-red-500/80 to-transparent" />
@@ -286,7 +263,6 @@ export default function MonthlyCreditsFloatingCounter({
                 >
                   {Math.max(0, view.addonsRemaining)}
                 </div>
-
                 <div className="text-white/55 text-[12px] font-extrabold pb-1">TX</div>
               </div>
 
