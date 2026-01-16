@@ -417,13 +417,9 @@ export default async function handler(req, res) {
 
       if (isCompany && subSnap && subSnap.exists) {
         const sub = subSnap.data() || {};
-        const status = normLower(sub.status || "");
-        const endAt = toDateSafe(sub.endAt) || (sub.endAtISO ? new Date(sub.endAtISO) : null);
+const endAt = toDateSafe(sub.endAt) || (sub.endAtISO ? new Date(sub.endAtISO) : null);
+timeActiveNow = !!endAt && endAt.getTime() > now.getTime();
 
-        timeActiveNow =
-          (status === "active" || status === "trial") &&
-          !!endAt &&
-          endAt.getTime() > now.getTime();
 
         // لو منتهي بالفعل => اجبره expired + اقفل كله
         if (!timeActiveNow && endAt && endAt.getTime() <= now.getTime()) {
@@ -691,30 +687,41 @@ export default async function handler(req, res) {
         );
 
         // mirror into companySubscriptions: timeActive ثابت بالوقت / isActive يتأثر بالرصيد
-        if (subSnap && subSnap.exists) {
-          const benefitsActiveAfterSpend = (timeActiveNow === true) && (totalRemainingAfterSpend > 0);
+if (subSnap && subSnap.exists) {
+  const subOld = subSnap.data() || {};
+  const endAtOld = toDateSafe(subOld.endAt) || (subOld.endAtISO ? new Date(subOld.endAtISO) : null);
 
-          tx.set(
-            subRef,
-            {
-              status: timeActiveNow ? "active" : "expired", // time-based
-              timeActive: !!timeActiveNow,                  // ✅ timer/UI
-              isActive: !!benefitsActiveAfterSpend,         // ✅ benefits/fees
-              benefitsState: benefitsActiveAfterSpend ? "on" : "off",
-              txCredits: {
-                monthKey,
-                baseLimit: Number(baseLimit || 0),
-                baseRemaining: Number(baseRemaining || 0),
-                usedThisMonth: Number(usedThisMonth || 0),
-                addonsRemaining: Number(addonsRemaining || 0),
-                totalRemaining: Number(totalRemainingAfterSpend || 0),
-                updatedAtISO: nowISO(),
-              },
-              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            },
-            { merge: true }
-          );
-        }
+  // ✅ timeActive الحقيقي: بالوقت فقط
+  const timeActiveFixed = !!endAtOld && endAtOld.getTime() > now.getTime();
+
+  // ✅ status الحقيقي: بالوقت فقط
+  const statusFixed = timeActiveFixed ? "active" : "expired";
+
+  const benefitsActiveAfterSpend = timeActiveFixed && (totalRemainingAfterSpend > 0);
+
+  tx.set(
+    subRef,
+    {
+      status: statusFixed,              // ✅ time فقط
+      timeActive: !!timeActiveFixed,    // ✅ time فقط
+      isActive: !!benefitsActiveAfterSpend,   // ✅ credits فقط (مع time)
+      benefitsState: benefitsActiveAfterSpend ? "on" : "off",
+
+      txCredits: {
+        monthKey,
+        baseLimit: Number(baseLimit || 0),
+        baseRemaining: Number(baseRemaining || 0),
+        usedThisMonth: Number(usedThisMonth || 0),
+        addonsRemaining: Number(addonsRemaining || 0),
+        totalRemaining: Number(totalRemainingAfterSpend || 0),
+        updatedAtISO: nowISO(),
+      },
+
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+}
       }
 
       // (C) wallet/coins
@@ -755,21 +762,19 @@ export default async function handler(req, res) {
           const normAfterAdd = normalizeBucketsForMonth(addonBuckets, monthKey);
           addonBuckets = normAfterAdd.keep;
           const addonsRemainingAfter = Number(normAfterAdd.sum || 0);
+// time validity from existing subscription (TIME ONLY - no status dependency)
+let timeValidFromOld = false;
 
-          // time validity from existing subscription
-          let timeValidFromOld = false;
-          let statusFromOld = "expired";
+if (subSnap && subSnap.exists) {
+  const old = subSnap.data() || {};
+  const endAtFromOld =
+    toDateSafe(old.endAt) || (old.endAtISO ? new Date(old.endAtISO) : null);
 
-          if (subSnap && subSnap.exists) {
-            const old = subSnap.data() || {};
-            statusFromOld = normLower(old.status || "") || "expired";
-            const endAtFromOld = toDateSafe(old.endAt) || (old.endAtISO ? new Date(old.endAtISO) : null);
+  timeValidFromOld = !!endAtFromOld && endAtFromOld.getTime() > now.getTime();
+}
 
-            timeValidFromOld =
-              (statusFromOld === "active" || statusFromOld === "trial") &&
-              !!endAtFromOld &&
-              endAtFromOld.getTime() > now.getTime();
-          }
+const statusFromOld = timeValidFromOld ? "active" : "expired";
+
 
           const hasCreditsAfterAddon = (Number(baseRemaining || 0) + Number(addonsRemainingAfter || 0)) > 0;
           const benefitsActiveAfterAddon = timeValidFromOld && hasCreditsAfterAddon;
@@ -897,12 +902,8 @@ export default async function handler(req, res) {
         if (subSnap && subSnap.exists) {
           const old = subSnap.data() || {};
           const oldEnd = toDateSafe(old.endAt) || (old.endAtISO ? new Date(old.endAtISO) : null);
-          const oldStatus = normLower(old.status || "");
+          const oldActiveNow = !!oldEnd && oldEnd.getTime() > now.getTime();
 
-          const oldActiveNow =
-            !!oldEnd &&
-            oldEnd.getTime() > now.getTime() &&
-            (oldStatus === "active" || oldStatus === "trial");
 
           if (oldActiveNow) {
             baseEnd = oldEnd;
