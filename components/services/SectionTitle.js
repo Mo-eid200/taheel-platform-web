@@ -66,7 +66,7 @@ const unsubUser = onSnapshot(
       (!startAtMs || now >= startAtMs) &&
       (endAtMs ? now < endAtMs : false);
 
-    setSubscriptionActiveForCounter(Boolean(timeOk));
+    setSubscriptionActiveForCounter(Boolean(u?.subscriptionActive));
   },
   () => setSubscriptionActiveForCounter(false)
 );
