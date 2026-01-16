@@ -299,6 +299,23 @@ function ClientProfilePageInner({ userId }) {
   const [showWalletMenu, setShowWalletMenu] = useState(false);
   const [showMessagesMenu, setShowMessagesMenu] = useState(false);
  
+  const [showCounter, setShowCounter] = useState(false);
+
+useEffect(() => {
+  if (!client?.customerId) {
+    setShowCounter(false);
+    return;
+  }
+
+  const unsub = onSnapshot(
+    doc(firestore, "users", client.customerId),
+    (snap) => setShowCounter(Boolean(snap.data()?.subscriptionActive)),
+    () => setShowCounter(false)
+  );
+
+  return () => unsub();
+}, [client?.customerId]);
+
 
   const [search, setSearch] = useState("");
   const [reloadClient, setReloadClient] = useState(false);
@@ -1102,12 +1119,10 @@ useEffect(() => {
               </SectionTitle>
 
                   {/* ✅ العداد يظهر فقط في صفحة خدمات الشركات + اشتراك Active */}
-    {selectedSection === "companyServices" && Boolean(freePrinting) && (
-      <MonthlyCreditsFloatingCounter
-        companyDocId={client?.customerId}
-        lang={lang}
-      />
-    )}
+{selectedSection === "companyServices" && clientType === "company" && showCounter && (
+  <MonthlyCreditsFloatingCounter companyDocId={client?.customerId} lang={lang} />
+)}
+
 
               {/* Search box */}
               <div className="w-full flex items-center gap-2 mb-5">
@@ -1164,7 +1179,7 @@ useEffect(() => {
   name_en={displayName}
   description={displayDesc}
   description_en={displayDesc}
-  subscriptionActive={Boolean(freePrinting && isCompanyServicesSection)}
+  subscriptionActive={Boolean(isCompanyServicesSection && showCounter && freePrinting)}
   price={srv.price}
   printingFee={srv.printingFee}
   clientPrice={srv.clientPrice}
