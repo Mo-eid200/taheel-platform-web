@@ -7,14 +7,6 @@ import MonthlyCreditsFloatingCounter from "@/components/subscriptions/MonthlyCre
 import SectionTitle from "@/components/services/SectionTitle";
 import ServiceProfileCard from "@/components/services/ServiceProfileCard";
 
-function toMs(v) {
-  if (!v) return 0;
-  if (typeof v === "object" && typeof v.toDate === "function") return v.toDate().getTime();
-  if (typeof v === "object" && typeof v.seconds === "number") return v.seconds * 1000;
-  const t = Date.parse(v);
-  return Number.isFinite(t) ? t : 0;
-}
-
 export default function ServiceSection({
   icon,
   color,
@@ -35,48 +27,42 @@ export default function ServiceSection({
   const isCompany = String(category || "").toLowerCase().includes("company");
   const companyId = String(client?.customerId || "").trim(); // COM-xxx
 
-  // ✅ (A) COUNTER visibility: by TIME ONLY (users start/end) - NOT by subscriptionActive
-  const [subscriptionTimeActive, setSubscriptionTimeActive] = useState(false);
+  // ✅ (A) COUNTER visibility: by users.subscriptionActive ONLY
+  const [subscriptionActiveForCounter, setSubscriptionActiveForCounter] = useState(false);
 
-  // ✅ (B) BENEFITS: by CREDITS ONLY (companySubscriptions.isActive)
+  // ✅ (B) BENEFITS: by credits ONLY (companySubscriptions.isActive)
   const [subscriptionBenefitsActive, setSubscriptionBenefitsActive] = useState(false);
 
   useEffect(() => {
-    // reset if not a company
     if (!isCompany || !companyId) {
-      setSubscriptionTimeActive(false);
+      setSubscriptionActiveForCounter(false);
       setSubscriptionBenefitsActive(false);
       return;
     }
 
-    // -----------------------------
-    // (1) USERS => TIME WINDOW ONLY
-    // -----------------------------
-    const unsubUser = onSnapshot(doc(firestore, "users", companyId), (snap) => {
-      const u = snap.exists() ? snap.data() : null;
-
-      // ✅ ONLY TIME WINDOW (start/end)
-      const startAtMs = toMs(u?.subscriptionStartAtISO || u?.subscriptionStartAt);
-      const endAtMs = toMs(u?.subscriptionEndAtISO || u?.subscriptionEndAt);
-      const now = Date.now();
-
-      // active if now within [start, end)
-      const timeOk =
-        (!startAtMs || now >= startAtMs) &&
-        (!endAtMs || now < endAtMs);
-
-      setSubscriptionTimeActive(Boolean(timeOk));
-    });
+    // -----------------------------------------
+    // (1) USERS => subscriptionActive ONLY (visibility)
+    // -----------------------------------------
+    const unsubUser = onSnapshot(
+      doc(firestore, "users", companyId),
+      (snap) => {
+        const u = snap.exists() ? snap.data() : null;
+        setSubscriptionActiveForCounter(Boolean(u?.subscriptionActive));
+      },
+      () => setSubscriptionActiveForCounter(false)
+    );
 
     // -----------------------------------------
-    // (2) companySubscriptions => CREDITS ONLY
+    // (2) companySubscriptions => credits ONLY (benefits)
     // -----------------------------------------
-    const unsubSub = onSnapshot(doc(firestore, "companySubscriptions", companyId), (snap) => {
-      const s = snap.exists() ? snap.data() : null;
-
-      // ✅ credits-driven benefits (webhook flips it false when credits = 0)
-      setSubscriptionBenefitsActive(Boolean(s?.isActive));
-    });
+    const unsubSub = onSnapshot(
+      doc(firestore, "companySubscriptions", companyId),
+      (snap) => {
+        const s = snap.exists() ? snap.data() : null;
+        setSubscriptionBenefitsActive(Boolean(s?.isActive)); // credits only
+      },
+      () => setSubscriptionBenefitsActive(false)
+    );
 
     return () => {
       unsubUser?.();
@@ -98,8 +84,8 @@ export default function ServiceSection({
         {title}
       </SectionTitle>
 
-      {/* ✅ COUNTER: show/hide by TIME ONLY (even if credits = 0) */}
-      {isCompany && companyId && subscriptionTimeActive && (
+      {/* ✅ COUNTER: show/hide by users.subscriptionActive ONLY (even if credits = 0) */}
+      {isCompany && companyId && subscriptionActiveForCounter && (
         <MonthlyCreditsFloatingCounter companyDocId={companyId} lang={lang} />
       )}
 
@@ -134,7 +120,6 @@ export default function ServiceSection({
             repeatable={srv.repeatable}
             allowPaperCount={srv.allowPaperCount}
             provider={srv.provider}
-
             // ✅ BENEFITS on cards: credits ONLY
             subscriptionActive={isCompany && subscriptionBenefitsActive}
           />

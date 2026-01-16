@@ -119,7 +119,11 @@ export default function MonthlyCreditsFloatingCounter({
     const endOk = !endAt || endAt.getTime() > now.getTime();
 
     // ✅ العداد يظهر طالما الوقت شغال
-    const timeActive = startOk && endOk;
+    const timeActive =
+  typeof userDoc?.subscriptionActive === "boolean"
+    ? userDoc.subscriptionActive
+    : (startOk && endOk); // fallback فقط
+
 
     // =========================================================
     // ✅ (B) benefitsActive = isActive من companySubscriptions فقط (رصيد/مميزات)
