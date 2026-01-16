@@ -115,14 +115,9 @@ export default function MonthlyCreditsFloatingCounter({
     const startAt = startAtUsers || startAtSub; // للعرض + للحكم
     const endAt = endAtUsers || endAtSub;       // للعرض + للحكم
 
-    const startOk = !startAt || startAt.getTime() <= now.getTime();
-    const endOk = !endAt || endAt.getTime() > now.getTime();
+// ✅ العداد يظهر/يختفي فقط من users.subscriptionActive
+const timeActive = Boolean(userDoc?.subscriptionActive);
 
-    // ✅ العداد يظهر طالما الوقت شغال
-    const timeActive =
-  typeof userDoc?.subscriptionActive === "boolean"
-    ? userDoc.subscriptionActive
-    : (startOk && endOk); // fallback فقط
 
 
     // =========================================================
