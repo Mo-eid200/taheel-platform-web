@@ -413,47 +413,17 @@ export default async function handler(req, res) {
       // isActive   = صلاحية الرصيد (credits only)
       // benefitsState = وقت + رصيد
       // =============================
-      let timeActiveNow = false;      // time only
-      let benefitsActiveNow = false;  // time + credits (for printing hide logic)
-
-      if (isCompany && subSnap && subSnap.exists) {
-        const sub = subSnap.data() || {};
-        const endAt = toDateSafe(sub.endAt) || (sub.endAtISO ? new Date(sub.endAtISO) : null);
-        timeActiveNow = !!endAt && endAt.getTime() > now.getTime();
-
-        // لو منتهي بالفعل => اجبره expired + اقفل كله
-        if (!timeActiveNow && endAt && endAt.getTime() <= now.getTime()) {
-          tx.set(
-            subRef,
-            {
-              status: "expired",
-              timeActive: false,
-              isActive: false,
-              benefitsState: "off",
-              expiredAtISO: now.toISOString(),
-              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            },
-            { merge: true }
-          );
-
-          // user mirror (time only)
-          tx.set(
-            userRef,
-            {
-              subscriptionActive: false,
-              subscriptionStatus: "expired",
-              subscriptionUpdatedAtISO: nowISO(),
-            },
-            { merge: true }
-          );
-        }
-      }
+      // ✅ التعديل 1: timeActiveNow مصدره users.subscriptionActive فقط (حسب الاتفاق)
+      let timeActiveNow = Boolean(udata.subscriptionActive); // time only
+      let benefitsActiveNow = false; // time + credits (for printing hide logic)
 
       // الرصيد الحالي (Base + Addons) بعد normalize/reset الشهري
       const hasCreditsNow = (Number(baseRemaining || 0) + Number(addonsRemaining || 0)) > 0;
 
       // ✅ benefits (الإعفاء) = وقت صالح + رصيد
       benefitsActiveNow = timeActiveNow && hasCreditsNow;
+
+      // ✅ التعديل 2: إزالة بلوك "ALWAYS sync" بالكامل (كان بيعمل overwrite قبل الخصم)
 
       // ✅ منطق إخفاء رسوم الطباعة للشركات:
       // - خدمات فقط (مش addon ولا subscription)
@@ -686,43 +656,37 @@ export default async function handler(req, res) {
           { merge: true }
         );
 
-        // mirror into companySubscriptions: timeActive ثابت بالوقت / isActive يتأثر بالرصيد
-        if (subSnap && subSnap.exists) {
-          const subOld = subSnap.data() || {};
-          const endAtOld = toDateSafe(subOld.endAt) || (subOld.endAtISO ? new Date(subOld.endAtISO) : null);
+        // ✅ التعديل 3: تحديث companySubscriptions بعد الخصم فقط (هنا المكان الصح)
+        const creditsActiveAfterSpend = (totalRemainingAfterSpend > 0);
+        const benefitsAfterSpend = (timeActiveNow && creditsActiveAfterSpend);
 
-          // ✅ timeActive الحقيقي: بالوقت فقط
-          const timeActiveFixed = !!endAtOld && endAtOld.getTime() > now.getTime();
+        tx.set(
+          subRef,
+          {
+            // status/timeActive هنا وقت فقط (من users.subscriptionActive)
+            status: timeActiveNow ? "active" : "expired",
+            timeActive: !!timeActiveNow,
 
-          // ✅ status الحقيقي: بالوقت فقط
-          const statusFixed = timeActiveFixed ? "active" : "expired";
+            // ✅ isActive = credits only (بيتقفل لما الرصيد يبقى 0)
+            isActive: !!creditsActiveAfterSpend,
 
-          const creditsActiveAfterSpend = (totalRemainingAfterSpend > 0); // ✅ credits فقط
-          const benefitsAfterSpend = (timeActiveFixed && creditsActiveAfterSpend); // ✅ وقت + رصيد
+            // ✅ benefitsState = time + credits
+            benefitsState: benefitsAfterSpend ? "on" : "off",
 
-          tx.set(
-            subRef,
-            {
-              status: statusFixed,                 // ✅ time فقط
-              timeActive: !!timeActiveFixed,       // ✅ time فقط
-              isActive: !!creditsActiveAfterSpend, // ✅ credits فقط
-              benefitsState: benefitsAfterSpend ? "on" : "off", // ✅ وقت + رصيد
-
-              txCredits: {
-                monthKey,
-                baseLimit: Number(baseLimit || 0),
-                baseRemaining: Number(baseRemaining || 0),
-                usedThisMonth: Number(usedThisMonth || 0),
-                addonsRemaining: Number(addonsRemaining || 0),
-                totalRemaining: Number(totalRemainingAfterSpend || 0),
-                updatedAtISO: nowISO(),
-              },
-
-              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            txCredits: {
+              monthKey,
+              baseLimit: Number(baseLimit || 0),
+              baseRemaining: Number(baseRemaining || 0),
+              usedThisMonth: Number(usedThisMonth || 0),
+              addonsRemaining: Number(addonsRemaining || 0),
+              totalRemaining: Number(totalRemainingAfterSpend || 0),
+              updatedAtISO: nowISO(),
             },
-            { merge: true }
-          );
-        }
+
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
       }
 
       // (C) wallet/coins
@@ -764,17 +728,9 @@ export default async function handler(req, res) {
           addonBuckets = normAfterAdd.keep;
           const addonsRemainingAfter = Number(normAfterAdd.sum || 0);
 
-          // time validity from existing subscription (TIME ONLY - no status dependency)
-          let timeValidFromOld = false;
-          if (subSnap && subSnap.exists) {
-            const old = subSnap.data() || {};
-            const endAtFromOld = toDateSafe(old.endAt) || (old.endAtISO ? new Date(old.endAtISO) : null);
-            timeValidFromOld = !!endAtFromOld && endAtFromOld.getTime() > now.getTime();
-          }
-
           const creditsActiveAfterAddon =
-            (Number(baseRemaining || 0) + Number(addonsRemainingAfter || 0)) > 0; // ✅ credits فقط
-          const benefitsAfterAddon = (timeValidFromOld && creditsActiveAfterAddon); // ✅ وقت + رصيد
+            (Number(baseRemaining || 0) + Number(addonsRemainingAfter || 0)) > 0; // credits فقط
+          const benefitsAfterAddon = (timeActiveNow && creditsActiveAfterAddon); // وقت + رصيد
 
           const companyPublicId = safeStr(udata.companyId || udata.customerId || udata.userId || customerIdMeta);
           const companyEmail = safeStr(udata.email || md.userEmail || "");
@@ -786,10 +742,10 @@ export default async function handler(req, res) {
               companyId: companyPublicId,
               email: companyEmail,
 
-              status: timeValidFromOld ? "active" : "expired", // ✅ time فقط
-              timeActive: !!timeValidFromOld,                 // ✅ time فقط
-              isActive: !!creditsActiveAfterAddon,            // ✅ credits فقط
-              benefitsState: benefitsAfterAddon ? "on" : "off",// ✅ وقت + رصيد
+              status: timeActiveNow ? "active" : "expired", // time فقط
+              timeActive: !!timeActiveNow,                 // time فقط
+              isActive: !!creditsActiveAfterAddon,         // credits فقط
+              benefitsState: benefitsAfterAddon ? "on" : "off", // وقت + رصيد
 
               txCredits: {
                 monthKey,
@@ -941,10 +897,10 @@ export default async function handler(req, res) {
             endAtISO: endDate.toISOString(),
 
             // ✅ split states
-            status: statusNow,                       // time-based
-            timeActive: !!timeValid,                 // timer/UI (time only)
-            isActive: !!creditsActiveAfterSub,       // ✅ credits only
-            benefitsState: benefitsAfterSub ? "on" : "off", // ✅ time + credits
+            status: statusNow,                             // time-based
+            timeActive: !!timeValid,                       // timer/UI (time only)
+            isActive: !!creditsActiveAfterSub,             // credits only
+            benefitsState: benefitsAfterSub ? "on" : "off", // time + credits
 
             txCredits: {
               monthKey,
@@ -987,8 +943,8 @@ export default async function handler(req, res) {
 
           status: statusNow,
           timeActive: !!timeValid,
-          isActive: !!creditsActiveAfterSub,             // ✅ credits only
-          benefitsState: benefitsAfterSub ? "on" : "off", // ✅ time + credits
+          isActive: !!creditsActiveAfterSub,
+          benefitsState: benefitsAfterSub ? "on" : "off",
 
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
