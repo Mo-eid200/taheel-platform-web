@@ -43,14 +43,34 @@ export default function ServiceSection({
     // -----------------------------------------
     // (1) USERS => subscriptionActive ONLY (visibility)
     // -----------------------------------------
-    const unsubUser = onSnapshot(
-      doc(firestore, "users", companyId),
-      (snap) => {
-        const u = snap.exists() ? snap.data() : null;
-        setSubscriptionActiveForCounter(Boolean(u?.subscriptionActive));
-      },
-      () => setSubscriptionActiveForCounter(false)
-    );
+function toMs(v) {
+  if (!v) return 0;
+  if (typeof v === "object" && typeof v.toDate === "function") return v.toDate().getTime();
+  if (typeof v === "object" && typeof v.seconds === "number") return v.seconds * 1000;
+  const t = Date.parse(v);
+  return Number.isFinite(t) ? t : 0;
+}
+
+// (1) USERS => TIME WINDOW ONLY (visibility)
+const unsubUser = onSnapshot(
+  doc(firestore, "users", companyId),
+  (snap) => {
+    const u = snap.exists() ? snap.data() : null;
+
+    const startAtMs = toMs(u?.subscriptionStartAtISO || u?.subscriptionStartAt);
+    const endAtMs = toMs(u?.subscriptionEndAtISO || u?.subscriptionEndAt);
+    const now = Date.now();
+
+    // لازم end يكون موجود علشان نعتبر في اشتراك فعّال
+    const timeOk =
+      (!startAtMs || now >= startAtMs) &&
+      (endAtMs ? now < endAtMs : false);
+
+    setSubscriptionActiveForCounter(Boolean(timeOk));
+  },
+  () => setSubscriptionActiveForCounter(false)
+);
+
 
     // -----------------------------------------
     // (2) companySubscriptions => credits ONLY (benefits)
