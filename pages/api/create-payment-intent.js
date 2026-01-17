@@ -427,63 +427,70 @@ export default async function handler(req, res) {
     }
 
     // ----------------- Create PaymentIntent -----------------
-    const pi = await stripe.paymentIntents.create({
-      amount: amountSmallest,
-      currency: "aed",
-      automatic_payment_methods: { enabled: true },
-      metadata: {
-        customerId,
-        lang,
-        monthKey,
+const pi = await stripe.paymentIntents.create(
+  {
+    amount: amountSmallest,
+    currency: "aed",
+    automatic_payment_methods: { enabled: true },
+    metadata: {
+      customerId,
+      lang,
+      monthKey,
 
-        requestId: orderNumber,
-        requestType,
-        clientType,
+      requestId: orderNumber,
+      requestType,
+      clientType,
 
-        serviceId,
-        serviceName,
+      serviceId,
+      serviceName,
 
-        assignedTo,
-        assignedToName,
+      assignedTo,
+      assignedToName,
 
-        // breakdown
-        baseAmountAED: String(baseAmountAED.toFixed(2)),
-        printingFee: String(printingFeeAED.toFixed(2)),
-        vatAED: String(vatAED.toFixed(2)),
-        totalPriceAED: String(totalPriceAED.toFixed(2)),
-        processingFee: String(processingFeeAED.toFixed(2)),
-        totalAED: String(totalAED.toFixed(2)),
+      // breakdown
+      baseAmountAED: String(baseAmountAED.toFixed(2)),
+      printingFee: String(printingFeeAED.toFixed(2)),
+      vatAED: String(vatAED.toFixed(2)),
+      totalPriceAED: String(totalPriceAED.toFixed(2)),
+      processingFee: String(processingFeeAED.toFixed(2)),
+      totalAED: String(totalAED.toFixed(2)),
 
-        coinsUsed: String(coinsUsed),
-        coinsGiven: String(coinsGiven),
+      coinsUsed: String(coinsUsed),
+      coinsGiven: String(coinsGiven),
 
-        // subscription meta
-        planKey,
-        planName,
-        pricingKey,
-        subscriptionDays: String(subscriptionDays),
-        giftDays: String(giftDays),
-        totalSubscriptionDays: String(totalSubDays),
-        monthsShown: String(monthsShown),
-        paidMonths: String(paidMonths),
-        bonus: String(bonus),
-        monthlyIncludedTxLimit: String(resolvedMonthlyIncludedTxLimit || 0),
+      // subscription meta
+      planKey,
+      planName,
+      pricingKey,
+      subscriptionDays: String(subscriptionDays),
+      giftDays: String(giftDays),
+      totalSubscriptionDays: String(totalSubDays),
+      monthsShown: String(monthsShown),
+      paidMonths: String(paidMonths),
+      bonus: String(bonus),
+      monthlyIncludedTxLimit: String(resolvedMonthlyIncludedTxLimit || 0),
 
-        // addon meta
-        ...(requestType === "addon"
-          ? {
-              isAddon: "1",
-              addonKey: addonKeyFromBody,
-              addonQty: String(resolvedAddonQty),
-              addonType: safeStr(addonDoc?.type || ""),
-              addonTitleAr: safeStr(addonDoc?.title?.ar || ""),
-              addonTitleEn: safeStr(addonDoc?.title?.en || ""),
-            }
-          : {}),
+      // addon meta
+      ...(requestType === "addon"
+        ? {
+            isAddon: "1",
+            addonKey: addonKeyFromBody,
+            addonQty: String(resolvedAddonQty),
+            addonType: safeStr(addonDoc?.type || ""),
+            addonTitleAr: safeStr(addonDoc?.title?.ar || ""),
+            addonTitleEn: safeStr(addonDoc?.title?.en || ""),
+          }
+        : {}),
 
-        ...(attachmentsJson ? { attachments: attachmentsJson } : {}),
-      },
-    });
+      ...(attachmentsJson ? { attachments: attachmentsJson } : {}),
+    },
+  },
+  {
+    // ✅ هنا المكان الصح
+    idempotencyKey: orderNumber,
+  }
+);
+
 
     // ----------------- Create/merge request doc -----------------
     const requestDoc = {
