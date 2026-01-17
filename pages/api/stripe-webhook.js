@@ -964,6 +964,56 @@ export default async function handler(req, res) {
         addonsRemaining = addonsRemainingAfterSub;
       }
 
+      // ✅ FINAL: enforce isActive strictly by credits (base + addons)
+// and benefitsState by (time + credits), every webhook run.
+if (isCompany) {
+  // credits now (after any subscription/addon/decrement logic)
+  const finalCreditsRemaining =
+    Number(baseRemaining || 0) + Number(addonsRemaining || 0);
+
+  const finalCreditsActive = finalCreditsRemaining > 0;
+
+  // time validity (endAt from existing sub doc OR what we just set)
+  const subLatest =
+    (subSnap && subSnap.exists ? (subSnap.data() || {}) : {}) || {};
+
+  const endAtLatest =
+    toDateSafe(subLatest.endAt) || (subLatest.endAtISO ? new Date(subLatest.endAtISO) : null);
+
+  const finalTimeActive = !!endAtLatest && endAtLatest.getTime() > now.getTime();
+
+  const finalBenefits = finalTimeActive && finalCreditsActive;
+
+  tx.set(
+    subRef,
+    {
+      // credits only
+      isActive: !!finalCreditsActive,
+
+      // time only (optional but consistent)
+      timeActive: !!finalTimeActive,
+      status: finalTimeActive ? "active" : "expired",
+
+      // time + credits
+      benefitsState: finalBenefits ? "on" : "off",
+
+      txCredits: {
+        monthKey,
+        baseLimit: Number(baseLimit || 0),
+        baseRemaining: Number(baseRemaining || 0),
+        usedThisMonth: Number(usedThisMonth || 0),
+        addonsRemaining: Number(addonsRemaining || 0),
+        totalRemaining: Number(finalCreditsRemaining || 0),
+        updatedAtISO: nowISO(),
+      },
+
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+}
+
+
       // (F) transactions log
       const txRef = db.collection("transactions").doc();
       tx.set(txRef, {
