@@ -731,6 +731,22 @@ export default async function handler(req, res) {
           const creditsActiveAfterAddon =
             (Number(baseRemaining || 0) + Number(addonsRemainingAfter || 0)) > 0; // credits فقط
           const benefitsAfterAddon = (timeActiveNow && creditsActiveAfterAddon); // وقت + رصيد
+          // ✅ Mirror to users so UI counter sees add-ons
+tx.set(
+  userRef,
+  {
+    monthlyTxCredits: {
+      monthKey,
+      baseLimit: Number(baseLimit || 0),
+      baseRemaining: Number(baseRemaining || 0),
+      usedThisMonth: Number(usedThisMonth || 0),
+      addonBuckets,
+      addonsRemaining: Number(addonsRemainingAfter || 0),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+  },
+  { merge: true }
+);
 
           const companyPublicId = safeStr(udata.companyId || udata.customerId || udata.userId || customerIdMeta);
           const companyEmail = safeStr(udata.email || md.userEmail || "");
@@ -974,13 +990,8 @@ if (isCompany) {
   const finalCreditsActive = finalCreditsRemaining > 0;
 
   // time validity (endAt from existing sub doc OR what we just set)
-  const subLatest =
-    (subSnap && subSnap.exists ? (subSnap.data() || {}) : {}) || {};
 
-  const endAtLatest =
-    toDateSafe(subLatest.endAt) || (subLatest.endAtISO ? new Date(subLatest.endAtISO) : null);
-
-  const finalTimeActive = !!endAtLatest && endAtLatest.getTime() > now.getTime();
+  const finalTimeActive = !!timeActiveNow; // ✅ time من users.subscriptionActive فقط
 
   const finalBenefits = finalTimeActive && finalCreditsActive;
 
