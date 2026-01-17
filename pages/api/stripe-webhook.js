@@ -380,9 +380,19 @@ export default async function handler(req, res) {
 
       const mtc0 = udata.monthlyTxCredits || {};
       const monthKey0 = String(mtc0.monthKey || "");
-      const baseLimit0 = Number(mtc0.baseLimit || 0);
-      const baseRemaining0 = Number(mtc0.baseRemaining || baseLimit0);
-      const used0 = Number(mtc0.usedThisMonth || 0);
+
+      // ✅ لا تستخدم || مع أرقام (0 قيمة صحيحة)
+      const baseLimit0 =
+        typeof mtc0.baseLimit === "number" ? mtc0.baseLimit : Number(mtc0.baseLimit || 0);
+
+      const baseRemaining0 =
+        typeof mtc0.baseRemaining === "number"
+          ? mtc0.baseRemaining
+          : baseLimit0;
+
+      const used0 =
+        typeof mtc0.usedThisMonth === "number" ? mtc0.usedThisMonth : Number(mtc0.usedThisMonth || 0);
+
       const buckets0 = Array.isArray(mtc0.addonBuckets) ? mtc0.addonBuckets : [];
 
       // لو أول مرة أو شهر اتغير => reset lazy
@@ -390,8 +400,11 @@ export default async function handler(req, res) {
       let baseLimit = baseLimit0;
       let baseRemaining = baseRemaining0;
       let usedThisMonth = used0;
-      let addonBuckets = [...buckets0];
 
+      // ✅ احتفظ بكل البكتس (الأصل) للخصم
+      let addonBucketsAll = [...buckets0];
+
+      // reset الشهر لو اتغير
       if (!monthKey0) {
         monthKey = currentMonthKey;
         baseRemaining = baseLimit;
@@ -402,9 +415,9 @@ export default async function handler(req, res) {
         usedThisMonth = 0;
       }
 
-      // ✅ فلترة حقيقية للبكتس + حساب الرصيد
-      const norm0 = normalizeBucketsForMonth(addonBuckets, monthKey);
-      addonBuckets = norm0.keep;
+      // ✅ للعرض فقط: فلترة البكتس للشهر الحالي
+      const norm0 = normalizeBucketsForMonth(addonBucketsAll, monthKey);
+      let addonBuckets = norm0.keep; // للعرض / التخزين كـ view
       let addonsRemaining = Number(norm0.sum || 0);
 
       // =============================
@@ -422,8 +435,6 @@ export default async function handler(req, res) {
 
       // ✅ benefits (الإعفاء) = وقت صالح + رصيد
       benefitsActiveNow = timeActiveNow && hasCreditsNow;
-
-      // ✅ التعديل 2: إزالة بلوك "ALWAYS sync" بالكامل (كان بيعمل overwrite قبل الخصم)
 
       // ✅ منطق إخفاء رسوم الطباعة للشركات:
       // - خدمات فقط (مش addon ولا subscription)
@@ -448,10 +459,6 @@ export default async function handler(req, res) {
         addonsRemaining: Number(addonsRemaining || 0),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
-
-      if (requestTypeMeta === "service" && !isAddon && !isSubscription) {
-        tx.set(userRef, { monthlyTxCredits: monthlyTxCreditsPatch }, { merge: true });
-      }
 
       // (B) request update/create
       if (requestRef && rDoc && rDoc.exists) {
@@ -618,22 +625,37 @@ export default async function handler(req, res) {
         !isSubscription;
 
       if (shouldDecrementCredits) {
-        if (Number(baseRemaining || 0) > 0) {
-          baseRemaining = Math.max(0, Number(baseRemaining || 0) - 1);
+        if (Number(baseRemaining) > 0) {
+          // خصم من الشهرية
+          baseRemaining = Math.max(0, Number(baseRemaining) - 1);
           usedThisMonth = Number(usedThisMonth || 0) + 1;
         } else {
-          addonBuckets = Array.isArray(addonBuckets) ? [...addonBuckets] : [];
-          for (let i = 0; i < addonBuckets.length; i++) {
-            const qty = Number(addonBuckets[i]?.qtyRemaining || 0);
+          // ✅ خصم من الـ Add-ons (من الأصل addonBucketsAll) بشرط usableMonthKey == monthKey
+          addonBucketsAll = Array.isArray(addonBucketsAll) ? [...addonBucketsAll] : [];
+
+          let decremented = false;
+
+          for (let i = 0; i < addonBucketsAll.length; i++) {
+            const b = addonBucketsAll[i] || {};
+            const usableKey = String(b.usableMonthKey || b.expiresMonthKey || b.purchasedMonthKey || "");
+            if (usableKey !== monthKey) continue;
+
+            const qty = Number(b.qtyRemaining || 0);
             if (qty > 0) {
-              addonBuckets[i] = { ...addonBuckets[i], qtyRemaining: Math.max(0, qty - 1) };
+              addonBucketsAll[i] = { ...b, qtyRemaining: Math.max(0, qty - 1) };
               usedThisMonth = Number(usedThisMonth || 0) + 1;
+              decremented = true;
               break;
             }
           }
+
+          if (!decremented) {
+            // no bucket usable for this month
+          }
         }
 
-        const normAfter = normalizeBucketsForMonth(addonBuckets, monthKey);
+        // ✅ بعد الخصم: اعمل normalize للعرض/الإجمالي
+        const normAfter = normalizeBucketsForMonth(addonBucketsAll, monthKey);
         addonBuckets = normAfter.keep;
         addonsRemaining = Number(normAfter.sum || 0);
 
@@ -656,23 +678,17 @@ export default async function handler(req, res) {
           { merge: true }
         );
 
-        // ✅ التعديل 3: تحديث companySubscriptions بعد الخصم فقط (هنا المكان الصح)
-        const creditsActiveAfterSpend = (totalRemainingAfterSpend > 0);
-        const benefitsAfterSpend = (timeActiveNow && creditsActiveAfterSpend);
+        // ✅ تحديث companySubscriptions بعد الخصم فقط
+        const creditsActiveAfterSpend = totalRemainingAfterSpend > 0;
+        const benefitsAfterSpend = timeActiveNow && creditsActiveAfterSpend;
 
         tx.set(
           subRef,
           {
-            // status/timeActive هنا وقت فقط (من users.subscriptionActive)
             status: timeActiveNow ? "active" : "expired",
             timeActive: !!timeActiveNow,
-
-            // ✅ isActive = credits only (بيتقفل لما الرصيد يبقى 0)
             isActive: !!creditsActiveAfterSpend,
-
-            // ✅ benefitsState = time + credits
             benefitsState: benefitsAfterSpend ? "on" : "off",
-
             txCredits: {
               monthKey,
               baseLimit: Number(baseLimit || 0),
@@ -682,7 +698,6 @@ export default async function handler(req, res) {
               totalRemaining: Number(totalRemainingAfterSpend || 0),
               updatedAtISO: nowISO(),
             },
-
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           },
           { merge: true }
@@ -713,8 +728,9 @@ export default async function handler(req, res) {
           const purchasedMonthKey = monthKeyOf(purchasedAt);
           const usableMonthKey = computeAddonUsableMonthKey(purchasedAt);
 
-          addonBuckets = [...addonBuckets];
-          addonBuckets.push({
+          // ✅ لازم نضيف على الأصل addonBucketsAll (مش view)
+          addonBucketsAll = Array.isArray(addonBucketsAll) ? [...addonBucketsAll] : [];
+          addonBucketsAll.push({
             id: String(paymentIntentId),
             addonKey: String(addonKey || ""),
             qtyRemaining: qtyToAdd,
@@ -724,29 +740,30 @@ export default async function handler(req, res) {
             expiresMonthKey: usableMonthKey,
           });
 
-          const normAfterAdd = normalizeBucketsForMonth(addonBuckets, monthKey);
+          const normAfterAdd = normalizeBucketsForMonth(addonBucketsAll, monthKey);
           addonBuckets = normAfterAdd.keep;
           const addonsRemainingAfter = Number(normAfterAdd.sum || 0);
 
           const creditsActiveAfterAddon =
             (Number(baseRemaining || 0) + Number(addonsRemainingAfter || 0)) > 0; // credits فقط
           const benefitsAfterAddon = (timeActiveNow && creditsActiveAfterAddon); // وقت + رصيد
+
           // ✅ Mirror to users so UI counter sees add-ons
-tx.set(
-  userRef,
-  {
-    monthlyTxCredits: {
-      monthKey,
-      baseLimit: Number(baseLimit || 0),
-      baseRemaining: Number(baseRemaining || 0),
-      usedThisMonth: Number(usedThisMonth || 0),
-      addonBuckets,
-      addonsRemaining: Number(addonsRemainingAfter || 0),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    },
-  },
-  { merge: true }
-);
+          tx.set(
+            userRef,
+            {
+              monthlyTxCredits: {
+                monthKey,
+                baseLimit: Number(baseLimit || 0),
+                baseRemaining: Number(baseRemaining || 0),
+                usedThisMonth: Number(usedThisMonth || 0),
+                addonBuckets,
+                addonsRemaining: Number(addonsRemainingAfter || 0),
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              },
+            },
+            { merge: true }
+          );
 
           const companyPublicId = safeStr(udata.companyId || udata.customerId || udata.userId || customerIdMeta);
           const companyEmail = safeStr(udata.email || md.userEmail || "");
@@ -758,10 +775,10 @@ tx.set(
               companyId: companyPublicId,
               email: companyEmail,
 
-              status: timeActiveNow ? "active" : "expired", // time فقط
-              timeActive: !!timeActiveNow,                 // time فقط
-              isActive: !!creditsActiveAfterAddon,         // credits فقط
-              benefitsState: benefitsAfterAddon ? "on" : "off", // وقت + رصيد
+              status: timeActiveNow ? "active" : "expired",
+              timeActive: !!timeActiveNow,
+              isActive: !!creditsActiveAfterAddon,
+              benefitsState: benefitsAfterAddon ? "on" : "off",
 
               txCredits: {
                 monthKey,
@@ -913,10 +930,10 @@ tx.set(
             endAtISO: endDate.toISOString(),
 
             // ✅ split states
-            status: statusNow,                             // time-based
-            timeActive: !!timeValid,                       // timer/UI (time only)
-            isActive: !!creditsActiveAfterSub,             // credits only
-            benefitsState: benefitsAfterSub ? "on" : "off", // time + credits
+            status: statusNow,
+            timeActive: !!timeValid,
+            isActive: !!creditsActiveAfterSub,
+            benefitsState: benefitsAfterSub ? "on" : "off",
 
             txCredits: {
               monthKey,
@@ -981,49 +998,42 @@ tx.set(
       }
 
       // ✅ FINAL: enforce isActive strictly by credits (base + addons)
-// and benefitsState by (time + credits), every webhook run.
-if (isCompany) {
-  // credits now (after any subscription/addon/decrement logic)
-  const finalCreditsRemaining =
-    Number(baseRemaining || 0) + Number(addonsRemaining || 0);
+      // and benefitsState by (time + credits), every webhook run.
+      if (isCompany) {
+        const finalCreditsRemaining =
+          Number(baseRemaining || 0) + Number(addonsRemaining || 0);
 
-  const finalCreditsActive = finalCreditsRemaining > 0;
+        const finalCreditsActive = finalCreditsRemaining > 0;
 
-  // time validity (endAt from existing sub doc OR what we just set)
+        const finalTimeActive = !!timeActiveNow; // ✅ time من users.subscriptionActive فقط
 
-  const finalTimeActive = !!timeActiveNow; // ✅ time من users.subscriptionActive فقط
+        const finalBenefits = finalTimeActive && finalCreditsActive;
 
-  const finalBenefits = finalTimeActive && finalCreditsActive;
+        tx.set(
+          subRef,
+          {
+            isActive: !!finalCreditsActive,
 
-  tx.set(
-    subRef,
-    {
-      // credits only
-      isActive: !!finalCreditsActive,
+            timeActive: !!finalTimeActive,
+            status: finalTimeActive ? "active" : "expired",
 
-      // time only (optional but consistent)
-      timeActive: !!finalTimeActive,
-      status: finalTimeActive ? "active" : "expired",
+            benefitsState: finalBenefits ? "on" : "off",
 
-      // time + credits
-      benefitsState: finalBenefits ? "on" : "off",
+            txCredits: {
+              monthKey,
+              baseLimit: Number(baseLimit || 0),
+              baseRemaining: Number(baseRemaining || 0),
+              usedThisMonth: Number(usedThisMonth || 0),
+              addonsRemaining: Number(addonsRemaining || 0),
+              totalRemaining: Number(finalCreditsRemaining || 0),
+              updatedAtISO: nowISO(),
+            },
 
-      txCredits: {
-        monthKey,
-        baseLimit: Number(baseLimit || 0),
-        baseRemaining: Number(baseRemaining || 0),
-        usedThisMonth: Number(usedThisMonth || 0),
-        addonsRemaining: Number(addonsRemaining || 0),
-        totalRemaining: Number(finalCreditsRemaining || 0),
-        updatedAtISO: nowISO(),
-      },
-
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    },
-    { merge: true }
-  );
-}
-
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
 
       // (F) transactions log
       const txRef = db.collection("transactions").doc();
