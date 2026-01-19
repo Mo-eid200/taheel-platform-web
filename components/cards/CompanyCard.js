@@ -347,10 +347,13 @@ const planLabel = useMemo(() => {
   const subEnd = sub?.endAt ? new Date(sub.endAt) : null;
   const subStart = sub?.startAt ? new Date(sub.startAt) : null;
 
-  const hasSub = !!sub && !!subEnd && !isNaN(subEnd.getTime());
-  const daysLeft = hasSub ? diffInDays(subEnd, new Date()) : null;
-  const subExpired = hasSub && typeof daysLeft === "number" && daysLeft < 0;
-  const subWarn = hasSub && typeof daysLeft === "number" && daysLeft >= 0 && daysLeft <= 7;
+  const hasSub = !!sub && String(sub?.planKey || sub?.planName || "").trim().length > 0;
+const hasEnd = !!subEnd && !isNaN(subEnd.getTime());
+
+const daysLeft = hasSub && hasEnd ? diffInDays(subEnd, new Date()) : null;
+const subExpired = hasSub && hasEnd && typeof daysLeft === "number" && daysLeft < 0;
+const subWarn = hasSub && hasEnd && typeof daysLeft === "number" && daysLeft >= 0 && daysLeft <= 7;
+
 
   const planKey = hasSub ? String(sub.planKey || "none").toLowerCase() : "none";
   const baseTheme = SUB_BRAND[planKey] || SUB_BRAND.none;
@@ -645,7 +648,7 @@ const planLabel = useMemo(() => {
           <div className="mt-2 grid grid-cols-3 gap-2 text-[11px] font-semibold text-gray-800">
             <div className="rounded-xl bg-white/60 border border-black/5 px-2 py-2">
               <div className="text-[10px] font-extrabold text-gray-600">{t.subStarts}</div>
-              <div className="mt-0.5 font-black">{hasSub ? fmtDate(subStart) : "—"}</div>
+              <div className="mt-0.5 font-black">{hasSub && subStart ? fmtDate(subStart) : "—"}</div>
             </div>
 
             <div className="rounded-xl bg-white/60 border border-black/5 px-2 py-2">
@@ -654,13 +657,13 @@ const planLabel = useMemo(() => {
                 className="mt-0.5 font-black"
                 style={{ color: subWarn || subExpired ? "#dc2626" : "#111827" }}
               >
-                {hasSub ? fmtDate(subEnd) : "—"}
+                {hasSub && hasEnd ? fmtDate(subEnd) : "—"}
               </div>
             </div>
 
             <div className="rounded-xl bg-white/60 border border-black/5 px-2 py-2">
               <div className="text-[10px] font-extrabold text-gray-600">{t.subDuration}</div>
-              <div className="mt-0.5 font-black">{hasSub ? durationText(subStart, subEnd) : "—"}</div>
+              <div className="mt-0.5 font-black">{hasSub && hasEnd ? durationText(subStart, subEnd) : "—"}</div>
             </div>
           </div>
 
