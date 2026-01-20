@@ -275,6 +275,8 @@ export default async function handler(req, res) {
 
     const coinsUsed = safeNum(body.coinsUsed || 0);
     const coinsGiven = safeNum(body.coinsGiven || 0);
+    // ✅ NEW: coins requested from client (AED)
+    const coinsRequestedAED = safeNum(body.coinsRequestedAED || 0);
 
     // subscription meta
     const planKey = safeStr(body.planKey || "").trim();
@@ -309,6 +311,8 @@ export default async function handler(req, res) {
 
     let resolvedAddonQty = 0;
     let resolvedMonthlyIncludedTxLimit = safeNum(body.monthlyIncludedTxLimit || 0);
+    // ✅ NEW: server-truth coins result
+    let coinsAppliedAED = 0;
 
     // ADDON: price + qty from catalog ONLY
     if (requestType === "addon") {
@@ -345,6 +349,23 @@ export default async function handler(req, res) {
       if (printingFeeAED > 0) {
         const waive = await shouldWaivePrintingFeeForCompany({ customerId, clientType });
         if (waive) printingFeeAED = 0;
+      }
+
+      // IMPORTANT: use outer coinsAppliedAED (do NOT redeclare)
+      if (coinsRequestedAED > 0 && printingFeeAED > 0) {
+        const coinsBalancePoints = safeNum(
+          userData.cashbackCoins ?? userData.coinsBalance ?? userData.coins ?? 0
+        );
+
+        const coinsBalanceAED = Number((coinsBalancePoints / 100).toFixed(2));
+
+        const maxByRule = Number((printingFeeAED * 0.10).toFixed(2));
+        coinsAppliedAED = Math.max(
+          0,
+          Math.min(coinsRequestedAED, coinsBalanceAED, maxByRule, printingFeeAED)
+        );
+
+        printingFeeAED = Number((printingFeeAED - coinsAppliedAED).toFixed(2));
       }
     }
 
@@ -427,70 +448,71 @@ export default async function handler(req, res) {
     }
 
     // ----------------- Create PaymentIntent -----------------
-const pi = await stripe.paymentIntents.create(
-  {
-    amount: amountSmallest,
-    currency: "aed",
-    automatic_payment_methods: { enabled: true },
-    metadata: {
-      customerId,
-      lang,
-      monthKey,
+    const pi = await stripe.paymentIntents.create(
+      {
+        amount: amountSmallest,
+        currency: "aed",
+        automatic_payment_methods: { enabled: true },
+        metadata: {
+          customerId,
+          lang,
+          monthKey,
 
-      requestId: orderNumber,
-      requestType,
-      clientType,
+          requestId: orderNumber,
+          requestType,
+          clientType,
 
-      serviceId,
-      serviceName,
+          serviceId,
+          serviceName,
 
-      assignedTo,
-      assignedToName,
+          assignedTo,
+          assignedToName,
 
-      // breakdown
-      baseAmountAED: String(baseAmountAED.toFixed(2)),
-      printingFee: String(printingFeeAED.toFixed(2)),
-      vatAED: String(vatAED.toFixed(2)),
-      totalPriceAED: String(totalPriceAED.toFixed(2)),
-      processingFee: String(processingFeeAED.toFixed(2)),
-      totalAED: String(totalAED.toFixed(2)),
+          // breakdown
+          baseAmountAED: String(baseAmountAED.toFixed(2)),
+          printingFee: String(printingFeeAED.toFixed(2)),
+          vatAED: String(vatAED.toFixed(2)),
+          totalPriceAED: String(totalPriceAED.toFixed(2)),
+          processingFee: String(processingFeeAED.toFixed(2)),
+          totalAED: String(totalAED.toFixed(2)),
 
-      coinsUsed: String(coinsUsed),
-      coinsGiven: String(coinsGiven),
+          coinsUsed: String(coinsUsed),
+          coinsGiven: String(coinsGiven),
+          coinsRequestedAED: String(Number(coinsRequestedAED || 0).toFixed(2)),
+          coinsAppliedAED: String(Number(coinsAppliedAED || 0).toFixed(2)),
 
-      // subscription meta
-      planKey,
-      planName,
-      pricingKey,
-      subscriptionDays: String(subscriptionDays),
-      giftDays: String(giftDays),
-      totalSubscriptionDays: String(totalSubDays),
-      monthsShown: String(monthsShown),
-      paidMonths: String(paidMonths),
-      bonus: String(bonus),
-      monthlyIncludedTxLimit: String(resolvedMonthlyIncludedTxLimit || 0),
+          // subscription meta
+          planKey,
+          planName,
+          pricingKey,
+          subscriptionDays: String(subscriptionDays),
+          giftDays: String(giftDays),
+          totalSubscriptionDays: String(totalSubDays),
+          monthsShown: String(monthsShown),
+          paidMonths: String(paidMonths),
+          bonus: String(bonus),
+          monthlyIncludedTxLimit: String(resolvedMonthlyIncludedTxLimit || 0),
 
-      // addon meta
-      ...(requestType === "addon"
-        ? {
-            isAddon: "1",
-            addonKey: addonKeyFromBody,
-            addonQty: String(resolvedAddonQty),
-            addonType: safeStr(addonDoc?.type || ""),
-            addonTitleAr: safeStr(addonDoc?.title?.ar || ""),
-            addonTitleEn: safeStr(addonDoc?.title?.en || ""),
-          }
-        : {}),
+          // addon meta
+          ...(requestType === "addon"
+            ? {
+                isAddon: "1",
+                addonKey: addonKeyFromBody,
+                addonQty: String(resolvedAddonQty),
+                addonType: safeStr(addonDoc?.type || ""),
+                addonTitleAr: safeStr(addonDoc?.title?.ar || ""),
+                addonTitleEn: safeStr(addonDoc?.title?.en || ""),
+              }
+            : {}),
 
-      ...(attachmentsJson ? { attachments: attachmentsJson } : {}),
-    },
-  },
-  {
-    // ✅ هنا المكان الصح
-    idempotencyKey: orderNumber,
-  }
-);
-
+          ...(attachmentsJson ? { attachments: attachmentsJson } : {}),
+        },
+      },
+      {
+        // ✅ هنا المكان الصح
+        idempotencyKey: orderNumber,
+      }
+    );
 
     // ----------------- Create/merge request doc -----------------
     const requestDoc = {
@@ -520,7 +542,8 @@ const pi = await stripe.paymentIntents.create(
 
       coinsUsed,
       coinsGiven,
-
+      coinsRequestedAED,
+      coinsAppliedAED,
       assignedTo,
       assignedToName,
 
@@ -571,6 +594,8 @@ const pi = await stripe.paymentIntents.create(
         totalPriceAED,
         processingFeeAED,
         totalAED,
+        coinsRequestedAED,
+        coinsAppliedAED,
       },
 
       addon:

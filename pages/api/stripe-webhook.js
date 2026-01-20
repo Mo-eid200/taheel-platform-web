@@ -214,6 +214,8 @@ export default async function handler(req, res) {
 
     const coinsGiven = safeNum(md.coinsGiven ?? md.cashbackCoins ?? md.coins ?? 0);
     const coinsUsed = safeNum(md.coinsUsed ?? 0);
+    const coinsRequestedAED = safeNum(md.coinsRequestedAED ?? 0);
+    const coinsAppliedAED = safeNum(md.coinsAppliedAED ?? 0);
 
     const printingFeeFromMeta = safeNum(md.printingFee ?? 0);
     const processingFeeMeta = safeNum(md.processingFee ?? md.processing_fee ?? md.processing_fee_value ?? 0);
@@ -332,6 +334,28 @@ export default async function handler(req, res) {
       const uDoc = await tx.get(userRef);
       if (!uDoc.exists) throw new Error("USER_NOT_FOUND");
       const udata = uDoc.data() || {};
+   
+// ✅ Coins deduction (READ-ONLY هنا — NO WRITES YET)
+// Stored coins are points: 100 points = 1 AED
+const coinsBalancePoints = safeNum(
+  udata.coins ?? udata.cashbackCoins ?? udata.coinsBalance ?? 0
+);
+
+// Use AED values computed in create-payment-intent
+const coinsAppliedAEDMeta = safeNum(coinsAppliedAED);
+const coinsRequestedAEDMeta = safeNum(coinsRequestedAED);
+
+// ⛔ لا تعمل tx.update هنا
+let coinsToDeductPoints = 0;
+
+const shouldDeductCoins =
+  requestTypeMeta === "service" && !isAddon && !isSubscription && coinsAppliedAEDMeta > 0;
+
+if (shouldDeductCoins) {
+  const wantPoints = Math.round(coinsAppliedAEDMeta * 100);
+  coinsToDeductPoints = Math.max(0, Math.min(coinsBalancePoints, wantPoints));
+}
+
 
       // تحديد الشركة مضبوط (حسب اتفاقنا)
       const userIsCompany = normLower(udata.accountType || udata.type || udata.clientType || "") === "company";
@@ -449,6 +473,14 @@ export default async function handler(req, res) {
       // --------- PREPARE request update/create (NO WRITES YET) ---------
       let finalRequestId = reqId || null;
 
+      // ✅ APPLY coins deduction HERE (after all reads, before writes section)
+if (coinsToDeductPoints > 0) {
+  tx.update(userRef, {
+    coins: admin.firestore.FieldValue.increment(-coinsToDeductPoints),
+  });
+}
+
+
       // --------- WRITES start هنا ---------
       const monthlyTxCreditsPatch = {
         monthKey,
@@ -475,6 +507,8 @@ export default async function handler(req, res) {
           paymentIntentId,
           statusHistory: history,
           paidAt: nowISO(),
+          coinsRequestedAED: coinsRequestedAEDMeta,
+          coinsAppliedAED: coinsAppliedAEDMeta,
 
           baseAmountAED: baseAmountFromMeta || safeNum(rdata.baseAmountAED || 0),
           processingFee:
@@ -577,6 +611,8 @@ export default async function handler(req, res) {
 
           coinsGiven,
           coinsUsed,
+          coinsRequestedAED: safeNum(coinsRequestedAED),
+          coinsAppliedAED: safeNum(coinsAppliedAED),
 
           createdAt: nowISO(),
           lastUpdated: nowISO(),
