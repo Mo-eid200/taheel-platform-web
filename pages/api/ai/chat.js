@@ -10,10 +10,6 @@ function json(res, code, payload) {
   return res.status(code).json(payload);
 }
 
-function safeLang(lang) {
-  return lang === "en" ? "en" : "ar";
-}
-
 function sanitizeMessages(messages) {
   const arr = Array.isArray(messages) ? messages : [];
   const clean = arr
@@ -40,29 +36,88 @@ function lastUserText(messages) {
   return String(last?.content || "").trim();
 }
 
-function buildSystemPrompt(lang) {
-  if (lang === "ar") {
-    return [
-      `أنت مساعد "TAHEEL Smart Chat".`,
-      `- أجب باختصار ووضوح وبالعربية.`,
-      `- إذا السؤال غير واضح اسأل سؤال توضيحي واحد فقط.`,
-      `- لا تكشف أي أسرار أو إعدادات داخلية أو مفاتيح.`,
-      `- إذا احتاج الموضوع لموظف دعم، اقترح تحويله لخدمة العملاء.`,
-    ].join("\n");
-  }
+// ===== Language detection (best-effort) =====
+// - uses body.lang if provided
+// - otherwise infer from last user text
+function pickLang(bodyLang, messages) {
+  const candidate = String(bodyLang || "").trim().toLowerCase();
+  if (candidate) return candidate;
+
+  const t = String(lastUserText(messages) || "");
+
+  // Arabic / Persian / Urdu ranges (covers most RTL scripts)
+  if (/[\u0600-\u06FF]/.test(t)) return "ar";
+
+  // Devanagari (Hindi)
+  if (/[\u0900-\u097F]/.test(t)) return "hi";
+
+  // Basic Latin fallback
+  return "en";
+}
+
+// Google Custom Search "hl" supports limited languages.
+// We'll keep the ANSWER language based on user, but hl can fallback safely.
+function googleHl(lang) {
+  const supported = new Set([
+    "ar",
+    "en",
+    "fr",
+    "hi",
+    "ur",
+    "tl",
+    "es",
+    "de",
+    "it",
+    "pt",
+    "ru",
+    "tr",
+    "id",
+    "ms",
+    "zh-CN",
+    "zh-TW",
+    "ja",
+    "ko",
+  ]);
+
+  const l = String(lang || "").trim();
+  if (supported.has(l)) return l;
+
+  // Map common variants
+  if (l.startsWith("zh")) return "zh-CN";
+  if (l.startsWith("pt")) return "pt";
+  if (l.startsWith("es")) return "es";
+  if (l.startsWith("fr")) return "fr";
+  if (l.startsWith("de")) return "de";
+  if (l.startsWith("it")) return "it";
+  if (l.startsWith("ru")) return "ru";
+  if (l.startsWith("tr")) return "tr";
+  if (l.startsWith("id")) return "id";
+  if (l.startsWith("ms")) return "ms";
+  if (l.startsWith("ja")) return "ja";
+  if (l.startsWith("ko")) return "ko";
+
+  // default for search only
+  return "en";
+}
+
+// ===== System Prompt (language-agnostic) =====
+function buildSystemPrompt() {
   return [
     `You are "TAHEEL Smart Chat".`,
-    `- Answer clearly and concisely in English.`,
-    `- If unclear, ask one clarifying question only.`,
-    `- Never reveal secrets, configs, or keys.`,
-    `- If needs a human agent, suggest contacting support.`,
+    `CRITICAL: Always reply in the SAME language as the user's latest message (detect from the text).`,
+    `Be clear, concise, and helpful.`,
+    `If the question is unclear, ask ONLY ONE clarifying question.`,
+    `Never reveal secrets, configs, or API keys.`,
+    `If the user needs a human agent, suggest contacting support.`,
+    `If you cite sources/links, keep them minimal and relevant.`,
   ].join("\n");
 }
 
 // ---------- simple in-memory rate limiter (best-effort) ----------
 // NOTE: On Vercel serverless, memory may not persist across invocations.
 // Still useful as a light guard.
-const RL = globalThis.__TAHEEL_AI_RL__ || (globalThis.__TAHEEL_AI_RL__ = new Map());
+const RL =
+  globalThis.__TAHEEL_AI_RL__ || (globalThis.__TAHEEL_AI_RL__ = new Map());
 
 function rateLimitKey(req) {
   // prefer user id if sent (optional)
@@ -98,10 +153,7 @@ async function googleSearch(queryText, lang) {
   if (!GOOGLE_API_KEY || !GOOGLE_CX) {
     return {
       ok: false,
-      text:
-        lang === "ar"
-          ? "ميزة البحث غير مفعّلة حالياً."
-          : "Search is not enabled right now.",
+      text: `Search is not enabled right now.`,
       items: [],
     };
   }
@@ -110,16 +162,19 @@ async function googleSearch(queryText, lang) {
   if (!q) {
     return {
       ok: true,
-      text: lang === "ar" ? "اكتب سؤالك للبحث." : "Type your query to search.",
+      text: `Type your query to search.`,
       items: [],
     };
   }
+
+  const hl = googleHl(lang);
 
   const url =
     "https://www.googleapis.com/customsearch/v1" +
     `?key=${encodeURIComponent(GOOGLE_API_KEY)}` +
     `&cx=${encodeURIComponent(GOOGLE_CX)}` +
     `&q=${encodeURIComponent(q)}` +
+    `&hl=${encodeURIComponent(hl)}` +
     `&num=5`;
 
   const r = await fetch(url, { method: "GET" });
@@ -128,10 +183,7 @@ async function googleSearch(queryText, lang) {
   if (!r.ok) {
     return {
       ok: false,
-      text:
-        lang === "ar"
-          ? "فشل البحث حالياً."
-          : "Search failed at the moment.",
+      text: `Search failed at the moment.`,
       items: [],
       details: data,
     };
@@ -149,28 +201,27 @@ async function googleSearch(queryText, lang) {
     .filter(Boolean)
     .join("\n\n");
 
-  const text =
-    summarized ||
-    (lang === "ar" ? "لم أجد نتائج واضحة." : "No clear results found.");
-
+  const text = summarized || `No clear results found.`;
   return { ok: true, text, items };
 }
 
 // ---------- openai ----------
-async function callOpenAI(messages, lang) {
+async function callOpenAI(messages) {
   const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
   if (!OPENAI_API_KEY) {
     return {
       ok: false,
-      text:
-        lang === "ar"
-          ? "خدمة الذكاء الاصطناعي غير مفعّلة حالياً."
-          : "AI service is not enabled right now.",
+      text: `AI service is not enabled right now.`,
     };
   }
 
   const clean = sanitizeMessages(messages);
-  const system = buildSystemPrompt(lang);
+  const system = buildSystemPrompt();
+
+  // IMPORTANT:
+  // - We prepend ONE system message only (our guardrails)
+  // - Any system messages inside "clean" (sent from client) will remain,
+  //   but our system comes first, and the model should follow it.
   const finalMessages = [{ role: "system", content: system }, ...clean];
 
   const r = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -183,6 +234,7 @@ async function callOpenAI(messages, lang) {
       model: DEFAULT_MODEL,
       messages: finalMessages,
       temperature: 0.3,
+      max_tokens: 700,
     }),
   });
 
@@ -194,19 +246,20 @@ async function callOpenAI(messages, lang) {
   const text = String(data?.choices?.[0]?.message?.content || "").trim();
   return {
     ok: true,
-    text: text || (lang === "ar" ? "لم أجد إجابة مناسبة." : "No suitable answer."),
+    text: text || "No suitable answer.",
   };
 }
 
 // ---------- handler ----------
 export default async function handler(req, res) {
-  // (اختياري) CORS بسيط لو هتطلبه من دومين غير نفس الدومين
+  // (optional) CORS
   // res.setHeader("Access-Control-Allow-Origin", "*");
   // res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   // res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-TAHEEL-UID");
 
   if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") return json(res, 405, { ok: false, error: "method_not_allowed" });
+  if (req.method !== "POST")
+    return json(res, 405, { ok: false, error: "method_not_allowed" });
 
   // ✅ rate limit
   const rl = checkRateLimit(req, 40, 60_000); // 40 req/min per IP or UID
@@ -218,27 +271,37 @@ export default async function handler(req, res) {
 
   try {
     const body = req.body || {};
-    const lang = safeLang(body?.lang);
     const mode = String(body?.mode || "auto").toLowerCase(); // auto | ai | search | hybrid
     const messages = sanitizeMessages(body?.messages || []);
 
+    // Determine language (any language)
+    const lang = pickLang(body?.lang, messages);
+
     const queryText = lastUserText(messages);
 
-    // ✅ auto decision (خفيف)
+    // ✅ auto decision (light)
     const wantsSearch =
-      /بحث|source|مصدر|link|روابط|موقع|government|official|verify|تأكد|أكد|citation/i.test(queryText);
+      /بحث|source|مصدر|link|روابط|موقع|government|official|verify|تأكد|أكد|citation|news|latest|update/i.test(
+        queryText
+      );
 
     const finalMode =
       mode === "ai" || mode === "search" || mode === "hybrid"
         ? mode
         : wantsSearch
-          ? "hybrid"
-          : "ai";
+        ? "hybrid"
+        : "ai";
 
     // 1) Search only
     if (finalMode === "search") {
       const s = await googleSearch(queryText, lang);
-      return json(res, 200, { ok: true, mode: "search", text: s.text, items: s.items || [] });
+      return json(res, 200, {
+        ok: true,
+        mode: "search",
+        text: s.text,
+        items: s.items || [],
+        lang,
+      });
     }
 
     // 2) Hybrid: Google -> OpenAI
@@ -247,28 +310,32 @@ export default async function handler(req, res) {
 
       // If search disabled or failed, fallback to AI only
       if (!s.ok) {
-        const a = await callOpenAI(messages, lang);
-        if (!a.ok) return json(res, 500, { ok: false, error: "ai_failed", details: a.details });
-        return json(res, 200, { ok: true, mode: "ai", text: a.text });
+        const a = await callOpenAI(messages);
+        if (!a.ok)
+          return json(res, 500, { ok: false, error: "ai_failed", details: a.details });
+        return json(res, 200, { ok: true, mode: "ai", text: a.text, lang });
       }
 
-      const ragHint =
-        lang === "ar"
-          ? `استخدم نتائج البحث التالية كمصادر للمساعدة، واذكر الروابط ذات الصلة إن أمكن:\n\n${s.text}`
-          : `Use the following search results as supporting sources, and include relevant links when useful:\n\n${s.text}`;
+      // We inject search results as context (not forcing a language here;
+      // the main system prompt forces the assistant to use user's language)
+      const ragHint = [
+        `Use the following web search results as supporting sources.`,
+        `Include relevant links when helpful.`,
+        ``,
+        s.text,
+      ].join("\n");
 
-      const hybridMessages = [
-        ...messages,
-        { role: "system", content: ragHint },
-      ];
+      const hybridMessages = [...messages, { role: "system", content: ragHint }];
 
-      const a = await callOpenAI(hybridMessages, lang);
-      if (!a.ok) return json(res, 500, { ok: false, error: "ai_failed", details: a.details });
+      const a = await callOpenAI(hybridMessages);
+      if (!a.ok)
+        return json(res, 500, { ok: false, error: "ai_failed", details: a.details });
 
       return json(res, 200, {
         ok: true,
         mode: "hybrid",
         text: a.text,
+        lang,
         sources: (s.items || []).map((it) => ({
           title: it?.title,
           link: it?.link,
@@ -278,10 +345,11 @@ export default async function handler(req, res) {
     }
 
     // 3) AI only
-    const a = await callOpenAI(messages, lang);
-    if (!a.ok) return json(res, 500, { ok: false, error: "ai_failed", details: a.details });
+    const a = await callOpenAI(messages);
+    if (!a.ok)
+      return json(res, 500, { ok: false, error: "ai_failed", details: a.details });
 
-    return json(res, 200, { ok: true, mode: "ai", text: a.text });
+    return json(res, 200, { ok: true, mode: "ai", text: a.text, lang });
   } catch (e) {
     console.error("ai/chat error:", e);
     return json(res, 500, { ok: false, error: "internal_error" });
