@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { collection, doc, getDocs, serverTimestamp, setDoc } from "firebase/firestore";
+import { collection, doc, serverTimestamp, setDoc, deleteDoc, onSnapshot, query as fsQuery } from "firebase/firestore";
 import { firestore } from "@/lib/firebase.client";
 import {
   Zap,
@@ -235,6 +235,7 @@ function normalizePlanDoc(id, data) {
     id,
     key: safeStr(d.key, id),
     planKey: safeStr(d.planKey, safeStr(d.key, id)),
+    tier: safeStr(d.tier, safeStr(d.planKey, "starter")),
 
     isActive: safeBool(d.isActive, true),
     isVisible: safeBool(d.isVisible, true),
@@ -346,7 +347,11 @@ function Toggle({ checked, onChange }) {
   return (
     <button
       type="button"
-      onClick={() => onChange(!checked)}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onChange(!checked);
+      }}
       className={cn(
         "w-12 h-7 rounded-full border transition relative",
         checked ? "bg-emerald-500/30 border-emerald-400/25" : "bg-white/8 border-white/10"
@@ -361,6 +366,7 @@ function Toggle({ checked, onChange }) {
     </button>
   );
 }
+
 
 /* =========================================
    Main Component
@@ -390,43 +396,44 @@ export default function PlansAndAddonsManager({ lang = "ar" }) {
   /* ---------------------------
      Load Plans + Addons
   ---------------------------- */
-  useEffect(() => {
-    let mounted = true;
+useEffect(() => {
+  const qPlans = fsQuery(collection(firestore, PLANS_COL));
+  const unsubPlans = onSnapshot(
+    qPlans,
+    (snap) => {
+      const rows = snap.docs.map((x) => normalizePlanDoc(x.id, x.data()));
+      rows.sort((a, b) => a.sortIndex - b.sortIndex || String(a.key).localeCompare(String(b.key)));
+      setPlans(rows);
+      setLoadingPlans(false);
+    },
+    (err) => {
+      console.error("Plans snapshot error:", err);
+      setPlans([]);
+      setLoadingPlans(false);
+    }
+  );
 
-    (async () => {
-      try {
-        setLoadingPlans(true);
-        const snap = await getDocs(collection(firestore, PLANS_COL));
-        const rows = snap.docs.map((x) => normalizePlanDoc(x.id, x.data()));
-        rows.sort((a, b) => a.sortIndex - b.sortIndex || String(a.key).localeCompare(String(b.key)));
-        if (mounted) setPlans(rows);
-      } catch (e) {
-        console.error("Load plans error:", e);
-        if (mounted) setPlans([]);
-      } finally {
-        if (mounted) setLoadingPlans(false);
-      }
-    })();
+  const qAddons = fsQuery(collection(firestore, ADDONS_COL));
+  const unsubAddons = onSnapshot(
+    qAddons,
+    (snap) => {
+      const rows = snap.docs.map((x) => normalizeAddonDoc(x.id, x.data()));
+      rows.sort((a, b) => String(a.addonKey).localeCompare(String(b.addonKey)));
+      setAddons(rows);
+      setLoadingAddons(false);
+    },
+    (err) => {
+      console.error("Addons snapshot error:", err);
+      setAddons([]);
+      setLoadingAddons(false);
+    }
+  );
 
-    (async () => {
-      try {
-        setLoadingAddons(true);
-        const snap = await getDocs(collection(firestore, ADDONS_COL));
-        const rows = snap.docs.map((x) => normalizeAddonDoc(x.id, x.data()));
-        rows.sort((a, b) => String(a.addonKey).localeCompare(String(b.addonKey)));
-        if (mounted) setAddons(rows);
-      } catch (e) {
-        console.error("Load addons error:", e);
-        if (mounted) setAddons([]);
-      } finally {
-        if (mounted) setLoadingAddons(false);
-      }
-    })();
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  return () => {
+    unsubPlans();
+    unsubAddons();
+  };
+}, []);
 
   /* ---------------------------
      Setters (immutable)
@@ -577,7 +584,7 @@ export default function PlansAndAddonsManager({ lang = "ar" }) {
       const payload = {
         key: safeStr(plan.key, plan.id),
         planKey: safeStr(plan.planKey, safeStr(plan.key, plan.id)),
-
+        tier: safeStr(plan.tier, safeStr(plan.planKey, "starter")),
         isActive: !!plan.isActive,
         isVisible: !!plan.isVisible,
         isMandatory: !!plan.isMandatory,
@@ -684,6 +691,198 @@ export default function PlansAndAddonsManager({ lang = "ar" }) {
       setTimeout(() => setToast(null), 2400);
     }
   };
+
+  // ✅ Create Plan
+const createPlan = async () => {
+  try {
+    setSavingId("create-plan");
+    setToast(null);
+
+    const ref = doc(collection(firestore, PLANS_COL));
+    const newId = ref.id;
+
+    const basePricing = Object.fromEntries(
+      DURATION_ORDER.map((k) => [
+        k,
+        {
+          title: { ar: DUR_LABELS[k]?.ar || "", en: DUR_LABELS[k]?.en || "" },
+          monthsShown: k === "monthly" ? 1 : k === "quarterly" ? 3 : k === "semiannual" ? 6 : 12,
+          paidMonths: k === "monthly" ? 1 : k === "quarterly" ? 3 : k === "semiannual" ? 6 : 12,
+          bonus: 0,
+          price: 0,
+          tag: "",
+          best: false,
+          currency: "AED",
+          stripe: { mode: "subscription", priceId: "", productId: "" },
+        },
+      ])
+    );
+
+    const payload = {
+      key: newId,
+      planKey: newId,
+      tier: "starter", // ✅ مهم عشان الألوان
+
+      isActive: true,
+      isVisible: true,
+      isMandatory: false,
+
+      sortIndex: plans.length ? Math.max(...plans.map((x) => safeNum(x.sortIndex, 0))) + 10 : 10,
+      version: 1,
+      currency: "AED",
+
+      name: { ar: "باقة جديدة", en: "New Plan" },
+      fit: { ar: "", en: "" },
+
+      perks: { ar: [], en: [] },
+
+      afterLimit: { allowAddon: true, allowUpgrade: false, hardBlock: false, mode: "custom" },
+      allowEntitiesOutsidePlan: true,
+      allowedBillingPeriods: ["semiannual", "yearly", "contract"],
+      includedEntities: ["all"],
+      monthlyIncludedTxLimit: 0,
+
+      covers: {
+        adminProcessing: true,
+        governmentFee: false,
+        printingFee: true,
+        stripeFee: false,
+        vat: true,
+      },
+
+      pricing: basePricing,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    await setDoc(ref, payload, { merge: true });
+
+    setExpandedPlans((prev) => ({ ...prev, [newId]: true }));
+    setTabByPlan((prev) => ({ ...prev, [newId]: "pricing" }));
+
+    setToast({ type: "ok", msg: isAr ? "تم إنشاء باقة جديدة ✅" : "New plan created ✅" });
+  } catch (e) {
+    console.error("Create plan error:", e);
+    setToast({ type: "err", msg: isAr ? "فشل إنشاء الباقة ❌" : "Create plan failed ❌" });
+  } finally {
+    setSavingId(null);
+    setTimeout(() => setToast(null), 2400);
+  }
+};
+
+
+// ✅ Create Addon
+const createAddon = async () => {
+  try {
+    setSavingId("create-addon");
+    setToast(null);
+
+    const now = Date.now();
+    const newId = `addon_${now}`;
+
+    const payload = {
+      addonKey: newId,
+      isActive: true,
+      popular: false,
+
+      currency: "AED",
+      version: 1,
+
+      title: { ar: "إضافة جديدة", en: "New Add-on" },
+      type: "bundle",
+      qty: 0,
+
+      perTxn: 0,
+      price: 0,
+      priceMin: 0,
+      priceMax: 0,
+
+      covers: {
+        adminProcessing: true,
+        governmentFee: false,
+        printingFee: true,
+        stripeFee: false,
+        vat: true,
+      },
+
+      stripe: { mode: "payment", priceId: "", productId: "" },
+
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    await setDoc(doc(firestore, ADDONS_COL, newId), payload, { merge: true });
+
+    setExpandedAddons((prev) => ({ ...prev, [newId]: true }));
+
+    setToast({ type: "ok", msg: isAr ? "تم إنشاء Add-on جديدة ✅" : "New add-on created ✅" });
+  } catch (e) {
+    console.error("Create addon error:", e);
+    setToast({ type: "err", msg: isAr ? "فشل إنشاء الإضافة ❌" : "Create add-on failed ❌" });
+  } finally {
+    setSavingId(null);
+    setTimeout(() => setToast(null), 2400);
+  }
+};
+
+// ✅ Remove Plan
+const removePlan = async (id) => {
+  try {
+    const ok = window.confirm(isAr ? "متأكد تريد حذف الباقة؟" : "Delete this plan?");
+    if (!ok) return;
+
+    setSavingId(id);
+    setToast(null);
+
+    await deleteDoc(doc(firestore, PLANS_COL, id));
+
+    setExpandedPlans((prev) => {
+      const copy = { ...prev };
+      delete copy[id];
+      return copy;
+    });
+    setTabByPlan((prev) => {
+      const copy = { ...prev };
+      delete copy[id];
+      return copy;
+    });
+
+    setToast({ type: "ok", msg: isAr ? "تم حذف الباقة ✅" : "Plan deleted ✅" });
+  } catch (e) {
+    console.error("Delete plan error:", e);
+    setToast({ type: "err", msg: isAr ? "فشل حذف الباقة ❌" : "Delete plan failed ❌" });
+  } finally {
+    setSavingId(null);
+    setTimeout(() => setToast(null), 2400);
+  }
+};
+
+// ✅ Remove Addon
+const removeAddon = async (id) => {
+  try {
+    const ok = window.confirm(isAr ? "متأكد تريد حذف الإضافة؟" : "Delete this add-on?");
+    if (!ok) return;
+
+    setSavingId(id);
+    setToast(null);
+
+    await deleteDoc(doc(firestore, ADDONS_COL, id));
+
+    setExpandedAddons((prev) => {
+      const copy = { ...prev };
+      delete copy[id];
+      return copy;
+    });
+
+    setToast({ type: "ok", msg: isAr ? "تم حذف الإضافة ✅" : "Add-on deleted ✅" });
+  } catch (e) {
+    console.error("Delete addon error:", e);
+    setToast({ type: "err", msg: isAr ? "فشل حذف الإضافة ❌" : "Delete add-on failed ❌" });
+  } finally {
+    setSavingId(null);
+    setTimeout(() => setToast(null), 2400);
+  }
+};
 
   /* ---------------------------
      Filters
@@ -827,7 +1026,35 @@ export default function PlansAndAddonsManager({ lang = "ar" }) {
           </div>
         </div>
 
-        <div className="hidden sm:block text-xs text-white/45 font-bold">{t.helperTag}</div>
+        <div className={cn("flex items-center gap-2", isAr && "flex-row-reverse")}>
+  <div className="hidden sm:block text-xs text-white/45 font-bold">{t.helperTag}</div>
+
+  {activeTab === "plans" ? (
+    <button
+      onClick={createPlan}
+      disabled={savingId === "create-plan"}
+      className={cn(
+        "cursor-pointer inline-flex items-center gap-2 px-4 py-2 rounded-2xl font-extrabold text-white transition active:scale-[0.98]",
+        savingId === "create-plan" ? "bg-white/15" : "bg-emerald-600 hover:bg-emerald-700"
+      )}
+    >
+      <PackagePlus className="w-4 h-4" />
+      {isAr ? "إضافة باقة" : "Add Plan"}
+    </button>
+  ) : (
+    <button
+      onClick={createAddon}
+      disabled={savingId === "create-addon"}
+      className={cn(
+        "cursor-pointer inline-flex items-center gap-2 px-4 py-2 rounded-2xl font-extrabold text-white transition active:scale-[0.98]",
+        savingId === "create-addon" ? "bg-white/15" : "bg-emerald-600 hover:bg-emerald-700"
+      )}
+    >
+      <PackagePlus className="w-4 h-4" />
+      {isAr ? "إضافة Add-on" : "Add Add-on"}
+    </button>
+  )}
+</div>
       </div>
 
       {/* Body */}
@@ -843,7 +1070,7 @@ export default function PlansAndAddonsManager({ lang = "ar" }) {
           ) : (
             <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4">
               {filteredPlans.map((p) => {
-                const brand = BRAND[p.id] || BRAND[p.key] || BRAND[p.planKey] || BRAND.starter;
+                const brand = BRAND[p.tier] || BRAND.starter;
                 const Icon = brand.icon || Sparkles;
 
                 const tab = tabByPlan[p.id] || "pricing";
@@ -1004,19 +1231,29 @@ export default function PlansAndAddonsManager({ lang = "ar" }) {
                         {/* المهم: كل structuredClone اتشال واتبدل بـ deepClone في الدوال اللي فوق */}
 
                         {/* زر الحفظ */}
-                        <div className={cn("mt-4 flex items-center justify-end", isAr && "justify-start")}>
-                          <button
-                            onClick={() => savePlan(p)}
-                            disabled={savingId === p.id}
-                            className={cn(
-                              "cursor-pointer inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-extrabold text-white shadow-lg transition active:scale-[0.98]",
-                              savingId === p.id ? "bg-white/20" : brand.btn
-                            )}
-                          >
-                            <Save className="w-4 h-4" />
-                            {savingId === p.id ? t.saving : t.save}
-                          </button>
-                        </div>
+<div className={cn("mt-4 flex items-center justify-end gap-2", isAr && "justify-start flex-row-reverse")}>
+  <button
+    onClick={() => savePlan(p)}
+    disabled={savingId === p.id}
+    className={cn(
+      "cursor-pointer inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-extrabold text-white shadow-lg transition active:scale-[0.98]",
+      savingId === p.id ? "bg-white/20" : brand.btn
+    )}
+  >
+    <Save className="w-4 h-4" />
+    {savingId === p.id ? t.saving : t.save}
+  </button>
+
+  <button
+    onClick={() => removePlan(p.id)}
+    disabled={savingId === p.id}
+    className="cursor-pointer inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-extrabold border border-rose-400/25 bg-rose-500/10 text-rose-200 hover:bg-rose-500/15 transition active:scale-[0.98]"
+  >
+    <AlertTriangle className="w-4 h-4" />
+    {isAr ? "حذف" : "Delete"}
+  </button>
+</div>
+
 
                         {!isOk ? (
                           <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 p-4">
@@ -1320,19 +1557,28 @@ export default function PlansAndAddonsManager({ lang = "ar" }) {
                             </div>
                           </div>
 
-                          <div className={cn("mt-4 flex items-center justify-end", isAr && "justify-start")}>
-                            <button
-                              onClick={() => saveAddon(a)}
-                              disabled={savingId === a.id}
-                              className={cn(
-                                "cursor-pointer inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-extrabold text-white shadow-lg transition active:scale-[0.98]",
-                                savingId === a.id ? "bg-white/20" : "bg-emerald-600 hover:bg-emerald-700"
-                              )}
-                            >
-                              <Save className="w-4 h-4" />
-                              {savingId === a.id ? t.saving : t.save}
-                            </button>
-                          </div>
+<div className={cn("mt-4 flex items-center justify-end gap-2", isAr && "justify-start flex-row-reverse")}>
+  <button
+    onClick={() => saveAddon(a)}
+    disabled={savingId === a.id}
+    className={cn(
+      "cursor-pointer inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-extrabold text-white shadow-lg transition active:scale-[0.98]",
+      savingId === a.id ? "bg-white/20" : "bg-emerald-600 hover:bg-emerald-700"
+    )}
+  >
+    <Save className="w-4 h-4" />
+    {savingId === a.id ? t.saving : t.save}
+  </button>
+
+  <button
+    onClick={() => removeAddon(a.id)}
+    disabled={savingId === a.id}
+    className="cursor-pointer inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-extrabold border border-rose-400/25 bg-rose-500/10 text-rose-200 hover:bg-rose-500/15 transition active:scale-[0.98]"
+  >
+    <AlertTriangle className="w-4 h-4" />
+    {isAr ? "حذف" : "Delete"}
+  </button>
+</div>
                         </div>
                       </div>
                     ) : null}
