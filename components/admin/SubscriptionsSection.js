@@ -1226,6 +1226,337 @@ const removeAddon = async (id) => {
                           })}
                         </div>
 
+                        {/* ====== PLAN EDITOR ====== */}
+{tab === "meta" ? (
+  <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div>
+        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.planKey}</div>
+        <input
+          value={p.planKey}
+          onChange={(e) => setPlanField(p.id, { planKey: e.target.value.trim() })}
+          className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+        />
+      </div>
+
+      <div>
+        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.key}</div>
+        <input
+          value={p.key}
+          onChange={(e) => setPlanField(p.id, { key: e.target.value.trim() })}
+          className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+        />
+      </div>
+
+      <div>
+        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.sortIndex}</div>
+        <input
+          type="number"
+          value={p.sortIndex ?? 0}
+          onChange={(e) => setPlanField(p.id, { sortIndex: Number(e.target.value || 0) })}
+          className={cn(inputBaseDark, brand.focus)}
+        />
+      </div>
+
+      <div>
+        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.version}</div>
+        <input
+          type="number"
+          value={p.version ?? 1}
+          onChange={(e) => setPlanField(p.id, { version: Number(e.target.value || 1) })}
+          className={cn(inputBaseDark, brand.focus)}
+        />
+      </div>
+
+      <div>
+        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.currency}</div>
+        <input
+          value={p.currency || "AED"}
+          onChange={(e) => setPlanField(p.id, { currency: e.target.value.trim().toUpperCase() })}
+          className={cn(inputBaseDark, brand.focus)}
+          placeholder="AED"
+        />
+      </div>
+
+      <div>
+        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.mode}</div>
+        <input
+          value={p.afterLimit?.mode || "custom"}
+          onChange={(e) => setPlanNested(p.id, ["afterLimit", "mode"], e.target.value.trim())}
+          className={cn(inputBaseDark, brand.focus)}
+          placeholder="custom"
+        />
+      </div>
+
+      <div>
+        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.nameAr}</div>
+        <input
+          value={p.name?.ar || ""}
+          onChange={(e) => setPlanNested(p.id, ["name", "ar"], e.target.value)}
+          className={cn(inputBaseDark, brand.focus)}
+        />
+      </div>
+
+      <div>
+        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.nameEn}</div>
+        <input
+          value={p.name?.en || ""}
+          onChange={(e) => setPlanNested(p.id, ["name", "en"], e.target.value)}
+          className={cn(inputBaseDark, brand.focus)}
+        />
+      </div>
+
+      <div>
+        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.fitAr}</div>
+        <input
+          value={p.fit?.ar || ""}
+          onChange={(e) => setPlanNested(p.id, ["fit", "ar"], e.target.value)}
+          className={cn(inputBaseDark, brand.focus)}
+        />
+      </div>
+
+      <div>
+        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.fitEn}</div>
+        <input
+          value={p.fit?.en || ""}
+          onChange={(e) => setPlanNested(p.id, ["fit", "en"], e.target.value)}
+          className={cn(inputBaseDark, brand.focus)}
+        />
+      </div>
+    </div>
+  </div>
+) : null}
+
+{tab === "pricing" ? (
+  <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+    {DURATION_ORDER.map((dur) => {
+      const v = p.pricing?.[dur] || {};
+      return (
+        <div key={dur} className="rounded-2xl border border-white/10 bg-black/20 p-4">
+          <div className={cn("flex items-center justify-between gap-2", isAr && "flex-row-reverse")}>
+            <div className="text-white font-extrabold">
+              {DUR_LABELS[dur]?.[isAr ? "ar" : "en"] || dur}
+            </div>
+            <div className="text-xs text-white/45 font-bold">
+              {isOfferDuration(dur) ? (isAr ? "يسمح بعرض/بونص" : "Offer allowed") : (isAr ? "بدون عروض" : "No offer")}
+            </div>
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 sm:grid-cols-6 gap-2">
+            <div>
+              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.monthsShown}</div>
+              <input
+                type="number"
+                value={v.monthsShown ?? 1}
+                onChange={(e) => setPlanNested(p.id, ["pricing", dur, "monthsShown"], Number(e.target.value || 1))}
+                className={cn(inputBaseDark, brand.focus)}
+              />
+            </div>
+            <div>
+              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.paidMonths}</div>
+              <input
+                type="number"
+                value={v.paidMonths ?? 1}
+                onChange={(e) => setPlanNested(p.id, ["pricing", dur, "paidMonths"], Number(e.target.value || 1))}
+                className={cn(inputBaseDark, brand.focus)}
+              />
+            </div>
+            <div>
+              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.bonus}</div>
+              <input
+                type="number"
+                value={v.bonus ?? 0}
+                onChange={(e) => setPlanNested(p.id, ["pricing", dur, "bonus"], Number(e.target.value || 0))}
+                className={cn(inputBaseDark, brand.focus)}
+                disabled={!isOfferDuration(dur)}
+              />
+            </div>
+            <div>
+              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.price}</div>
+              <input
+                type="number"
+                value={v.price ?? 0}
+                onChange={(e) => setPlanNested(p.id, ["pricing", dur, "price"], Number(e.target.value || 0))}
+                className={cn(inputBaseDark, brand.focus)}
+              />
+            </div>
+            <div>
+              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.tag}</div>
+              <input
+                value={v.tag || ""}
+                onChange={(e) => setPlanNested(p.id, ["pricing", dur, "tag"], e.target.value)}
+                className={cn(inputBaseDark, brand.focus)}
+                placeholder="offer / most"
+              />
+            </div>
+            <div className={cn("flex items-end justify-between gap-2", isAr && "flex-row-reverse")}>
+              <div className="w-full">
+                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.best}</div>
+                <div className={cn("flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2", isAr && "flex-row-reverse")}>
+                  <span className="text-white/75 font-extrabold text-sm">{isAr ? "تمييز" : "Highlight"}</span>
+                  <Toggle checked={!!v.best} onChange={(val) => setPlanNested(p.id, ["pricing", dur, "best"], val)} />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Stripe IDs per duration */}
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div>
+              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.stripeMode}</div>
+              <input
+                value={v?.stripe?.mode || "subscription"}
+                onChange={(e) => setPlanNested(p.id, ["pricing", dur, "stripe", "mode"], e.target.value.trim())}
+                className={cn(inputBaseDark, brand.focus)}
+                placeholder="subscription"
+              />
+            </div>
+            <div>
+              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.stripePriceId}</div>
+              <input
+                value={v?.stripe?.priceId || ""}
+                onChange={(e) => setPlanNested(p.id, ["pricing", dur, "stripe", "priceId"], e.target.value.trim())}
+                className={cn(inputBaseDark, brand.focus)}
+                placeholder="price_..."
+              />
+            </div>
+            <div>
+              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.stripeProductId}</div>
+              <input
+                value={v?.stripe?.productId || ""}
+                onChange={(e) => setPlanNested(p.id, ["pricing", dur, "stripe", "productId"], e.target.value.trim())}
+                className={cn(inputBaseDark, brand.focus)}
+                placeholder="prod_..."
+              />
+            </div>
+          </div>
+        </div>
+      );
+    })}
+  </div>
+) : null}
+
+{tab === "perks" ? (
+  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+    {(["ar", "en"]).map((locale) => (
+      <div key={locale} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+        <div className={cn("flex items-center justify-between", isAr && "flex-row-reverse")}>
+          <div className="text-sm font-extrabold text-white">
+            {locale === "ar" ? (isAr ? "المميزات (عربي)" : "Perks (AR)") : (isAr ? "المميزات (English)" : "Perks (EN)")}
+          </div>
+          <button
+            onClick={() => addPerk(p.id, locale)}
+            className="cursor-pointer inline-flex items-center gap-2 px-3 py-2 rounded-xl font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white"
+          >
+            <Sparkles className="w-4 h-4" /> {t.addPerk}
+          </button>
+        </div>
+
+        <div className="mt-3 space-y-2">
+          {(p.perks?.[locale] || []).map((val, idx) => (
+            <div key={idx} className={cn("flex items-center gap-2", isAr && "flex-row-reverse")}>
+              <input
+                value={val}
+                onChange={(e) => setPlanNested(p.id, ["perks", locale, idx], e.target.value)}
+                className={cn(inputBaseDark, brand.focus)}
+                placeholder={isAr ? "اكتب الميزة..." : "Type perk..."}
+              />
+              <button
+                onClick={() => removePerk(p.id, locale, idx)}
+                className="cursor-pointer px-3 py-2 rounded-xl font-extrabold border border-rose-400/25 bg-rose-500/10 text-rose-200 hover:bg-rose-500/15"
+              >
+                {t.remove}
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    ))}
+  </div>
+) : null}
+
+{tab === "rules" ? (
+  <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {[
+        { path: ["afterLimit", "allowAddon"], label: t.allowAddon },
+        { path: ["afterLimit", "allowUpgrade"], label: t.allowUpgrade },
+        { path: ["afterLimit", "hardBlock"], label: t.hardBlock },
+        { path: ["allowEntitiesOutsidePlan"], label: t.allowEntitiesOutsidePlan },
+      ].map((x, i) => (
+        <div key={i} className={cn("flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3", isAr && "flex-row-reverse")}>
+          <span className="text-white/80 font-extrabold">{x.label}</span>
+          <Toggle
+            checked={!!(x.path[0] === "allowEntitiesOutsidePlan" ? p.allowEntitiesOutsidePlan : p?.[x.path[0]]?.[x.path[1]])}
+            onChange={(v) => (x.path[0] === "allowEntitiesOutsidePlan" ? setPlanField(p.id, { allowEntitiesOutsidePlan: v }) : setPlanNested(p.id, x.path, v))}
+          />
+        </div>
+      ))}
+
+      <div>
+        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.monthlyIncludedTxLimit}</div>
+        <input
+          type="number"
+          value={p.monthlyIncludedTxLimit ?? 0}
+          onChange={(e) => setPlanField(p.id, { monthlyIncludedTxLimit: Number(e.target.value || 0) })}
+          className={cn(inputBaseDark, brand.focus)}
+        />
+      </div>
+
+      <div>
+        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.allowedBillingPeriods}</div>
+        <input
+          value={(p.allowedBillingPeriods || []).join(", ")}
+          onChange={(e) => setPlanField(p.id, { allowedBillingPeriods: uniq(e.target.value.split(",").map((s) => s.trim())) })}
+          className={cn(inputBaseDark, brand.focus)}
+          placeholder="semiannual, yearly, contract"
+        />
+      </div>
+
+      <div className="sm:col-span-2">
+        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.includedEntities}</div>
+        <input
+          value={(p.includedEntities || []).join(", ")}
+          onChange={(e) => setPlanField(p.id, { includedEntities: uniq(e.target.value.split(",").map((s) => s.trim())) })}
+          className={cn(inputBaseDark, brand.focus)}
+          placeholder="all"
+        />
+      </div>
+    </div>
+  </div>
+) : null}
+
+{tab === "covers" ? (
+  <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {[
+        { k: "adminProcessing", label: t.coversAdminProcessing },
+        { k: "governmentFee", label: t.coversGovernmentFee },
+        { k: "printingFee", label: t.coversPrintingFee },
+        { k: "stripeFee", label: t.coversStripeFee },
+        { k: "vat", label: t.coversVat },
+      ].map((x) => (
+        <div key={x.k} className={cn("flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3", isAr && "flex-row-reverse")}>
+          <span className="text-white/80 font-extrabold">{x.label}</span>
+          <Toggle checked={!!p?.covers?.[x.k]} onChange={(v) => setPlanNested(p.id, ["covers", x.k], v)} />
+        </div>
+      ))}
+    </div>
+  </div>
+) : null}
+
+{tab === "stripe" ? (
+  <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+    <div className="text-sm text-white/70 font-extrabold">
+      {isAr ? "Stripe موجود داخل كل مدة في Pricing (priceId / productId)" : "Stripe is configured per duration in Pricing"}
+    </div>
+    <div className="text-xs text-white/45 font-bold mt-2">
+      {isAr ? "لو عايز Stripe عام للخطة قولّي ونضيفه" : "If you want plan-level Stripe fields, tell me and I’ll add it."}
+    </div>
+  </div>
+) : null}
+
+
                         {/* ✅ باقي الـ UI زي ما هو عندك (pricing/perks/rules/covers/stripe/meta) */}
                         {/* علشان الرد مايبقاش ضخم أكتر من كده: نفس بلوكات JSX اللي عندك انسخها مكان السطر ده بدون تغيير */}
                         {/* المهم: كل structuredClone اتشال واتبدل بـ deepClone في الدوال اللي فوق */}
@@ -1253,7 +1584,6 @@ const removeAddon = async (id) => {
     {isAr ? "حذف" : "Delete"}
   </button>
 </div>
-
 
                         {!isOk ? (
                           <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 p-4">
