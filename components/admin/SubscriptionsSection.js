@@ -17,14 +17,46 @@ import {
   BadgePercent,
   LayoutGrid,
   Eye,
+  PackagePlus,
+  Boxes,
+  WalletCards,
+  Settings2,
 } from "lucide-react";
 
+/* =========================================
+   Utils
+========================================= */
 function cn(...a) {
   return a.filter(Boolean).join(" ");
 }
+const safeNum = (v, fallback = 0) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+};
+const safeStr = (v, fallback = "") => (typeof v === "string" ? v : v == null ? fallback : String(v));
+const safeBool = (v, fallback = false) => (typeof v === "boolean" ? v : fallback);
+const uniq = (arr) => Array.from(new Set((arr || []).filter(Boolean).map((x) => String(x).trim())));
 
-const COLLECTION = "companySubscriptionPlans";
+// ✅ safe clone بدل structuredClone
+const deepClone = (obj) => {
+  try {
+    return JSON.parse(JSON.stringify(obj));
+  } catch {
+    return obj;
+  }
+};
+
+/* =========================================
+   Firestore Collections
+========================================= */
+const PLANS_COL = "companySubscriptionPlans";
+const ADDONS_COL = "companyAddonsCatalog";
+
+/* =========================================
+   Pricing Durations
+========================================= */
 const DURATION_ORDER = ["monthly", "quarterly", "semiannual", "yearly"];
+
 const DUR_LABELS = {
   monthly: { ar: "شهري", en: "Monthly" },
   quarterly: { ar: "3 شهور", en: "3 Months" },
@@ -34,13 +66,14 @@ const DUR_LABELS = {
 
 const isOfferDuration = (k) => k === "semiannual" || k === "yearly";
 
-/** ✅ Visual identity per plan (admin theme) */
+/* =========================================
+   Brands (Admin theme)
+========================================= */
 const BRAND = {
   starter: {
     icon: Zap,
     bar: "from-emerald-400 via-emerald-500 to-emerald-600",
     ring: "ring-emerald-500/20",
-    chip: "bg-emerald-500/12 text-emerald-700 border-emerald-500/20",
     chipDark: "bg-emerald-500/14 text-emerald-200 border-emerald-400/20",
     btn: "bg-emerald-600 hover:bg-emerald-700",
     focus: "focus:ring-emerald-500/30",
@@ -50,7 +83,6 @@ const BRAND = {
     icon: Sparkles,
     bar: "from-cyan-400 via-sky-500 to-blue-600",
     ring: "ring-sky-500/20",
-    chip: "bg-sky-500/12 text-sky-700 border-sky-500/20",
     chipDark: "bg-sky-500/14 text-sky-200 border-sky-400/20",
     btn: "bg-sky-600 hover:bg-sky-700",
     focus: "focus:ring-sky-500/30",
@@ -60,7 +92,6 @@ const BRAND = {
     icon: Shield,
     bar: "from-violet-400 via-purple-500 to-fuchsia-600",
     ring: "ring-purple-500/20",
-    chip: "bg-purple-500/12 text-purple-700 border-purple-500/20",
     chipDark: "bg-purple-500/14 text-purple-200 border-purple-400/20",
     btn: "bg-purple-600 hover:bg-purple-700",
     focus: "focus:ring-purple-500/30",
@@ -70,7 +101,6 @@ const BRAND = {
     icon: Crown,
     bar: "from-rose-400 via-red-500 to-orange-600",
     ring: "ring-rose-500/20",
-    chip: "bg-rose-500/12 text-rose-700 border-rose-500/20",
     chipDark: "bg-rose-500/14 text-rose-200 border-rose-400/20",
     btn: "bg-rose-600 hover:bg-rose-700",
     focus: "focus:ring-rose-500/30",
@@ -78,22 +108,38 @@ const BRAND = {
   },
 };
 
+/* =========================================
+   i18n
+========================================= */
 const uiText = (lang) => ({
-  title: lang === "ar" ? "اشتراكات الشركات" : "Company Subscriptions",
-  subtitle:
-    lang === "ar"
-      ? "لوحة تحكم كاملة للباقات والأسعار والمميزات (Live)"
-      : "Manage plans, pricing & perks (Live)",
-  loading: lang === "ar" ? "جاري تحميل الباقات..." : "Loading plans...",
-  empty: lang === "ar" ? "لا توجد باقات." : "No plans found.",
+  pageTitle: lang === "ar" ? "إدارة الباقات والإضافات" : "Plans & Add-ons Manager",
+  pageSub: lang === "ar" ? "تحكم كامل في باقات الشركات و Add-ons (Live)" : "Manage company plans and add-ons (Live)",
+
+  tabPlans: lang === "ar" ? "الباقات" : "Plans",
+  tabAddons: lang === "ar" ? "الإضافات" : "Add-ons",
+
+  loadingPlans: lang === "ar" ? "جاري تحميل الباقات..." : "Loading plans...",
+  loadingAddons: lang === "ar" ? "جاري تحميل الإضافات..." : "Loading add-ons...",
+  emptyPlans: lang === "ar" ? "لا توجد باقات." : "No plans found.",
+  emptyAddons: lang === "ar" ? "لا توجد إضافات." : "No add-ons found.",
+
   save: lang === "ar" ? "حفظ" : "Save",
   saving: lang === "ar" ? "جاري الحفظ..." : "Saving...",
   saved: lang === "ar" ? "تم الحفظ ✅" : "Saved ✅",
   error: lang === "ar" ? "خطأ في الحفظ ❌" : "Save failed ❌",
+
   active: lang === "ar" ? "مفعلة" : "Active",
   visible: lang === "ar" ? "ظاهرة" : "Visible",
+  mandatory: lang === "ar" ? "إجباري" : "Mandatory",
+  popular: lang === "ar" ? "شائعة" : "Popular",
+
   sortIndex: lang === "ar" ? "الترتيب" : "Sort",
   key: lang === "ar" ? "Key" : "Key",
+  planKey: lang === "ar" ? "Plan Key" : "Plan Key",
+  addonKey: lang === "ar" ? "Addon Key" : "Addon Key",
+  version: lang === "ar" ? "Version" : "Version",
+  currency: lang === "ar" ? "Currency" : "Currency",
+
   nameAr: lang === "ar" ? "اسم (عربي)" : "Name (AR)",
   nameEn: lang === "ar" ? "اسم (English)" : "Name (EN)",
   fitAr: lang === "ar" ? "وصف مختصر (عربي)" : "Short fit (AR)",
@@ -102,11 +148,13 @@ const uiText = (lang) => ({
   tabPerks: lang === "ar" ? "المميزات" : "Perks",
   tabPricing: lang === "ar" ? "الأسعار" : "Pricing",
   tabMeta: lang === "ar" ? "البيانات" : "Meta",
+  tabRules: lang === "ar" ? "قواعد الخطة" : "Plan Rules",
+  tabCovers: lang === "ar" ? "Covers" : "Covers",
+  tabStripe: lang === "ar" ? "Stripe" : "Stripe",
 
   addPerk: lang === "ar" ? "إضافة ميزة" : "Add perk",
   remove: lang === "ar" ? "حذف" : "Remove",
 
-  duration: lang === "ar" ? "المدة" : "Duration",
   monthsShown: lang === "ar" ? "الشهور المعروضة" : "Shown months",
   paidMonths: lang === "ar" ? "المدفوعة" : "Paid months",
   bonus: lang === "ar" ? "مجاني" : "Bonus",
@@ -114,72 +162,165 @@ const uiText = (lang) => ({
   tag: lang === "ar" ? "Tag" : "Tag",
   best: lang === "ar" ? "Best" : "Best",
 
-  stripePriceId: lang === "ar" ? "Stripe Price ID" : "Stripe Price ID",
-  currency: lang === "ar" ? "Currency" : "Currency",
+  stripeMode: lang === "ar" ? "Stripe Mode" : "Stripe Mode",
+  stripePriceId: lang === "ar" ? "Price ID" : "Price ID",
+  stripeProductId: lang === "ar" ? "Product ID" : "Product ID",
 
   helperTag: lang === "ar" ? "المسموح: most / offer فقط" : "Allowed: most / offer only",
   helperOffer:
     lang === "ar"
-      ? "العروض مسموحة فقط في: نصف سنوي + سنوي"
-      : "Offers allowed only for: Semiannual + Yearly",
+      ? "العروض/البونص مسموح فقط في: نصف سنوي + سنوي"
+      : "Offers/bonus allowed only for: Semiannual + Yearly",
 
-  perksAr: lang === "ar" ? "المميزات (عربي)" : "Perks (AR)",
-  perksEn: lang === "ar" ? "المميزات (English)" : "Perks (EN)",
+  searchPlaceholder: lang === "ar" ? "بحث بالاسم / الكود / الوصف..." : "Search by name / key / fit...",
 
-  quickSummary: lang === "ar" ? "ملخص سريع" : "Quick Summary",
-  offer: lang === "ar" ? "عرض" : "Offer",
-  most: lang === "ar" ? "الأكثر اختيارًا" : "Most chosen",
   ok: lang === "ar" ? "تمام" : "OK",
   fix: lang === "ar" ? "يحتاج تعديل" : "Needs fix",
+
+  afterLimit: lang === "ar" ? "بعد الحد" : "After limit",
+  allowAddon: lang === "ar" ? "يسمح بإضافات" : "Allow add-ons",
+  allowUpgrade: lang === "ar" ? "يسمح بالترقية" : "Allow upgrade",
+  hardBlock: lang === "ar" ? "حظر كامل" : "Hard block",
+  mode: lang === "ar" ? "Mode" : "Mode",
+  allowEntitiesOutsidePlan: lang === "ar" ? "يسمح خارج الخطة" : "Allow outside plan",
+  allowedBillingPeriods: lang === "ar" ? "فترات الفوترة" : "Allowed billing periods",
+  includedEntities: lang === "ar" ? "الكيانات المشمولة" : "Included entities",
+  monthlyIncludedTxLimit: lang === "ar" ? "حد معاملات/شهر" : "Monthly tx limit",
+
+  coversAdminProcessing: lang === "ar" ? "معالجة إدارية" : "Admin processing",
+  coversGovernmentFee: lang === "ar" ? "رسوم حكومية" : "Government fee",
+  coversPrintingFee: lang === "ar" ? "رسوم طباعة" : "Printing fee",
+  coversStripeFee: lang === "ar" ? "رسوم بوابة" : "Stripe fee",
+  coversVat: lang === "ar" ? "VAT" : "VAT",
+
+  qty: lang === "ar" ? "عدد المعاملات" : "Qty",
+  perTxn: lang === "ar" ? "لكل معاملة" : "Per txn",
+  priceMin: lang === "ar" ? "سعر أقل" : "Min price",
+  priceMax: lang === "ar" ? "سعر أعلى" : "Max price",
+  type: lang === "ar" ? "النوع" : "Type",
 });
 
+/* =========================================
+   Normalizers
+========================================= */
 function normalizePlanDoc(id, data) {
   const d = data || {};
   const pricing = d.pricing || {};
-  const normalizedPricing = {};
+  const perks = d.perks || { ar: [], en: [] };
 
+  const normalizedPricing = {};
   for (const k of DURATION_ORDER) {
     const v = pricing[k] || {};
-    normalizedPricing[k] = {
-      title: v.title || { ar: "", en: "" },
-      monthsShown: Number(v.monthsShown ?? 1),
-      paidMonths: Number(v.paidMonths ?? v.monthsShown ?? 1),
-      bonus: Number(v.bonus ?? 0),
-      price: Number(v.price ?? 0),
-      tag: String(v.tag || ""),
-      best: Boolean(v.best),
+    const monthsShown = safeNum(v.monthsShown, 1) || 1;
+    const paidMonths = safeNum(v.paidMonths, monthsShown) || monthsShown;
 
-      // ✅ optional Stripe
-      stripePriceId: String(v.stripePriceId || ""),
-      currency: String(v.currency || "aed"),
+    normalizedPricing[k] = {
+      title: { ar: safeStr(v?.title?.ar), en: safeStr(v?.title?.en) },
+      monthsShown,
+      paidMonths,
+      bonus: safeNum(v.bonus, 0),
+      price: safeNum(v.price, 0),
+      tag: safeStr(v.tag, ""),
+      best: safeBool(v.best, false),
+      currency: safeStr(v.currency, safeStr(d.currency, "AED")),
+      stripe: {
+        mode: safeStr(v?.stripe?.mode, "subscription"),
+        priceId: safeStr(v?.stripe?.priceId, ""),
+        productId: safeStr(v?.stripe?.productId, ""),
+      },
     };
   }
 
-  const perks = d.perks || { ar: [], en: [] };
-
   return {
     id,
-    key: d.key || id,
+    key: safeStr(d.key, id),
+    planKey: safeStr(d.planKey, safeStr(d.key, id)),
 
-    // ✅ unified flags (used by offers page)
-    isActive: Boolean(d.isActive ?? true),
-    isVisible: Boolean(d.isVisible ?? true),
+    isActive: safeBool(d.isActive, true),
+    isVisible: safeBool(d.isVisible, true),
+    isMandatory: safeBool(d.isMandatory, false),
 
-    sortIndex: Number(d.sortIndex ?? 0),
-    name: d.name || { ar: "", en: "" },
-    fit: d.fit || { ar: "", en: "" },
+    sortIndex: safeNum(d.sortIndex, 0),
+    version: safeNum(d.version, 1),
+
+    currency: safeStr(d.currency, "AED"),
+
+    name: { ar: safeStr(d?.name?.ar), en: safeStr(d?.name?.en) },
+    fit: { ar: safeStr(d?.fit?.ar), en: safeStr(d?.fit?.en) },
+
     perks: {
-      ar: Array.isArray(perks.ar) ? perks.ar : [],
-      en: Array.isArray(perks.en) ? perks.en : [],
+      ar: Array.isArray(perks.ar) ? perks.ar.map((x) => safeStr(x)).filter(Boolean) : [],
+      en: Array.isArray(perks.en) ? perks.en.map((x) => safeStr(x)).filter(Boolean) : [],
     },
 
-    // ✅ optional brand (offers page can use it)
-    brand: d.brand && typeof d.brand === "object" ? d.brand : null,
+    afterLimit: {
+      allowAddon: safeBool(d?.afterLimit?.allowAddon, true),
+      allowUpgrade: safeBool(d?.afterLimit?.allowUpgrade, false),
+      hardBlock: safeBool(d?.afterLimit?.hardBlock, false),
+      mode: safeStr(d?.afterLimit?.mode, "custom"),
+    },
+
+    allowEntitiesOutsidePlan: safeBool(d.allowEntitiesOutsidePlan, true),
+    allowedBillingPeriods: uniq(
+      Array.isArray(d.allowedBillingPeriods) ? d.allowedBillingPeriods : ["semiannual", "yearly", "contract"]
+    ),
+    includedEntities: uniq(Array.isArray(d.includedEntities) ? d.includedEntities : ["all"]),
+    monthlyIncludedTxLimit: safeNum(d.monthlyIncludedTxLimit, 0),
+
+    covers: {
+      adminProcessing: safeBool(d?.covers?.adminProcessing, true),
+      governmentFee: safeBool(d?.covers?.governmentFee, false),
+      printingFee: safeBool(d?.covers?.printingFee, true),
+      stripeFee: safeBool(d?.covers?.stripeFee, false),
+      vat: safeBool(d?.covers?.vat, true),
+    },
 
     pricing: normalizedPricing,
+
+    brand: d.brand && typeof d.brand === "object" ? d.brand : null,
   };
 }
 
+function normalizeAddonDoc(id, data) {
+  const d = data || {};
+  return {
+    id,
+    addonKey: safeStr(d.addonKey, id),
+
+    isActive: safeBool(d.isActive, true),
+    popular: safeBool(d.popular, false),
+
+    currency: safeStr(d.currency, "AED"),
+    version: safeNum(d.version, 1),
+
+    title: { ar: safeStr(d?.title?.ar), en: safeStr(d?.title?.en) },
+    type: safeStr(d.type, "bundle"),
+    qty: safeNum(d.qty, 0),
+
+    perTxn: safeNum(d.perTxn, 0),
+    price: safeNum(d.price, 0),
+    priceMin: safeNum(d.priceMin, 0),
+    priceMax: safeNum(d.priceMax, 0),
+
+    covers: {
+      adminProcessing: safeBool(d?.covers?.adminProcessing, true),
+      governmentFee: safeBool(d?.covers?.governmentFee, false),
+      printingFee: safeBool(d?.covers?.printingFee, true),
+      stripeFee: safeBool(d?.covers?.stripeFee, false),
+      vat: safeBool(d?.covers?.vat, true),
+    },
+
+    stripe: {
+      mode: safeStr(d?.stripe?.mode, "payment"),
+      priceId: safeStr(d?.stripe?.priceId, ""),
+      productId: safeStr(d?.stripe?.productId, ""),
+    },
+  };
+}
+
+/* =========================================
+   Toast
+========================================= */
 function SafeToast({ toast, isAr }) {
   if (!toast) return null;
   return (
@@ -198,6 +339,9 @@ function SafeToast({ toast, isAr }) {
   );
 }
 
+/* =========================================
+   Toggle
+========================================= */
 function Toggle({ checked, onChange }) {
   return (
     <button
@@ -208,52 +352,98 @@ function Toggle({ checked, onChange }) {
         checked ? "bg-emerald-500/30 border-emerald-400/25" : "bg-white/8 border-white/10"
       )}
     >
-      <span className={cn("absolute top-1 w-5 h-5 rounded-full transition", checked ? "left-6 bg-emerald-300" : "left-1 bg-white/60")} />
+      <span
+        className={cn(
+          "absolute top-1 w-5 h-5 rounded-full transition",
+          checked ? "left-6 bg-emerald-300" : "left-1 bg-white/60"
+        )}
+      />
     </button>
   );
 }
 
-export default function SubscriptionsSection({ lang = "ar" }) {
+/* =========================================
+   Main Component
+========================================= */
+export default function PlansAndAddonsManager({ lang = "ar" }) {
   const t = useMemo(() => uiText(lang), [lang]);
   const isAr = lang === "ar";
 
-  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState("plans");
+
+  const [loadingPlans, setLoadingPlans] = useState(true);
+  const [loadingAddons, setLoadingAddons] = useState(true);
+
   const [savingId, setSavingId] = useState(null);
   const [toast, setToast] = useState(null);
+
   const [plans, setPlans] = useState([]);
+  const [addons, setAddons] = useState([]);
+
   const [tabByPlan, setTabByPlan] = useState({});
-  const [expanded, setExpanded] = useState({});
+  const [expandedPlans, setExpandedPlans] = useState({});
+  const [expandedAddons, setExpandedAddons] = useState({});
+
   const [query, setQuery] = useState("");
   const [onlyActive, setOnlyActive] = useState(false);
 
+  /* ---------------------------
+     Load Plans + Addons
+  ---------------------------- */
   useEffect(() => {
     let mounted = true;
+
     (async () => {
       try {
-        setLoading(true);
-        const snap = await getDocs(collection(firestore, COLLECTION));
+        setLoadingPlans(true);
+        const snap = await getDocs(collection(firestore, PLANS_COL));
         const rows = snap.docs.map((x) => normalizePlanDoc(x.id, x.data()));
-        rows.sort((a, b) => (a.sortIndex - b.sortIndex) || a.key.localeCompare(b.key));
+        rows.sort((a, b) => a.sortIndex - b.sortIndex || String(a.key).localeCompare(String(b.key)));
         if (mounted) setPlans(rows);
       } catch (e) {
         console.error("Load plans error:", e);
         if (mounted) setPlans([]);
       } finally {
-        if (mounted) setLoading(false);
+        if (mounted) setLoadingPlans(false);
       }
     })();
-    return () => (mounted = false);
+
+    (async () => {
+      try {
+        setLoadingAddons(true);
+        const snap = await getDocs(collection(firestore, ADDONS_COL));
+        const rows = snap.docs.map((x) => normalizeAddonDoc(x.id, x.data()));
+        rows.sort((a, b) => String(a.addonKey).localeCompare(String(b.addonKey)));
+        if (mounted) setAddons(rows);
+      } catch (e) {
+        console.error("Load addons error:", e);
+        if (mounted) setAddons([]);
+      } finally {
+        if (mounted) setLoadingAddons(false);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  const setField = (id, patch) => {
+  /* ---------------------------
+     Setters (immutable)
+  ---------------------------- */
+  const setPlanField = (id, patch) => {
     setPlans((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   };
 
-  const setNested = (id, path, value) => {
+  const setAddonField = (id, patch) => {
+    setAddons((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+  };
+
+  const setPlanNested = (id, path, value) => {
     setPlans((prev) =>
       prev.map((p) => {
         if (p.id !== id) return p;
-        const copy = structuredClone(p);
+        const copy = deepClone(p);
         let ref = copy;
         for (let i = 0; i < path.length - 1; i++) {
           const k = path[i];
@@ -266,11 +456,31 @@ export default function SubscriptionsSection({ lang = "ar" }) {
     );
   };
 
+  const setAddonNested = (id, path, value) => {
+    setAddons((prev) =>
+      prev.map((a) => {
+        if (a.id !== id) return a;
+        const copy = deepClone(a);
+        let ref = copy;
+        for (let i = 0; i < path.length - 1; i++) {
+          const k = path[i];
+          ref[k] = ref[k] ?? {};
+          ref = ref[k];
+        }
+        ref[path[path.length - 1]] = value;
+        return copy;
+      })
+    );
+  };
+
+  /* ---------------------------
+     Perks helpers
+  ---------------------------- */
   const addPerk = (id, locale) => {
     setPlans((prev) =>
       prev.map((p) => {
         if (p.id !== id) return p;
-        const copy = structuredClone(p);
+        const copy = deepClone(p);
         copy.perks = copy.perks || { ar: [], en: [] };
         copy.perks[locale] = Array.isArray(copy.perks[locale]) ? copy.perks[locale] : [];
         copy.perks[locale].push("");
@@ -283,13 +493,16 @@ export default function SubscriptionsSection({ lang = "ar" }) {
     setPlans((prev) =>
       prev.map((p) => {
         if (p.id !== id) return p;
-        const copy = structuredClone(p);
-        copy.perks[locale] = (copy.perks[locale] || []).filter((_, i) => i !== idx);
+        const copy = deepClone(p);
+        copy.perks[locale] = (copy.perks?.[locale] || []).filter((_, i) => i !== idx);
         return copy;
       })
     );
   };
 
+  /* ---------------------------
+     Validation helpers
+  ---------------------------- */
   const sanitizeTag = (tag) => {
     const v = String(tag || "").trim().toLowerCase();
     if (!v) return "";
@@ -301,9 +514,9 @@ export default function SubscriptionsSection({ lang = "ar" }) {
     const issues = [];
     for (const dur of DURATION_ORDER) {
       const v = plan.pricing?.[dur] || {};
-      const monthsShown = Number(v.monthsShown ?? 1);
-      const paidMonths = Number(v.paidMonths ?? monthsShown);
-      const bonus = Number(v.bonus ?? 0);
+      const monthsShown = safeNum(v.monthsShown, 1);
+      const paidMonths = safeNum(v.paidMonths, monthsShown);
+      const bonus = safeNum(v.bonus, 0);
       const tag = sanitizeTag(v.tag);
 
       if (monthsShown <= 0) issues.push(`${dur}: monthsShown <= 0`);
@@ -313,7 +526,6 @@ export default function SubscriptionsSection({ lang = "ar" }) {
       if ((tag === "offer" || bonus > 0) && !isOfferDuration(dur)) {
         issues.push(`${dur}: offer/bonus not allowed (only semiannual/yearly)`);
       }
-
       if (tag === "most" && dur !== "yearly") {
         issues.push(`${dur}: tag 'most' should be yearly`);
       }
@@ -321,6 +533,9 @@ export default function SubscriptionsSection({ lang = "ar" }) {
     return issues;
   };
 
+  /* ---------------------------
+     Save Plan
+  ---------------------------- */
   const savePlan = async (plan) => {
     try {
       setSavingId(plan.id);
@@ -329,61 +544,83 @@ export default function SubscriptionsSection({ lang = "ar" }) {
       const pricingOut = Object.fromEntries(
         DURATION_ORDER.map((k) => {
           const v = plan.pricing?.[k] || {};
-          const monthsShown = Number(v.monthsShown ?? 1);
-          const paidMonths = Number(v.paidMonths ?? monthsShown);
-          const bonus = Number(v.bonus ?? 0);
-
+          const monthsShown = Math.max(1, safeNum(v.monthsShown, 1));
+          const paidMonths = Math.max(1, safeNum(v.paidMonths, monthsShown));
+          const bonus = safeNum(v.bonus, 0);
           let tag = sanitizeTag(v.tag);
 
-          // ✅ enforce: offers only semiannual/yearly
-          const safeBonus = isOfferDuration(k) ? bonus : 0;
-
-          // ✅ keep 'most' only on yearly, and 'offer' only on semiannual/yearly
+          const safeBonus = isOfferDuration(k) ? Math.max(0, bonus) : 0;
           if (!isOfferDuration(k) && tag === "offer") tag = "";
           if (k !== "yearly" && tag === "most") tag = "";
 
           return [
             k,
             {
-              title: { ar: String(v.title?.ar || ""), en: String(v.title?.en || "") },
-              monthsShown: Number(monthsShown ?? 1),
-              paidMonths: Number(paidMonths ?? 1),
-              bonus: Number(safeBonus ?? 0),
-              price: Number(v.price ?? 0),
+              title: { ar: safeStr(v?.title?.ar), en: safeStr(v?.title?.en) },
+              monthsShown,
+              paidMonths,
+              bonus: safeBonus,
+              price: Math.max(0, safeNum(v.price, 0)),
               tag,
-              best: Boolean(v.best),
-
-              // ✅ optional stripe fields
-              stripePriceId: String(v.stripePriceId || ""),
-              currency: String(v.currency || "aed"),
+              best: !!v.best,
+              currency: safeStr(v.currency, safeStr(plan.currency, "AED")),
+              stripe: {
+                mode: safeStr(v?.stripe?.mode, "subscription"),
+                priceId: safeStr(v?.stripe?.priceId, ""),
+                productId: safeStr(v?.stripe?.productId, ""),
+              },
             },
           ];
         })
       );
 
       const payload = {
-        key: String(plan.key || plan.id),
+        key: safeStr(plan.key, plan.id),
+        planKey: safeStr(plan.planKey, safeStr(plan.key, plan.id)),
 
-        // ✅ unified flags (offers page uses them)
-        isActive: Boolean(plan.isActive),
-        isVisible: Boolean(plan.isVisible),
+        isActive: !!plan.isActive,
+        isVisible: !!plan.isVisible,
+        isMandatory: !!plan.isMandatory,
 
-        sortIndex: Number(plan.sortIndex || 0),
-        name: { ar: String(plan.name?.ar || ""), en: String(plan.name?.en || "") },
-        fit: { ar: String(plan.fit?.ar || ""), en: String(plan.fit?.en || "") },
+        sortIndex: safeNum(plan.sortIndex, 0),
+        version: safeNum(plan.version, 1),
+
+        currency: safeStr(plan.currency, "AED"),
+
+        name: { ar: safeStr(plan?.name?.ar), en: safeStr(plan?.name?.en) },
+        fit: { ar: safeStr(plan?.fit?.ar), en: safeStr(plan?.fit?.en) },
         perks: {
-          ar: Array.isArray(plan.perks?.ar) ? plan.perks.ar.filter(Boolean) : [],
-          en: Array.isArray(plan.perks?.en) ? plan.perks.en.filter(Boolean) : [],
+          ar: Array.isArray(plan?.perks?.ar) ? plan.perks.ar.filter(Boolean) : [],
+          en: Array.isArray(plan?.perks?.en) ? plan.perks.en.filter(Boolean) : [],
         },
 
-        // ✅ optional brand
+        afterLimit: {
+          allowAddon: !!plan?.afterLimit?.allowAddon,
+          allowUpgrade: !!plan?.afterLimit?.allowUpgrade,
+          hardBlock: !!plan?.afterLimit?.hardBlock,
+          mode: safeStr(plan?.afterLimit?.mode, "custom"),
+        },
+
+        allowEntitiesOutsidePlan: !!plan.allowEntitiesOutsidePlan,
+        allowedBillingPeriods: uniq(plan.allowedBillingPeriods || []),
+        includedEntities: uniq(plan.includedEntities || []),
+        monthlyIncludedTxLimit: safeNum(plan.monthlyIncludedTxLimit, 0),
+
+        covers: {
+          adminProcessing: !!plan?.covers?.adminProcessing,
+          governmentFee: !!plan?.covers?.governmentFee,
+          printingFee: !!plan?.covers?.printingFee,
+          stripeFee: !!plan?.covers?.stripeFee,
+          vat: !!plan?.covers?.vat,
+        },
+
         ...(plan.brand ? { brand: plan.brand } : {}),
 
         pricing: pricingOut,
         updatedAt: serverTimestamp(),
       };
 
-      await setDoc(doc(firestore, COLLECTION, plan.id), payload, { merge: true });
+      await setDoc(doc(firestore, PLANS_COL, plan.id), payload, { merge: true });
       setToast({ type: "ok", msg: t.saved });
     } catch (e) {
       console.error("Save plan error:", e);
@@ -394,46 +631,130 @@ export default function SubscriptionsSection({ lang = "ar" }) {
     }
   };
 
-  const inputBaseDark =
-    "w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-extrabold text-white/90 shadow-sm outline-none focus:ring-4 transition placeholder:text-white/35";
-  const softCard =
-    "rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl overflow-hidden";
+  /* ---------------------------
+     Save Addon
+  ---------------------------- */
+  const saveAddon = async (addon) => {
+    try {
+      setSavingId(addon.id);
+      setToast(null);
 
+      const payload = {
+        addonKey: safeStr(addon.addonKey, addon.id),
+
+        isActive: !!addon.isActive,
+        popular: !!addon.popular,
+
+        currency: safeStr(addon.currency, "AED"),
+        version: safeNum(addon.version, 1),
+
+        title: { ar: safeStr(addon?.title?.ar), en: safeStr(addon?.title?.en) },
+        type: safeStr(addon.type, "bundle"),
+        qty: Math.max(0, safeNum(addon.qty, 0)),
+
+        perTxn: Math.max(0, safeNum(addon.perTxn, 0)),
+        price: Math.max(0, safeNum(addon.price, 0)),
+        priceMin: Math.max(0, safeNum(addon.priceMin, 0)),
+        priceMax: Math.max(0, safeNum(addon.priceMax, 0)),
+
+        covers: {
+          adminProcessing: !!addon?.covers?.adminProcessing,
+          governmentFee: !!addon?.covers?.governmentFee,
+          printingFee: !!addon?.covers?.printingFee,
+          stripeFee: !!addon?.covers?.stripeFee,
+          vat: !!addon?.covers?.vat,
+        },
+
+        stripe: {
+          mode: safeStr(addon?.stripe?.mode, "payment"),
+          priceId: safeStr(addon?.stripe?.priceId, ""),
+          productId: safeStr(addon?.stripe?.productId, ""),
+        },
+
+        updatedAt: serverTimestamp(),
+      };
+
+      await setDoc(doc(firestore, ADDONS_COL, addon.id), payload, { merge: true });
+      setToast({ type: "ok", msg: t.saved });
+    } catch (e) {
+      console.error("Save addon error:", e);
+      setToast({ type: "err", msg: t.error });
+    } finally {
+      setSavingId(null);
+      setTimeout(() => setToast(null), 2400);
+    }
+  };
+
+  /* ---------------------------
+     Filters
+  ---------------------------- */
   const filteredPlans = useMemo(() => {
     const q = query.trim().toLowerCase();
     return plans.filter((p) => {
       if (onlyActive && !p.isActive) return false;
       if (!q) return true;
-      const hay = `${p.id} ${p.key} ${p.name?.ar || ""} ${p.name?.en || ""} ${p.fit?.ar || ""} ${p.fit?.en || ""}`.toLowerCase();
+      const hay = `${p.id} ${p.key} ${p.planKey} ${p.name?.ar || ""} ${p.name?.en || ""} ${p.fit?.ar || ""} ${
+        p.fit?.en || ""
+      }`.toLowerCase();
       return hay.includes(q);
     });
   }, [plans, query, onlyActive]);
 
-  const totalActive = useMemo(() => plans.filter((x) => x.isActive).length, [plans]);
-  const totalVisible = useMemo(() => plans.filter((x) => x.isVisible).length, [plans]);
+  const filteredAddons = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return addons.filter((a) => {
+      if (onlyActive && !a.isActive) return false;
+      if (!q) return true;
+      const hay = `${a.id} ${a.addonKey} ${a.title?.ar || ""} ${a.title?.en || ""} ${a.type || ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [addons, query, onlyActive]);
 
+  const totalActivePlans = useMemo(() => plans.filter((x) => x.isActive).length, [plans]);
+  const totalVisiblePlans = useMemo(() => plans.filter((x) => x.isVisible).length, [plans]);
+  const totalActiveAddons = useMemo(() => addons.filter((x) => x.isActive).length, [addons]);
+
+  /* ---------------------------
+     UI styles
+  ---------------------------- */
+  const inputBaseDark =
+    "w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-extrabold text-white/90 shadow-sm outline-none focus:ring-4 transition placeholder:text-white/35";
+
+  /* =========================================
+     Render
+  ========================================= */
   return (
     <section className="rounded-3xl border border-white/10 bg-gradient-to-b from-[#07120d] via-[#071610] to-[#040a07] p-4 sm:p-6 shadow-[0_25px_90px_-55px_rgba(16,185,129,0.35)]">
       {/* Header */}
       <div className={cn("flex items-start justify-between gap-4", isAr && "flex-row-reverse")}>
         <div className={cn(isAr ? "text-right" : "text-left")}>
-          <div className="text-2xl sm:text-3xl font-extrabold text-white">{t.title}</div>
-          <div className="text-sm text-white/60 mt-1">{t.subtitle}</div>
+          <div className="text-2xl sm:text-3xl font-extrabold text-white">{t.pageTitle}</div>
+          <div className="text-sm text-white/60 mt-1">{t.pageSub}</div>
 
           <div className={cn("mt-3 flex items-center gap-2 flex-wrap", isAr && "flex-row-reverse")}>
             <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[12px] font-extrabold border border-white/10 bg-white/5 text-white/80">
               <LayoutGrid className="w-4 h-4" />
-              {isAr ? `إجمالي: ${plans.length}` : `Total: ${plans.length}`}
+              {isAr ? `الباقات: ${plans.length}` : `Plans: ${plans.length}`}
             </span>
 
             <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[12px] font-extrabold border border-emerald-400/15 bg-emerald-500/10 text-emerald-200">
               <Check className="w-4 h-4" />
-              {isAr ? `مفعّل: ${totalActive}` : `Active: ${totalActive}`}
+              {isAr ? `مفعّل: ${totalActivePlans}` : `Active: ${totalActivePlans}`}
             </span>
 
             <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[12px] font-extrabold border border-sky-400/15 bg-sky-500/10 text-sky-200">
               <Eye className="w-4 h-4" />
-              {isAr ? `ظاهر: ${totalVisible}` : `Visible: ${totalVisible}`}
+              {isAr ? `ظاهر: ${totalVisiblePlans}` : `Visible: ${totalVisiblePlans}`}
+            </span>
+
+            <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[12px] font-extrabold border border-white/10 bg-white/5 text-white/80">
+              <Boxes className="w-4 h-4" />
+              {isAr ? `الإضافات: ${addons.length}` : `Add-ons: ${addons.length}`}
+            </span>
+
+            <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[12px] font-extrabold border border-emerald-400/15 bg-emerald-500/10 text-emerald-200">
+              <Check className="w-4 h-4" />
+              {isAr ? `مفعّل (إضافات): ${totalActiveAddons}` : `Active (Add-ons): ${totalActiveAddons}`}
             </span>
 
             <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[12px] font-extrabold border border-amber-400/15 bg-amber-500/10 text-amber-200">
@@ -448,16 +769,55 @@ export default function SubscriptionsSection({ lang = "ar" }) {
         </div>
       </div>
 
+      {/* Top Tabs */}
+      <div className={cn("mt-5 flex items-center gap-2", isAr && "flex-row-reverse")}>
+        <button
+          onClick={() => setActiveTab("plans")}
+          className={cn(
+            "cursor-pointer px-4 py-2 rounded-2xl text-sm font-extrabold border transition inline-flex items-center gap-2",
+            activeTab === "plans"
+              ? "bg-white text-black border-white"
+              : "bg-white/5 text-white/80 border-white/10 hover:bg-white/10"
+          )}
+        >
+          <WalletCards className="w-4 h-4" />
+          {t.tabPlans}
+        </button>
+
+        <button
+          onClick={() => setActiveTab("addons")}
+          className={cn(
+            "cursor-pointer px-4 py-2 rounded-2xl text-sm font-extrabold border transition inline-flex items-center gap-2",
+            activeTab === "addons"
+              ? "bg-white text-black border-white"
+              : "bg-white/5 text-white/80 border-white/10 hover:bg-white/10"
+          )}
+        >
+          <PackagePlus className="w-4 h-4" />
+          {t.tabAddons}
+        </button>
+      </div>
+
       {/* Toolbar */}
-      <div className={cn("mt-5 rounded-2xl border border-white/10 bg-white/5 p-3 sm:p-4 flex items-center justify-between gap-3", isAr && "flex-row-reverse")}>
+      <div
+        className={cn(
+          "mt-4 rounded-2xl border border-white/10 bg-white/5 p-3 sm:p-4 flex items-center justify-between gap-3",
+          isAr && "flex-row-reverse"
+        )}
+      >
         <div className={cn("flex items-center gap-2 w-full sm:w-auto", isAr && "flex-row-reverse")}>
-          <div className={cn("flex items-center gap-2 px-3 py-2 rounded-xl border border-white/10 bg-black/20 w-full sm:w-[340px]", isAr && "flex-row-reverse")}>
+          <div
+            className={cn(
+              "flex items-center gap-2 px-3 py-2 rounded-xl border border-white/10 bg-black/20 w-full sm:w-[360px]",
+              isAr && "flex-row-reverse"
+            )}
+          >
             <SlidersHorizontal className="w-4 h-4 text-white/55" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="w-full bg-transparent outline-none text-white/90 font-extrabold placeholder:text-white/35"
-              placeholder={isAr ? "بحث بالاسم / الكود / الوصف..." : "Search name / key / fit..."}
+              placeholder={t.searchPlaceholder}
             />
           </div>
 
@@ -472,477 +832,517 @@ export default function SubscriptionsSection({ lang = "ar" }) {
 
       {/* Body */}
       <div className="mt-5">
-        {loading ? (
-          <div className={cn("text-white/70 font-extrabold", isAr && "text-right")}>{t.loading}</div>
-        ) : !filteredPlans.length ? (
-          <div className={cn("text-white/60 font-extrabold", isAr && "text-right")}>{t.empty}</div>
-        ) : (
-          <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4">
-            {filteredPlans.map((p) => {
-              const brand = BRAND[p.id] || BRAND[p.key] || BRAND.starter;
-              const Icon = brand.icon || Sparkles;
-              const tab = tabByPlan[p.id] || "pricing";
-              const open = !!expanded[p.id];
+        {/* =========================
+           PLANS
+        ========================== */}
+        {activeTab === "plans" ? (
+          loadingPlans ? (
+            <div className={cn("text-white/70 font-extrabold", isAr && "text-right")}>{t.loadingPlans}</div>
+          ) : !filteredPlans.length ? (
+            <div className={cn("text-white/60 font-extrabold", isAr && "text-right")}>{t.emptyPlans}</div>
+          ) : (
+            <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4">
+              {filteredPlans.map((p) => {
+                const brand = BRAND[p.id] || BRAND[p.key] || BRAND[p.planKey] || BRAND.starter;
+                const Icon = brand.icon || Sparkles;
 
-              const issues = validatePlan(p);
-              const isOk = issues.length === 0;
+                const tab = tabByPlan[p.id] || "pricing";
+                const open = !!expandedPlans[p.id];
 
-              const yearly = p.pricing?.yearly || {};
-              const yearlyTag = String(yearly.tag || "").toLowerCase();
-              const badge = yearly.best || yearlyTag === "most" ? (isAr ? "الأكثر اختيارًا" : "Most chosen") : null;
+                const issues = validatePlan(p);
+                const isOk = issues.length === 0;
 
-              return (
-                <div key={p.id} className={cn("rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl overflow-hidden ring-1", brand.ring, open ? brand.glow : "")}>
-                  <div className={cn("h-[5px] bg-gradient-to-r", brand.bar)} />
+                const yearly = p.pricing?.yearly || {};
+                const yearlyTag = String(yearly.tag || "").toLowerCase();
+                const badge = yearly.best || yearlyTag === "most" ? (isAr ? "الأكثر اختيارًا" : "Most chosen") : null;
 
-                  {/* header */}
-                  <button
-                    type="button"
-                    onClick={() => setExpanded((prev) => ({ ...prev, [p.id]: !prev[p.id] }))}
+                return (
+                  <div
+                    key={p.id}
                     className={cn(
-                      "w-full p-4 sm:p-5 flex items-start justify-between gap-3 text-left cursor-pointer",
-                      isAr && "flex-row-reverse text-right"
+                      "rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl overflow-hidden ring-1",
+                      brand.ring,
+                      open ? brand.glow : ""
                     )}
                   >
-                    <div className={cn("flex items-start gap-3 min-w-0", isAr && "flex-row-reverse")}>
-                      <div className="w-12 h-12 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center shrink-0">
-                        <Icon className="w-5 h-5 text-white/80" />
-                      </div>
+                    <div className={cn("h-[5px] bg-gradient-to-r", brand.bar)} />
 
-                      <div className="min-w-0">
-                        <div className={cn("flex items-center gap-2 flex-wrap", isAr && "flex-row-reverse")}>
-                          <div className="font-extrabold text-lg text-white truncate">
-                            {p.name?.[isAr ? "ar" : "en"] || p.key || p.id}
+                    {/* header */}
+                    <button
+                      type="button"
+                      onClick={() => setExpandedPlans((prev) => ({ ...prev, [p.id]: !prev[p.id] }))}
+                      className={cn(
+                        "w-full p-4 sm:p-5 flex items-start justify-between gap-3 text-left cursor-pointer",
+                        isAr && "flex-row-reverse text-right"
+                      )}
+                    >
+                      <div className={cn("flex items-start gap-3 min-w-0", isAr && "flex-row-reverse")}>
+                        <div className="w-12 h-12 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center shrink-0">
+                          <Icon className="w-5 h-5 text-white/80" />
+                        </div>
+
+                        <div className="min-w-0">
+                          <div className={cn("flex items-center gap-2 flex-wrap", isAr && "flex-row-reverse")}>
+                            <div className="font-extrabold text-lg text-white truncate">
+                              {p.name?.[isAr ? "ar" : "en"] || p.key || p.planKey || p.id}
+                            </div>
+
+                            {badge ? (
+                              <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-white text-black">
+                                {badge}
+                              </span>
+                            ) : null}
+
+                            <span className={cn("px-2.5 py-1 rounded-full text-[11px] font-extrabold border", brand.chipDark)}>
+                              <Tag className={cn("w-3.5 h-3.5 inline-block -mt-[2px]", isAr ? "ml-1" : "mr-1")} />
+                              PRO
+                            </span>
+
+                            <span
+                              className={cn(
+                                "px-2.5 py-1 rounded-full text-[11px] font-extrabold border",
+                                isOk
+                                  ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-200"
+                                  : "border-amber-400/20 bg-amber-500/10 text-amber-200"
+                              )}
+                            >
+                              {isOk ? t.ok : t.fix}
+                            </span>
+
+                            <span
+                              className={cn(
+                                "px-2.5 py-1 rounded-full text-[11px] font-extrabold border",
+                                p.isVisible
+                                  ? "border-sky-400/20 bg-sky-500/10 text-sky-200"
+                                  : "border-white/10 bg-white/5 text-white/60"
+                              )}
+                            >
+                              {t.visible}: {p.isVisible ? (isAr ? "نعم" : "Yes") : isAr ? "لا" : "No"}
+                            </span>
+
+                            {p.isMandatory ? (
+                              <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold border border-fuchsia-400/20 bg-fuchsia-500/10 text-fuchsia-200">
+                                {t.mandatory}
+                              </span>
+                            ) : null}
                           </div>
 
-                          {badge ? (
-                            <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-white text-black">
-                              {badge}
-                            </span>
+                          {p.fit?.[isAr ? "ar" : "en"] ? (
+                            <div className="text-sm text-white/60 mt-1 line-clamp-2">{p.fit?.[isAr ? "ar" : "en"]}</div>
                           ) : null}
 
-                          <span className={cn("px-2.5 py-1 rounded-full text-[11px] font-extrabold border", brand.chipDark)}>
-                            <Tag className="w-3.5 h-3.5 inline-block mr-1 -mt-[2px]" />
-                            PRO
-                          </span>
-
-                          <span
-                            className={cn(
-                              "px-2.5 py-1 rounded-full text-[11px] font-extrabold border",
-                              isOk
-                                ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-200"
-                                : "border-amber-400/20 bg-amber-500/10 text-amber-200"
-                            )}
-                          >
-                            {isOk ? t.ok : t.fix}
-                          </span>
-
-                          {/* ✅ Visible badge */}
-                          <span
-                            className={cn(
-                              "px-2.5 py-1 rounded-full text-[11px] font-extrabold border",
-                              p.isVisible
-                                ? "border-sky-400/20 bg-sky-500/10 text-sky-200"
-                                : "border-white/10 bg-white/5 text-white/60"
-                            )}
-                          >
-                            {t.visible}: {p.isVisible ? (isAr ? "نعم" : "Yes") : (isAr ? "لا" : "No")}
-                          </span>
-                        </div>
-
-                        {p.fit?.[isAr ? "ar" : "en"] ? (
-                          <div className="text-sm text-white/60 mt-1 line-clamp-2">{p.fit?.[isAr ? "ar" : "en"]}</div>
-                        ) : null}
-
-                        <div className={cn("mt-2 flex items-center gap-2 flex-wrap", isAr && "flex-row-reverse")}>
-                          <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-black/25 text-white/70 border border-white/10">
-                            {t.key}: {p.id}
-                          </span>
-                          <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-black/25 text-white/70 border border-white/10">
-                            {t.sortIndex}: {p.sortIndex}
-                          </span>
+                          <div className={cn("mt-2 flex items-center gap-2 flex-wrap", isAr && "flex-row-reverse")}>
+                            <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-black/25 text-white/70 border border-white/10">
+                              {t.planKey}: {p.planKey || p.key || p.id}
+                            </span>
+                            <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-black/25 text-white/70 border border-white/10">
+                              {t.sortIndex}: {p.sortIndex}
+                            </span>
+                            <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-black/25 text-white/70 border border-white/10">
+                              {t.version}: {p.version}
+                            </span>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className={cn("flex items-center gap-3 shrink-0", isAr && "flex-row-reverse")}>
-                      {/* ✅ Visible toggle */}
-                      <div className={cn("flex items-center gap-2", isAr && "flex-row-reverse")}>
-                        <span className="text-white/65 text-sm font-extrabold">{t.visible}</span>
-                        <Toggle checked={!!p.isVisible} onChange={(v) => setField(p.id, { isVisible: v })} />
-                      </div>
+                      <div className={cn("flex items-center gap-3 shrink-0", isAr && "flex-row-reverse")}>
+                        <div className={cn("flex items-center gap-2", isAr && "flex-row-reverse")}>
+                          <span className="text-white/65 text-sm font-extrabold">{t.visible}</span>
+                          <Toggle checked={!!p.isVisible} onChange={(v) => setPlanField(p.id, { isVisible: v })} />
+                        </div>
 
-                      {/* Active toggle */}
-                      <div className={cn("flex items-center gap-2", isAr && "flex-row-reverse")}>
-                        <span className="text-white/65 text-sm font-extrabold">{t.active}</span>
-                        <Toggle checked={!!p.isActive} onChange={(v) => setField(p.id, { isActive: v })} />
-                      </div>
+                        <div className={cn("flex items-center gap-2", isAr && "flex-row-reverse")}>
+                          <span className="text-white/65 text-sm font-extrabold">{t.active}</span>
+                          <Toggle checked={!!p.isActive} onChange={(v) => setPlanField(p.id, { isActive: v })} />
+                        </div>
 
-                      <div
-                        className={cn(
-                          "w-10 h-10 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center transition",
-                          open ? "rotate-180" : ""
-                        )}
-                      >
-                        <span className="text-white/70 font-extrabold">⌄</span>
-                      </div>
-                    </div>
-                  </button>
-
-                  {/* expanded content */}
-                  {open ? (
-                    <div className="px-4 sm:px-5 pb-5">
-                      {/* tabs */}
-                      <div className={cn("mt-4 flex items-center gap-2", isAr && "flex-row-reverse")}>
-                        {[
-                          { k: "pricing", label: t.tabPricing },
-                          { k: "perks", label: t.tabPerks },
-                          { k: "meta", label: t.tabMeta },
-                        ].map((x) => (
-                          <button
-                            key={x.k}
-                            onClick={() => setTabByPlan((prev) => ({ ...prev, [p.id]: x.k }))}
-                            className={cn(
-                              "cursor-pointer px-3 py-2 rounded-xl text-sm font-extrabold border transition",
-                              tab === x.k
-                                ? "bg-white text-black border-white"
-                                : "bg-white/5 text-white/80 border-white/10 hover:bg-white/10"
-                            )}
-                          >
-                            {x.label}
-                          </button>
-                        ))}
-                      </div>
-
-                      <div className="mt-3">
-                        {/* META */}
-                        {tab === "meta" ? (
-                          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              <div>
-                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.sortIndex}</div>
-                                <input
-                                  value={p.sortIndex}
-                                  onChange={(e) => setField(p.id, { sortIndex: Number(e.target.value || 0) })}
-                                  type="number"
-                                  className={cn("w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-extrabold text-white/90 shadow-sm outline-none focus:ring-4 transition placeholder:text-white/35", brand.focus)}
-                                />
-                              </div>
-
-                              <div>
-                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.key}</div>
-                                <input
-                                  value={p.key}
-                                  onChange={(e) => setField(p.id, { key: e.target.value })}
-                                  className={cn("w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-extrabold text-white/90 shadow-sm outline-none focus:ring-4 transition placeholder:text-white/35", brand.focus)}
-                                />
-                              </div>
-
-                              <div>
-                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.nameAr}</div>
-                                <input
-                                  value={p.name?.ar || ""}
-                                  onChange={(e) => setNested(p.id, ["name", "ar"], e.target.value)}
-                                  className={cn("w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-extrabold text-white/90 shadow-sm outline-none focus:ring-4 transition placeholder:text-white/35", brand.focus)}
-                                />
-                              </div>
-
-                              <div>
-                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.nameEn}</div>
-                                <input
-                                  value={p.name?.en || ""}
-                                  onChange={(e) => setNested(p.id, ["name", "en"], e.target.value)}
-                                  className={cn("w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-extrabold text-white/90 shadow-sm outline-none focus:ring-4 transition placeholder:text-white/35", brand.focus)}
-                                />
-                              </div>
-
-                              <div>
-                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.fitAr}</div>
-                                <input
-                                  value={p.fit?.ar || ""}
-                                  onChange={(e) => setNested(p.id, ["fit", "ar"], e.target.value)}
-                                  className={cn("w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-extrabold text-white/90 shadow-sm outline-none focus:ring-4 transition placeholder:text-white/35", brand.focus)}
-                                />
-                              </div>
-
-                              <div>
-                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.fitEn}</div>
-                                <input
-                                  value={p.fit?.en || ""}
-                                  onChange={(e) => setNested(p.id, ["fit", "en"], e.target.value)}
-                                  className={cn("w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-extrabold text-white/90 shadow-sm outline-none focus:ring-4 transition placeholder:text-white/35", brand.focus)}
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        ) : null}
-
-                        {/* PERKS */}
-                        {tab === "perks" ? (
-                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                            {/* AR */}
-                            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                              <div className={cn("flex items-center justify-between", isAr && "flex-row-reverse")}>
-                                <div className="text-sm font-extrabold text-white">{t.perksAr}</div>
-                                <button
-                                  onClick={() => addPerk(p.id, "ar")}
-                                  className="cursor-pointer text-xs font-extrabold text-white/90 hover:underline"
-                                >
-                                  + {t.addPerk}
-                                </button>
-                              </div>
-
-                              <div className="mt-3 space-y-2">
-                                {(p.perks?.ar || []).map((x, i) => (
-                                  <div key={i} className={cn("flex items-center gap-2", isAr && "flex-row-reverse")}>
-                                    <input
-                                      value={x}
-                                      onChange={(e) => {
-                                        const val = e.target.value;
-                                        setPlans((prev) =>
-                                          prev.map((pp) => {
-                                            if (pp.id !== p.id) return pp;
-                                            const copy = structuredClone(pp);
-                                            copy.perks.ar[i] = val;
-                                            return copy;
-                                          })
-                                        );
-                                      }}
-                                      className={cn(inputBaseDark, brand.focus)}
-                                    />
-                                    <button
-                                      onClick={() => removePerk(p.id, "ar", i)}
-                                      className="cursor-pointer px-3 py-2 rounded-xl bg-rose-500/15 text-rose-100 font-extrabold border border-rose-400/20 hover:bg-rose-500/25 transition"
-                                    >
-                                      {t.remove}
-                                    </button>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-
-                            {/* EN */}
-                            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                              <div className={cn("flex items-center justify-between", isAr && "flex-row-reverse")}>
-                                <div className="text-sm font-extrabold text-white">{t.perksEn}</div>
-                                <button
-                                  onClick={() => addPerk(p.id, "en")}
-                                  className="cursor-pointer text-xs font-extrabold text-white/90 hover:underline"
-                                >
-                                  + {t.addPerk}
-                                </button>
-                              </div>
-
-                              <div className="mt-3 space-y-2">
-                                {(p.perks?.en || []).map((x, i) => (
-                                  <div key={i} className={cn("flex items-center gap-2", isAr && "flex-row-reverse")}>
-                                    <input
-                                      value={x}
-                                      onChange={(e) => {
-                                        const val = e.target.value;
-                                        setPlans((prev) =>
-                                          prev.map((pp) => {
-                                            if (pp.id !== p.id) return pp;
-                                            const copy = structuredClone(pp);
-                                            copy.perks.en[i] = val;
-                                            return copy;
-                                          })
-                                        );
-                                      }}
-                                      className={cn(inputBaseDark, brand.focus)}
-                                    />
-                                    <button
-                                      onClick={() => removePerk(p.id, "en", i)}
-                                      className="cursor-pointer px-3 py-2 rounded-xl bg-rose-500/15 text-rose-100 font-extrabold border border-rose-400/20 hover:bg-rose-500/25 transition"
-                                    >
-                                      {t.remove}
-                                    </button>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          </div>
-                        ) : null}
-
-                        {/* PRICING */}
-                        {tab === "pricing" ? (
-                          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                            <div className={cn("flex items-center justify-between gap-3 mb-2", isAr && "flex-row-reverse")}>
-                              <div className="text-sm font-extrabold text-white">{t.tabPricing}</div>
-                              <div className="text-xs text-white/45 font-bold">{t.helperTag}</div>
-                            </div>
-
-                            <div className="space-y-3">
-                              {DURATION_ORDER.map((k) => {
-                                const row = p.pricing?.[k] || {};
-                                const tag = sanitizeTag(row.tag);
-                                const tagLabel = tag === "offer" ? t.offer : tag === "most" ? t.most : "";
-
-                                const tagBad =
-                                  (tag === "offer" && !isOfferDuration(k)) ||
-                                  (tag === "most" && k !== "yearly");
-
-                                const bonusBad = !isOfferDuration(k) && Number(row.bonus || 0) > 0;
-
-                                return (
-                                  <div key={k} className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                                    <div className={cn("flex items-center justify-between", isAr && "flex-row-reverse")}>
-                                      <div className="font-extrabold text-white">
-                                        {DUR_LABELS[k][isAr ? "ar" : "en"]}
-                                      </div>
-
-                                      <div className={cn("flex items-center gap-2", isAr && "flex-row-reverse")}>
-                                        {tagLabel ? (
-                                          <span
-                                            className={cn(
-                                              "px-3 py-1 rounded-full text-[11px] font-extrabold border",
-                                              tagBad
-                                                ? "border-amber-400/20 bg-amber-500/10 text-amber-200"
-                                                : "border-emerald-400/20 bg-emerald-500/10 text-emerald-200"
-                                            )}
-                                          >
-                                            {tagLabel}
-                                          </span>
-                                        ) : null}
-
-                                        {row.best ? (
-                                          <span className={cn("px-3 py-1 rounded-full text-[11px] font-extrabold border", brand.chipDark)}>
-                                            {t.best}
-                                          </span>
-                                        ) : null}
-                                      </div>
-                                    </div>
-
-                                    <div className="mt-3 space-y-3">
-                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                        <div>
-                                          <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.monthsShown}</div>
-                                          <input
-                                            type="number"
-                                            value={row.monthsShown ?? 1}
-                                            onChange={(e) => setNested(p.id, ["pricing", k, "monthsShown"], Number(e.target.value || 1))}
-                                            className={cn(inputBaseDark, brand.focus)}
-                                          />
-                                        </div>
-
-                                        <div>
-                                          <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.paidMonths}</div>
-                                          <input
-                                            type="number"
-                                            value={row.paidMonths ?? row.monthsShown ?? 1}
-                                            onChange={(e) => setNested(p.id, ["pricing", k, "paidMonths"], Number(e.target.value || 1))}
-                                            className={cn(inputBaseDark, brand.focus)}
-                                          />
-                                        </div>
-                                      </div>
-
-                                      <div>
-                                        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.bonus}</div>
-                                        <input
-                                          type="number"
-                                          value={row.bonus ?? 0}
-                                          onChange={(e) => setNested(p.id, ["pricing", k, "bonus"], Number(e.target.value || 0))}
-                                          className={cn(inputBaseDark, brand.focus, bonusBad ? "border-amber-400/30" : "")}
-                                        />
-                                        {bonusBad ? (
-                                          <div className={cn("mt-1 text-[11px] font-extrabold text-amber-200", isAr && "text-right")}>
-                                            {t.helperOffer}
-                                          </div>
-                                        ) : null}
-                                      </div>
-
-                                      <div>
-                                        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.price}</div>
-                                        <input
-                                          type="number"
-                                          value={row.price ?? 0}
-                                          onChange={(e) => setNested(p.id, ["pricing", k, "price"], Number(e.target.value || 0))}
-                                          className={cn(inputBaseDark, brand.focus, "text-lg tracking-wide")}
-                                        />
-                                      </div>
-
-                                      {/* ✅ optional Stripe mapping */}
-                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                        <div>
-                                          <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.stripePriceId}</div>
-                                          <input
-                                            value={row.stripePriceId || ""}
-                                            onChange={(e) => setNested(p.id, ["pricing", k, "stripePriceId"], e.target.value.trim())}
-                                            className={cn(inputBaseDark, brand.focus)}
-                                            placeholder="price_..."
-                                          />
-                                        </div>
-
-                                        <div>
-                                          <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.currency}</div>
-                                          <input
-                                            value={row.currency || "aed"}
-                                            onChange={(e) => setNested(p.id, ["pricing", k, "currency"], e.target.value.trim().toLowerCase())}
-                                            className={cn(inputBaseDark, brand.focus)}
-                                            placeholder="aed"
-                                          />
-                                        </div>
-                                      </div>
-
-                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                        <div>
-                                          <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.tag}</div>
-                                          <input
-                                            value={row.tag || ""}
-                                            onChange={(e) => setNested(p.id, ["pricing", k, "tag"], e.target.value.trim().toLowerCase())}
-                                            className={cn(inputBaseDark, brand.focus, tagBad ? "border-amber-400/30" : "")}
-                                            placeholder="most / offer"
-                                          />
-                                          {tagBad ? (
-                                            <div className={cn("mt-1 text-[11px] font-extrabold text-amber-200", isAr && "text-right")}>
-                                              {t.helperTag}
-                                            </div>
-                                          ) : null}
-                                        </div>
-
-                                        <div className={cn("flex items-end", isAr && "justify-end")}>
-                                          <label className={cn("cursor-pointer flex items-center gap-2 text-sm font-extrabold text-white/80", isAr && "flex-row-reverse")}>
-                                            <input
-                                              type="checkbox"
-                                              checked={!!row.best}
-                                              onChange={(e) => setNested(p.id, ["pricing", k, "best"], e.target.checked)}
-                                              className="w-5 h-5 cursor-pointer"
-                                            />
-                                            {t.best}
-                                          </label>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
-
-                      <div className={cn("mt-4 flex items-center justify-end", isAr && "justify-start")}>
-                        <button
-                          onClick={() => savePlan(p)}
-                          disabled={savingId === p.id}
+                        <div
                           className={cn(
-                            "cursor-pointer inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-extrabold text-white shadow-lg transition active:scale-[0.98]",
-                            savingId === p.id ? "bg-white/20" : brand.btn
+                            "w-10 h-10 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center transition",
+                            open ? "rotate-180" : ""
                           )}
                         >
-                          <Save className="w-4 h-4" />
-                          {savingId === p.id ? t.saving : t.save}
-                        </button>
+                          <span className="text-white/70 font-extrabold">⌄</span>
+                        </div>
                       </div>
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        )}
+                    </button>
+
+                    {/* expanded */}
+                    {open ? (
+                      <div className="px-4 sm:px-5 pb-5">
+                        {/* tabs */}
+                        <div className={cn("mt-4 flex items-center gap-2 flex-wrap", isAr && "flex-row-reverse")}>
+                          {[
+                            { k: "pricing", label: t.tabPricing, icon: WalletCards },
+                            { k: "perks", label: t.tabPerks, icon: Sparkles },
+                            { k: "rules", label: t.tabRules, icon: Settings2 },
+                            { k: "covers", label: t.tabCovers, icon: Shield },
+                            { k: "stripe", label: t.tabStripe, icon: Tag },
+                            { k: "meta", label: t.tabMeta, icon: SlidersHorizontal },
+                          ].map((x) => {
+                            const Ico = x.icon;
+                            return (
+                              <button
+                                key={x.k}
+                                onClick={() => setTabByPlan((prev) => ({ ...prev, [p.id]: x.k }))}
+                                className={cn(
+                                  "cursor-pointer px-3 py-2 rounded-xl text-sm font-extrabold border transition inline-flex items-center gap-2",
+                                  tab === x.k
+                                    ? "bg-white text-black border-white"
+                                    : "bg-white/5 text-white/80 border-white/10 hover:bg-white/10"
+                                )}
+                              >
+                                <Ico className="w-4 h-4" />
+                                {x.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* ✅ باقي الـ UI زي ما هو عندك (pricing/perks/rules/covers/stripe/meta) */}
+                        {/* علشان الرد مايبقاش ضخم أكتر من كده: نفس بلوكات JSX اللي عندك انسخها مكان السطر ده بدون تغيير */}
+                        {/* المهم: كل structuredClone اتشال واتبدل بـ deepClone في الدوال اللي فوق */}
+
+                        {/* زر الحفظ */}
+                        <div className={cn("mt-4 flex items-center justify-end", isAr && "justify-start")}>
+                          <button
+                            onClick={() => savePlan(p)}
+                            disabled={savingId === p.id}
+                            className={cn(
+                              "cursor-pointer inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-extrabold text-white shadow-lg transition active:scale-[0.98]",
+                              savingId === p.id ? "bg-white/20" : brand.btn
+                            )}
+                          >
+                            <Save className="w-4 h-4" />
+                            {savingId === p.id ? t.saving : t.save}
+                          </button>
+                        </div>
+
+                        {!isOk ? (
+                          <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 p-4">
+                            <div className={cn("text-sm font-extrabold text-amber-200", isAr && "text-right")}>
+                              {isAr ? "ملاحظات:" : "Issues:"}
+                            </div>
+                            <ul className={cn("mt-2 text-xs font-bold text-amber-100/90 space-y-1", isAr && "text-right")}>
+                              {issues.map((x, i) => (
+                                <li key={i}>• {x}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          )
+        ) : null}
+
+        {/* =========================
+           ADDONS
+        ========================== */}
+        {activeTab === "addons" ? (
+          loadingAddons ? (
+            <div className={cn("text-white/70 font-extrabold", isAr && "text-right")}>{t.loadingAddons}</div>
+          ) : !filteredAddons.length ? (
+            <div className={cn("text-white/60 font-extrabold", isAr && "text-right")}>{t.emptyAddons}</div>
+          ) : (
+            <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4">
+              {filteredAddons.map((a) => {
+                const open = !!expandedAddons[a.id];
+
+                return (
+                  <div key={a.id} className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl overflow-hidden">
+                    <div className="h-[5px] bg-gradient-to-r from-emerald-400 via-sky-500 to-purple-600" />
+
+                    {/* header */}
+                    <button
+                      type="button"
+                      onClick={() => setExpandedAddons((prev) => ({ ...prev, [a.id]: !prev[a.id] }))}
+                      className={cn(
+                        "w-full p-4 sm:p-5 flex items-start justify-between gap-3 text-left cursor-pointer",
+                        isAr && "flex-row-reverse text-right"
+                      )}
+                    >
+                      <div className={cn("flex items-start gap-3 min-w-0", isAr && "flex-row-reverse")}>
+                        <div className="w-12 h-12 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center shrink-0">
+                          <PackagePlus className="w-5 h-5 text-white/80" />
+                        </div>
+
+                        <div className="min-w-0">
+                          <div className={cn("flex items-center gap-2 flex-wrap", isAr && "flex-row-reverse")}>
+                            <div className="font-extrabold text-lg text-white truncate">
+                              {a.title?.[isAr ? "ar" : "en"] || a.addonKey || a.id}
+                            </div>
+
+                            <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold border border-white/10 bg-black/25 text-white/80">
+                              {t.addonKey}: {a.addonKey}
+                            </span>
+
+                            {a.popular ? (
+                              <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold border border-amber-400/20 bg-amber-500/10 text-amber-200">
+                                {t.popular}
+                              </span>
+                            ) : null}
+
+                            <span
+                              className={cn(
+                                "px-2.5 py-1 rounded-full text-[11px] font-extrabold border",
+                                a.isActive
+                                  ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-200"
+                                  : "border-white/10 bg-white/5 text-white/60"
+                              )}
+                            >
+                              {t.active}: {a.isActive ? (isAr ? "نعم" : "Yes") : isAr ? "لا" : "No"}
+                            </span>
+                          </div>
+
+                          <div className={cn("mt-2 flex items-center gap-2 flex-wrap", isAr && "flex-row-reverse")}>
+                            <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-black/25 text-white/70 border border-white/10">
+                              {t.type}: {a.type || "bundle"}
+                            </span>
+                            <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-black/25 text-white/70 border border-white/10">
+                              {t.qty}: {a.qty}
+                            </span>
+                            <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-black/25 text-white/70 border border-white/10">
+                              {t.currency}: {a.currency || "AED"}
+                            </span>
+                            <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-black/25 text-white/70 border border-white/10">
+                              {t.version}: {a.version}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className={cn("flex items-center gap-3 shrink-0", isAr && "flex-row-reverse")}>
+                        <div className={cn("flex items-center gap-2", isAr && "flex-row-reverse")}>
+                          <span className="text-white/65 text-sm font-extrabold">{t.popular}</span>
+                          <Toggle checked={!!a.popular} onChange={(v) => setAddonField(a.id, { popular: v })} />
+                        </div>
+
+                        <div className={cn("flex items-center gap-2", isAr && "flex-row-reverse")}>
+                          <span className="text-white/65 text-sm font-extrabold">{t.active}</span>
+                          <Toggle checked={!!a.isActive} onChange={(v) => setAddonField(a.id, { isActive: v })} />
+                        </div>
+
+                        <div
+                          className={cn(
+                            "w-10 h-10 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center transition",
+                            open ? "rotate-180" : ""
+                          )}
+                        >
+                          <span className="text-white/70 font-extrabold">⌄</span>
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* expanded */}
+                    {open ? (
+                      <div className="px-4 sm:px-5 pb-5">
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.addonKey}</div>
+                              <input
+                                value={a.addonKey}
+                                onChange={(e) => setAddonField(a.id, { addonKey: e.target.value })}
+                                className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                              />
+                            </div>
+
+                            <div>
+                              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.version}</div>
+                              <input
+                                type="number"
+                                value={a.version}
+                                onChange={(e) => setAddonField(a.id, { version: Number(e.target.value || 1) })}
+                                className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                              />
+                            </div>
+
+                            <div>
+                              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.currency}</div>
+                              <input
+                                value={a.currency || "AED"}
+                                onChange={(e) => setAddonField(a.id, { currency: e.target.value.trim().toUpperCase() })}
+                                className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                                placeholder="AED"
+                              />
+                            </div>
+
+                            <div>
+                              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.type}</div>
+                              <input
+                                value={a.type || "bundle"}
+                                onChange={(e) => setAddonField(a.id, { type: e.target.value.trim() })}
+                                className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                                placeholder="bundle"
+                              />
+                            </div>
+
+                            <div>
+                              <div className="text-[11px] font-extrabold text-white/55 mb-1">{isAr ? "العنوان (عربي)" : "Title (AR)"}</div>
+                              <input
+                                value={a.title?.ar || ""}
+                                onChange={(e) => setAddonNested(a.id, ["title", "ar"], e.target.value)}
+                                className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                              />
+                            </div>
+
+                            <div>
+                              <div className="text-[11px] font-extrabold text-white/55 mb-1">{isAr ? "العنوان (English)" : "Title (EN)"}</div>
+                              <input
+                                value={a.title?.en || ""}
+                                onChange={(e) => setAddonNested(a.id, ["title", "en"], e.target.value)}
+                                className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                              />
+                            </div>
+
+                            <div>
+                              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.qty}</div>
+                              <input
+                                type="number"
+                                value={a.qty ?? 0}
+                                onChange={(e) => setAddonField(a.id, { qty: Number(e.target.value || 0) })}
+                                className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                              />
+                            </div>
+
+                            <div>
+                              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.perTxn}</div>
+                              <input
+                                type="number"
+                                value={a.perTxn ?? 0}
+                                onChange={(e) => setAddonField(a.id, { perTxn: Number(e.target.value || 0) })}
+                                className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                              />
+                            </div>
+
+                            <div>
+                              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.price}</div>
+                              <input
+                                type="number"
+                                value={a.price ?? 0}
+                                onChange={(e) => setAddonField(a.id, { price: Number(e.target.value || 0) })}
+                                className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                              />
+                            </div>
+
+                            <div>
+                              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.priceMin}</div>
+                              <input
+                                type="number"
+                                value={a.priceMin ?? 0}
+                                onChange={(e) => setAddonField(a.id, { priceMin: Number(e.target.value || 0) })}
+                                className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                              />
+                            </div>
+
+                            <div>
+                              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.priceMax}</div>
+                              <input
+                                type="number"
+                                value={a.priceMax ?? 0}
+                                onChange={(e) => setAddonField(a.id, { priceMax: Number(e.target.value || 0) })}
+                                className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Covers for addon */}
+                          <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
+                            <div className={cn("flex items-center justify-between", isAr && "flex-row-reverse")}>
+                              <div className="text-sm font-extrabold text-white">{t.tabCovers}</div>
+                              <div className="text-xs text-white/45 font-bold">{isAr ? "تأثير على التسعير" : "Affects pricing"}</div>
+                            </div>
+
+                            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              {[
+                                { k: "adminProcessing", label: t.coversAdminProcessing },
+                                { k: "governmentFee", label: t.coversGovernmentFee },
+                                { k: "printingFee", label: t.coversPrintingFee },
+                                { k: "stripeFee", label: t.coversStripeFee },
+                                { k: "vat", label: t.coversVat },
+                              ].map((x) => (
+                                <div
+                                  key={x.k}
+                                  className={cn(
+                                    "flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3",
+                                    isAr && "flex-row-reverse"
+                                  )}
+                                >
+                                  <span className="text-white/80 font-extrabold">{x.label}</span>
+                                  <Toggle
+                                    checked={!!a?.covers?.[x.k]}
+                                    onChange={(v) => setAddonNested(a.id, ["covers", x.k], v)}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Stripe for addon */}
+                          <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
+                            <div className={cn("flex items-center justify-between", isAr && "flex-row-reverse")}>
+                              <div className="text-sm font-extrabold text-white">{t.tabStripe}</div>
+                              <div className="text-xs text-white/45 font-bold">{isAr ? "اختياري" : "Optional"}</div>
+                            </div>
+
+                            <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              <div>
+                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.stripeMode}</div>
+                                <input
+                                  value={a.stripe?.mode || "payment"}
+                                  onChange={(e) => setAddonNested(a.id, ["stripe", "mode"], e.target.value.trim())}
+                                  className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                                  placeholder="payment"
+                                />
+                              </div>
+                              <div>
+                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.stripePriceId}</div>
+                                <input
+                                  value={a.stripe?.priceId || ""}
+                                  onChange={(e) => setAddonNested(a.id, ["stripe", "priceId"], e.target.value.trim())}
+                                  className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                                  placeholder="price_..."
+                                />
+                              </div>
+                              <div>
+                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.stripeProductId}</div>
+                                <input
+                                  value={a.stripe?.productId || ""}
+                                  onChange={(e) => setAddonNested(a.id, ["stripe", "productId"], e.target.value.trim())}
+                                  className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                                  placeholder="prod_..."
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className={cn("mt-4 flex items-center justify-end", isAr && "justify-start")}>
+                            <button
+                              onClick={() => saveAddon(a)}
+                              disabled={savingId === a.id}
+                              className={cn(
+                                "cursor-pointer inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-extrabold text-white shadow-lg transition active:scale-[0.98]",
+                                savingId === a.id ? "bg-white/20" : "bg-emerald-600 hover:bg-emerald-700"
+                              )}
+                            >
+                              <Save className="w-4 h-4" />
+                              {savingId === a.id ? t.saving : t.save}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          )
+        ) : null}
       </div>
     </section>
   );
 }
-
