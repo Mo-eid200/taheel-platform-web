@@ -1,7 +1,15 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { collection, doc, serverTimestamp, setDoc, deleteDoc, onSnapshot, query as fsQuery } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  serverTimestamp,
+  setDoc,
+  deleteDoc,
+  onSnapshot,
+  query as fsQuery,
+} from "firebase/firestore";
 import { firestore } from "@/lib/firebase.client";
 import {
   Zap,
@@ -33,9 +41,11 @@ const safeNum = (v, fallback = 0) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 };
-const safeStr = (v, fallback = "") => (typeof v === "string" ? v : v == null ? fallback : String(v));
+const safeStr = (v, fallback = "") =>
+  typeof v === "string" ? v : v == null ? fallback : String(v);
 const safeBool = (v, fallback = false) => (typeof v === "boolean" ? v : fallback);
-const uniq = (arr) => Array.from(new Set((arr || []).filter(Boolean).map((x) => String(x).trim())));
+const uniq = (arr) =>
+  Array.from(new Set((arr || []).filter(Boolean).map((x) => String(x).trim())));
 
 // ✅ safe clone بدل structuredClone
 const deepClone = (obj) => {
@@ -53,9 +63,16 @@ const PLANS_COL = "companySubscriptionPlans";
 const ADDONS_COL = "companyAddonsCatalog";
 
 /* =========================================
-   Pricing Durations
+   Plans / Durations (حسب نظامك)
+   - Starter: سنوي فقط
+   - Growth/Scale/Enterprise: نصف سنوي + سنوي (+ contract كخيار فوتره لو محتاج)
+   - في الـ DB قد يكون موجود monthly/quarterly لكن إحنا هنخفيهم/نصفرهم عند الحفظ
 ========================================= */
-const DURATION_ORDER = ["monthly", "quarterly", "semiannual", "yearly"];
+const TIER_ORDER = ["starter", "growth", "scale", "enterprise"];
+
+// هنخلي الكود قادر يقرأ أي بيانات قديمة (monthly/quarterly) لكن UI تركّز على semiannual/yearly
+const DURATIONS_ALL = ["monthly", "quarterly", "semiannual", "yearly"];
+const DURATIONS_UI = ["semiannual", "yearly"];
 
 const DUR_LABELS = {
   monthly: { ar: "شهري", en: "Monthly" },
@@ -64,10 +81,11 @@ const DUR_LABELS = {
   yearly: { ar: "سنوي", en: "Yearly" },
 };
 
+// العروض/البونص مسموح فقط في: نصف سنوي + سنوي
 const isOfferDuration = (k) => k === "semiannual" || k === "yearly";
 
 /* =========================================
-   Brands (Admin theme)
+   Brands (الهويات البصرية)
 ========================================= */
 const BRAND = {
   starter: {
@@ -113,7 +131,10 @@ const BRAND = {
 ========================================= */
 const uiText = (lang) => ({
   pageTitle: lang === "ar" ? "إدارة الباقات والإضافات" : "Plans & Add-ons Manager",
-  pageSub: lang === "ar" ? "تحكم كامل في باقات الشركات و Add-ons (Live)" : "Manage company plans and add-ons (Live)",
+  pageSub:
+    lang === "ar"
+      ? "تحكم كامل في باقات الشركات و Add-ons (Live)"
+      : "Manage company plans and add-ons (Live)",
 
   tabPlans: lang === "ar" ? "الباقات" : "Plans",
   tabAddons: lang === "ar" ? "الإضافات" : "Add-ons",
@@ -201,6 +222,35 @@ const uiText = (lang) => ({
 });
 
 /* =========================================
+   Rules: Billing periods per tier
+========================================= */
+function defaultAllowedBillingPeriodsForTier(tier) {
+  // حسب كلامك:
+  // - Starter: سنوي فقط
+  // - الباقي: نصف سنوي + سنوي (+ contract موجود في بياناتك)
+  if (tier === "starter") return ["yearly"];
+  return ["semiannual", "yearly", "contract"];
+}
+
+function allowedDurationsForPlan(plan) {
+  // allowedBillingPeriods في DB قيمها: semiannual/yearly/contract
+  // إحنا هنربط الفترات بـ durations
+  const abp = uniq(plan?.allowedBillingPeriods || []);
+  const out = [];
+  if (abp.includes("semiannual")) out.push("semiannual");
+  if (abp.includes("yearly")) out.push("yearly");
+  // contract ليس duration تسعير داخل pricing map عندك، فنتجاهله في pricing UI
+  return out.length ? out : ["yearly"];
+}
+
+function monthsByDuration(dur) {
+  if (dur === "monthly") return 1;
+  if (dur === "quarterly") return 3;
+  if (dur === "semiannual") return 6;
+  return 12;
+}
+
+/* =========================================
    Normalizers
 ========================================= */
 function normalizePlanDoc(id, data) {
@@ -209,13 +259,20 @@ function normalizePlanDoc(id, data) {
   const perks = d.perks || { ar: [], en: [] };
 
   const normalizedPricing = {};
-  for (const k of DURATION_ORDER) {
+
+  // نضمن وجود مفاتيح pricing الأربعة (لو موجودة قديمة) للحفظ الآمن
+  for (const k of DURATIONS_ALL) {
     const v = pricing[k] || {};
-    const monthsShown = safeNum(v.monthsShown, 1) || 1;
+    const defaultMonths = monthsByDuration(k);
+
+    const monthsShown = safeNum(v.monthsShown, defaultMonths) || defaultMonths;
     const paidMonths = safeNum(v.paidMonths, monthsShown) || monthsShown;
 
     normalizedPricing[k] = {
-      title: { ar: safeStr(v?.title?.ar), en: safeStr(v?.title?.en) },
+      title: {
+        ar: safeStr(v?.title?.ar, DUR_LABELS[k]?.ar || ""),
+        en: safeStr(v?.title?.en, DUR_LABELS[k]?.en || ""),
+      },
       monthsShown,
       paidMonths,
       bonus: safeNum(v.bonus, 0),
@@ -231,11 +288,21 @@ function normalizePlanDoc(id, data) {
     };
   }
 
+  // tier ثابت: starter/growth/scale/enterprise
+  const rawTier = safeStr(d.tier, safeStr(d.planKey, safeStr(d.key, "starter")));
+  const tier = TIER_ORDER.includes(rawTier) ? rawTier : "starter";
+
+  const allowedBillingPeriods = uniq(
+    Array.isArray(d.allowedBillingPeriods) && d.allowedBillingPeriods.length
+      ? d.allowedBillingPeriods
+      : defaultAllowedBillingPeriodsForTier(tier)
+  );
+
   return {
     id,
     key: safeStr(d.key, id),
     planKey: safeStr(d.planKey, safeStr(d.key, id)),
-    tier: safeStr(d.tier, safeStr(d.planKey, "starter")),
+    tier,
 
     isActive: safeBool(d.isActive, true),
     isVisible: safeBool(d.isVisible, true),
@@ -262,9 +329,7 @@ function normalizePlanDoc(id, data) {
     },
 
     allowEntitiesOutsidePlan: safeBool(d.allowEntitiesOutsidePlan, true),
-    allowedBillingPeriods: uniq(
-      Array.isArray(d.allowedBillingPeriods) ? d.allowedBillingPeriods : ["semiannual", "yearly", "contract"]
-    ),
+    allowedBillingPeriods,
     includedEntities: uniq(Array.isArray(d.includedEntities) ? d.includedEntities : ["all"]),
     monthlyIncludedTxLimit: safeNum(d.monthlyIncludedTxLimit, 0),
 
@@ -334,7 +399,11 @@ function SafeToast({ toast, isAr }) {
         isAr && "flex-row-reverse"
       )}
     >
-      {toast.type === "ok" ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+      {toast.type === "ok" ? (
+        <CheckCircle2 className="w-4 h-4" />
+      ) : (
+        <AlertTriangle className="w-4 h-4" />
+      )}
       {toast.msg}
     </div>
   );
@@ -367,7 +436,6 @@ function Toggle({ checked, onChange }) {
   );
 }
 
-
 /* =========================================
    Main Component
 ========================================= */
@@ -396,44 +464,53 @@ export default function PlansAndAddonsManager({ lang = "ar" }) {
   /* ---------------------------
      Load Plans + Addons
   ---------------------------- */
-useEffect(() => {
-  const qPlans = fsQuery(collection(firestore, PLANS_COL));
-  const unsubPlans = onSnapshot(
-    qPlans,
-    (snap) => {
-      const rows = snap.docs.map((x) => normalizePlanDoc(x.id, x.data()));
-      rows.sort((a, b) => a.sortIndex - b.sortIndex || String(a.key).localeCompare(String(b.key)));
-      setPlans(rows);
-      setLoadingPlans(false);
-    },
-    (err) => {
-      console.error("Plans snapshot error:", err);
-      setPlans([]);
-      setLoadingPlans(false);
-    }
-  );
+  useEffect(() => {
+    const qPlans = fsQuery(collection(firestore, PLANS_COL));
+    const unsubPlans = onSnapshot(
+      qPlans,
+      (snap) => {
+        const rows = snap.docs.map((x) => normalizePlanDoc(x.id, x.data()));
+        // ترتيب حسب sortIndex ثم ترتيب tiers ثم key
+        rows.sort((a, b) => {
+          const sa = safeNum(a.sortIndex, 0);
+          const sb = safeNum(b.sortIndex, 0);
+          if (sa !== sb) return sa - sb;
+          const ta = TIER_ORDER.indexOf(a.tier);
+          const tb = TIER_ORDER.indexOf(b.tier);
+          if (ta !== tb) return ta - tb;
+          return String(a.key).localeCompare(String(b.key));
+        });
+        setPlans(rows);
+        setLoadingPlans(false);
+      },
+      (err) => {
+        console.error("Plans snapshot error:", err);
+        setPlans([]);
+        setLoadingPlans(false);
+      }
+    );
 
-  const qAddons = fsQuery(collection(firestore, ADDONS_COL));
-  const unsubAddons = onSnapshot(
-    qAddons,
-    (snap) => {
-      const rows = snap.docs.map((x) => normalizeAddonDoc(x.id, x.data()));
-      rows.sort((a, b) => String(a.addonKey).localeCompare(String(b.addonKey)));
-      setAddons(rows);
-      setLoadingAddons(false);
-    },
-    (err) => {
-      console.error("Addons snapshot error:", err);
-      setAddons([]);
-      setLoadingAddons(false);
-    }
-  );
+    const qAddons = fsQuery(collection(firestore, ADDONS_COL));
+    const unsubAddons = onSnapshot(
+      qAddons,
+      (snap) => {
+        const rows = snap.docs.map((x) => normalizeAddonDoc(x.id, x.data()));
+        rows.sort((a, b) => String(a.addonKey).localeCompare(String(b.addonKey)));
+        setAddons(rows);
+        setLoadingAddons(false);
+      },
+      (err) => {
+        console.error("Addons snapshot error:", err);
+        setAddons([]);
+        setLoadingAddons(false);
+      }
+    );
 
-  return () => {
-    unsubPlans();
-    unsubAddons();
-  };
-}, []);
+    return () => {
+      unsubPlans();
+      unsubAddons();
+    };
+  }, []);
 
   /* ---------------------------
      Setters (immutable)
@@ -519,24 +596,50 @@ useEffect(() => {
 
   const validatePlan = (plan) => {
     const issues = [];
-    for (const dur of DURATION_ORDER) {
+
+    // تحقق من allowed billing periods حسب tier
+    const abp = uniq(plan.allowedBillingPeriods || []);
+    if (plan.tier === "starter") {
+      if (!abp.includes("yearly") || abp.includes("semiannual")) {
+        issues.push("starter: allowedBillingPeriods يجب أن تكون yearly فقط");
+      }
+    } else {
+      if (!abp.includes("semiannual") || !abp.includes("yearly")) {
+        issues.push(`${plan.tier}: allowedBillingPeriods يجب أن تحتوي semiannual + yearly`);
+      }
+    }
+
+    // تحقق من التسعير حسب الفترات المسموح بها
+    const allowedDur = allowedDurationsForPlan(plan);
+    for (const dur of DURATIONS_UI) {
       const v = plan.pricing?.[dur] || {};
-      const monthsShown = safeNum(v.monthsShown, 1);
+      const monthsShown = safeNum(v.monthsShown, monthsByDuration(dur));
       const paidMonths = safeNum(v.paidMonths, monthsShown);
       const bonus = safeNum(v.bonus, 0);
       const tag = sanitizeTag(v.tag);
 
-      if (monthsShown <= 0) issues.push(`${dur}: monthsShown <= 0`);
-      if (paidMonths <= 0) issues.push(`${dur}: paidMonths <= 0`);
-      if (bonus < 0) issues.push(`${dur}: bonus < 0`);
+      if (allowedDur.includes(dur)) {
+        if (monthsShown <= 0) issues.push(`${dur}: monthsShown <= 0`);
+        if (paidMonths <= 0) issues.push(`${dur}: paidMonths <= 0`);
+        if (bonus < 0) issues.push(`${dur}: bonus < 0`);
 
-      if ((tag === "offer" || bonus > 0) && !isOfferDuration(dur)) {
-        issues.push(`${dur}: offer/bonus not allowed (only semiannual/yearly)`);
-      }
-      if (tag === "most" && dur !== "yearly") {
-        issues.push(`${dur}: tag 'most' should be yearly`);
+        if ((tag === "offer" || bonus > 0) && !isOfferDuration(dur)) {
+          issues.push(`${dur}: offer/bonus not allowed (only semiannual/yearly)`);
+        }
+        if (tag === "most" && dur !== "yearly") {
+          issues.push(`${dur}: tag 'most' should be yearly`);
+        }
+      } else {
+        // غير مسموح: لازم ما يكونش فيه سعر/بونص/تاج
+        if (safeNum(v.price, 0) > 0) issues.push(`${dur}: غير مسموح لهذه الخطة (price>0)`);
+        if (safeNum(v.bonus, 0) > 0) issues.push(`${dur}: غير مسموح لهذه الخطة (bonus>0)`);
+        if (String(v.tag || "").trim()) issues.push(`${dur}: غير مسموح لهذه الخطة (tag)`);
       }
     }
+
+    // afterLimit required
+    if (!plan.afterLimit || typeof plan.afterLimit !== "object") issues.push("afterLimit: missing");
+
     return issues;
   };
 
@@ -548,26 +651,50 @@ useEffect(() => {
       setSavingId(plan.id);
       setToast(null);
 
+      const allowedDur = allowedDurationsForPlan(plan);
+
+      // Build pricing output (يحافظ على مفاتيح pricing الأربعة)
       const pricingOut = Object.fromEntries(
-        DURATION_ORDER.map((k) => {
+        DURATIONS_ALL.map((k) => {
           const v = plan.pricing?.[k] || {};
-          const monthsShown = Math.max(1, safeNum(v.monthsShown, 1));
-          const paidMonths = Math.max(1, safeNum(v.paidMonths, monthsShown));
-          const bonus = safeNum(v.bonus, 0);
+          const defaultMonths = monthsByDuration(k);
+
+          let monthsShown = Math.max(1, safeNum(v.monthsShown, defaultMonths));
+          let paidMonths = Math.max(1, safeNum(v.paidMonths, monthsShown));
+          let bonus = safeNum(v.bonus, 0);
           let tag = sanitizeTag(v.tag);
 
+          // لو duration غير مسموح: صفّر السعر/الbonus/tag وخلّي months default
+          const isAllowed = allowedDur.includes(k);
+          if (!isAllowed) {
+            monthsShown = defaultMonths;
+            paidMonths = defaultMonths;
+            bonus = 0;
+            tag = "";
+          }
+
+          // offer/bonus only on semiannual/yearly
           const safeBonus = isOfferDuration(k) ? Math.max(0, bonus) : 0;
           if (!isOfferDuration(k) && tag === "offer") tag = "";
           if (k !== "yearly" && tag === "most") tag = "";
 
+          // Starter سنوي فقط: تأمين إضافي
+          if (plan.tier === "starter" && k !== "yearly") {
+            bonus = 0;
+            tag = "";
+          }
+
           return [
             k,
             {
-              title: { ar: safeStr(v?.title?.ar), en: safeStr(v?.title?.en) },
+              title: {
+                ar: safeStr(v?.title?.ar, DUR_LABELS[k]?.ar || ""),
+                en: safeStr(v?.title?.en, DUR_LABELS[k]?.en || ""),
+              },
               monthsShown,
               paidMonths,
               bonus: safeBonus,
-              price: Math.max(0, safeNum(v.price, 0)),
+              price: isAllowed ? Math.max(0, safeNum(v.price, 0)) : 0,
               tag,
               best: !!v.best,
               currency: safeStr(v.currency, safeStr(plan.currency, "AED")),
@@ -581,10 +708,25 @@ useEffect(() => {
         })
       );
 
+      // Allowed billing periods guardrail
+      const allowedBillingPeriods = uniq(plan.allowedBillingPeriods || []);
+      const enforcedABP =
+        plan.tier === "starter"
+          ? ["yearly"]
+          : uniq(
+              allowedBillingPeriods.length
+                ? allowedBillingPeriods
+                : defaultAllowedBillingPeriodsForTier(plan.tier)
+            );
+
+      // tier guardrail
+      const enforcedTier = TIER_ORDER.includes(plan.tier) ? plan.tier : "starter";
+
       const payload = {
         key: safeStr(plan.key, plan.id),
         planKey: safeStr(plan.planKey, safeStr(plan.key, plan.id)),
-        tier: safeStr(plan.tier, safeStr(plan.planKey, "starter")),
+        tier: enforcedTier,
+
         isActive: !!plan.isActive,
         isVisible: !!plan.isVisible,
         isMandatory: !!plan.isMandatory,
@@ -596,11 +738,13 @@ useEffect(() => {
 
         name: { ar: safeStr(plan?.name?.ar), en: safeStr(plan?.name?.en) },
         fit: { ar: safeStr(plan?.fit?.ar), en: safeStr(plan?.fit?.en) },
+
         perks: {
           ar: Array.isArray(plan?.perks?.ar) ? plan.perks.ar.filter(Boolean) : [],
           en: Array.isArray(plan?.perks?.en) ? plan.perks.en.filter(Boolean) : [],
         },
 
+        // afterLimit كما وصفت
         afterLimit: {
           allowAddon: !!plan?.afterLimit?.allowAddon,
           allowUpgrade: !!plan?.afterLimit?.allowUpgrade,
@@ -609,8 +753,8 @@ useEffect(() => {
         },
 
         allowEntitiesOutsidePlan: !!plan.allowEntitiesOutsidePlan,
-        allowedBillingPeriods: uniq(plan.allowedBillingPeriods || []),
-        includedEntities: uniq(plan.includedEntities || []),
+        allowedBillingPeriods: enforcedABP,
+        includedEntities: uniq(plan.includedEntities || ["all"]),
         monthlyIncludedTxLimit: safeNum(plan.monthlyIncludedTxLimit, 0),
 
         covers: {
@@ -692,197 +836,223 @@ useEffect(() => {
     }
   };
 
-  // ✅ Create Plan
-const createPlan = async () => {
-  try {
-    setSavingId("create-plan");
-    setToast(null);
+  /* ---------------------------
+     Create Plan (4 tiers)
+     - default tier = starter
+     - starter: yearly only
+     - others: semiannual+yearly (+contract in allowedBillingPeriods)
+  ---------------------------- */
+  const createPlan = async () => {
+    try {
+      setSavingId("create-plan");
+      setToast(null);
 
-    const ref = doc(collection(firestore, PLANS_COL));
-    const newId = ref.id;
+      const ref = doc(collection(firestore, PLANS_COL));
+      const newId = ref.id;
 
-    const basePricing = Object.fromEntries(
-      DURATION_ORDER.map((k) => [
-        k,
-        {
-          title: { ar: DUR_LABELS[k]?.ar || "", en: DUR_LABELS[k]?.en || "" },
-          monthsShown: k === "monthly" ? 1 : k === "quarterly" ? 3 : k === "semiannual" ? 6 : 12,
-          paidMonths: k === "monthly" ? 1 : k === "quarterly" ? 3 : k === "semiannual" ? 6 : 12,
-          bonus: 0,
-          price: 0,
-          tag: "",
-          best: false,
-          currency: "AED",
-          stripe: { mode: "subscription", priceId: "", productId: "" },
+      const tier = "starter";
+      const allowedBillingPeriods = defaultAllowedBillingPeriodsForTier(tier);
+
+      const basePricing = Object.fromEntries(
+        DURATIONS_ALL.map((k) => {
+          const months = monthsByDuration(k);
+          const enabled = tier === "starter" ? k === "yearly" : (k === "semiannual" || k === "yearly");
+          return [
+            k,
+            {
+              title: { ar: DUR_LABELS[k]?.ar || "", en: DUR_LABELS[k]?.en || "" },
+              monthsShown: months,
+              paidMonths: months,
+              bonus: 0,
+              price: enabled ? 0 : 0,
+              tag: "",
+              best: false,
+              currency: "AED",
+              stripe: { mode: "subscription", priceId: "", productId: "" },
+            },
+          ];
+        })
+      );
+
+      const payload = {
+        key: newId,
+        planKey: newId,
+        tier,
+
+        isActive: true,
+        isVisible: true,
+        isMandatory: false,
+
+        sortIndex: plans.length
+          ? Math.max(...plans.map((x) => safeNum(x.sortIndex, 0))) + 10
+          : 10,
+        version: 1,
+        currency: "AED",
+
+        name: { ar: "باقة جديدة", en: "New Plan" },
+        fit: { ar: "", en: "" },
+
+        perks: { ar: [], en: [] },
+
+        // afterLimit الافتراضي حسب وصفك
+        afterLimit: {
+          allowAddon: true,
+          allowUpgrade: false,
+          hardBlock: false,
+          mode: "custom",
         },
-      ])
-    );
 
-    const payload = {
-      key: newId,
-      planKey: newId,
-      tier: "starter", // ✅ مهم عشان الألوان
+        allowEntitiesOutsidePlan: true,
+        allowedBillingPeriods,
+        includedEntities: ["all"],
+        monthlyIncludedTxLimit: 0,
 
-      isActive: true,
-      isVisible: true,
-      isMandatory: false,
+        covers: {
+          adminProcessing: true,
+          governmentFee: false,
+          printingFee: true,
+          stripeFee: false,
+          vat: true,
+        },
 
-      sortIndex: plans.length ? Math.max(...plans.map((x) => safeNum(x.sortIndex, 0))) + 10 : 10,
-      version: 1,
-      currency: "AED",
+        pricing: basePricing,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
 
-      name: { ar: "باقة جديدة", en: "New Plan" },
-      fit: { ar: "", en: "" },
+      await setDoc(ref, payload, { merge: true });
 
-      perks: { ar: [], en: [] },
+      setExpandedPlans((prev) => ({ ...prev, [newId]: true }));
+      setTabByPlan((prev) => ({ ...prev, [newId]: "pricing" }));
 
-      afterLimit: { allowAddon: true, allowUpgrade: false, hardBlock: false, mode: "custom" },
-      allowEntitiesOutsidePlan: true,
-      allowedBillingPeriods: ["semiannual", "yearly", "contract"],
-      includedEntities: ["all"],
-      monthlyIncludedTxLimit: 0,
+      setToast({ type: "ok", msg: isAr ? "تم إنشاء باقة جديدة ✅" : "New plan created ✅" });
+    } catch (e) {
+      console.error("Create plan error:", e);
+      setToast({ type: "err", msg: isAr ? "فشل إنشاء الباقة ❌" : "Create plan failed ❌" });
+    } finally {
+      setSavingId(null);
+      setTimeout(() => setToast(null), 2400);
+    }
+  };
 
-      covers: {
-        adminProcessing: true,
-        governmentFee: false,
-        printingFee: true,
-        stripeFee: false,
-        vat: true,
-      },
+  /* ---------------------------
+     Create Addon (extra_5/10/20…)
+  ---------------------------- */
+  const createAddon = async () => {
+    try {
+      setSavingId("create-addon");
+      setToast(null);
 
-      pricing: basePricing,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    };
+      const now = Date.now();
+      const newId = `extra_${now}`; // تقدر تغيّره بعدين لـ extra_5/10/20
 
-    await setDoc(ref, payload, { merge: true });
+      const payload = {
+        addonKey: newId,
+        isActive: true,
+        popular: false,
 
-    setExpandedPlans((prev) => ({ ...prev, [newId]: true }));
-    setTabByPlan((prev) => ({ ...prev, [newId]: "pricing" }));
+        currency: "AED",
+        version: 1,
 
-    setToast({ type: "ok", msg: isAr ? "تم إنشاء باقة جديدة ✅" : "New plan created ✅" });
-  } catch (e) {
-    console.error("Create plan error:", e);
-    setToast({ type: "err", msg: isAr ? "فشل إنشاء الباقة ❌" : "Create plan failed ❌" });
-  } finally {
-    setSavingId(null);
-    setTimeout(() => setToast(null), 2400);
-  }
-};
+        title: { ar: "إضافة جديدة", en: "New Add-on" },
+        type: "bundle",
+        qty: 0,
 
+        perTxn: 0,
+        price: 0,
+        priceMin: 0,
+        priceMax: 0,
 
-// ✅ Create Addon
-const createAddon = async () => {
-  try {
-    setSavingId("create-addon");
-    setToast(null);
+        covers: {
+          adminProcessing: true,
+          governmentFee: false,
+          printingFee: true,
+          stripeFee: false,
+          vat: true,
+        },
 
-    const now = Date.now();
-    const newId = `addon_${now}`;
+        stripe: { mode: "payment", priceId: "", productId: "" },
 
-    const payload = {
-      addonKey: newId,
-      isActive: true,
-      popular: false,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
 
-      currency: "AED",
-      version: 1,
+      await setDoc(doc(firestore, ADDONS_COL, newId), payload, { merge: true });
 
-      title: { ar: "إضافة جديدة", en: "New Add-on" },
-      type: "bundle",
-      qty: 0,
+      setExpandedAddons((prev) => ({ ...prev, [newId]: true }));
 
-      perTxn: 0,
-      price: 0,
-      priceMin: 0,
-      priceMax: 0,
+      setToast({ type: "ok", msg: isAr ? "تم إنشاء Add-on جديدة ✅" : "New add-on created ✅" });
+    } catch (e) {
+      console.error("Create addon error:", e);
+      setToast({ type: "err", msg: isAr ? "فشل إنشاء الإضافة ❌" : "Create add-on failed ❌" });
+    } finally {
+      setSavingId(null);
+      setTimeout(() => setToast(null), 2400);
+    }
+  };
 
-      covers: {
-        adminProcessing: true,
-        governmentFee: false,
-        printingFee: true,
-        stripeFee: false,
-        vat: true,
-      },
+  /* ---------------------------
+     Remove Plan
+  ---------------------------- */
+  const removePlan = async (id) => {
+    try {
+      const ok = window.confirm(isAr ? "متأكد تريد حذف الباقة؟" : "Delete this plan?");
+      if (!ok) return;
 
-      stripe: { mode: "payment", priceId: "", productId: "" },
+      setSavingId(id);
+      setToast(null);
 
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    };
+      await deleteDoc(doc(firestore, PLANS_COL, id));
 
-    await setDoc(doc(firestore, ADDONS_COL, newId), payload, { merge: true });
+      setExpandedPlans((prev) => {
+        const copy = { ...prev };
+        delete copy[id];
+        return copy;
+      });
+      setTabByPlan((prev) => {
+        const copy = { ...prev };
+        delete copy[id];
+        return copy;
+      });
 
-    setExpandedAddons((prev) => ({ ...prev, [newId]: true }));
+      setToast({ type: "ok", msg: isAr ? "تم حذف الباقة ✅" : "Plan deleted ✅" });
+    } catch (e) {
+      console.error("Delete plan error:", e);
+      setToast({ type: "err", msg: isAr ? "فشل حذف الباقة ❌" : "Delete plan failed ❌" });
+    } finally {
+      setSavingId(null);
+      setTimeout(() => setToast(null), 2400);
+    }
+  };
 
-    setToast({ type: "ok", msg: isAr ? "تم إنشاء Add-on جديدة ✅" : "New add-on created ✅" });
-  } catch (e) {
-    console.error("Create addon error:", e);
-    setToast({ type: "err", msg: isAr ? "فشل إنشاء الإضافة ❌" : "Create add-on failed ❌" });
-  } finally {
-    setSavingId(null);
-    setTimeout(() => setToast(null), 2400);
-  }
-};
+  /* ---------------------------
+     Remove Addon
+  ---------------------------- */
+  const removeAddon = async (id) => {
+    try {
+      const ok = window.confirm(isAr ? "متأكد تريد حذف الإضافة؟" : "Delete this add-on?");
+      if (!ok) return;
 
-// ✅ Remove Plan
-const removePlan = async (id) => {
-  try {
-    const ok = window.confirm(isAr ? "متأكد تريد حذف الباقة؟" : "Delete this plan?");
-    if (!ok) return;
+      setSavingId(id);
+      setToast(null);
 
-    setSavingId(id);
-    setToast(null);
+      await deleteDoc(doc(firestore, ADDONS_COL, id));
 
-    await deleteDoc(doc(firestore, PLANS_COL, id));
+      setExpandedAddons((prev) => {
+        const copy = { ...prev };
+        delete copy[id];
+        return copy;
+      });
 
-    setExpandedPlans((prev) => {
-      const copy = { ...prev };
-      delete copy[id];
-      return copy;
-    });
-    setTabByPlan((prev) => {
-      const copy = { ...prev };
-      delete copy[id];
-      return copy;
-    });
-
-    setToast({ type: "ok", msg: isAr ? "تم حذف الباقة ✅" : "Plan deleted ✅" });
-  } catch (e) {
-    console.error("Delete plan error:", e);
-    setToast({ type: "err", msg: isAr ? "فشل حذف الباقة ❌" : "Delete plan failed ❌" });
-  } finally {
-    setSavingId(null);
-    setTimeout(() => setToast(null), 2400);
-  }
-};
-
-// ✅ Remove Addon
-const removeAddon = async (id) => {
-  try {
-    const ok = window.confirm(isAr ? "متأكد تريد حذف الإضافة؟" : "Delete this add-on?");
-    if (!ok) return;
-
-    setSavingId(id);
-    setToast(null);
-
-    await deleteDoc(doc(firestore, ADDONS_COL, id));
-
-    setExpandedAddons((prev) => {
-      const copy = { ...prev };
-      delete copy[id];
-      return copy;
-    });
-
-    setToast({ type: "ok", msg: isAr ? "تم حذف الإضافة ✅" : "Add-on deleted ✅" });
-  } catch (e) {
-    console.error("Delete addon error:", e);
-    setToast({ type: "err", msg: isAr ? "فشل حذف الإضافة ❌" : "Delete add-on failed ❌" });
-  } finally {
-    setSavingId(null);
-    setTimeout(() => setToast(null), 2400);
-  }
-};
+      setToast({ type: "ok", msg: isAr ? "تم حذف الإضافة ✅" : "Add-on deleted ✅" });
+    } catch (e) {
+      console.error("Delete addon error:", e);
+      setToast({ type: "err", msg: isAr ? "فشل حذف الإضافة ❌" : "Delete add-on failed ❌" });
+    } finally {
+      setSavingId(null);
+      setTimeout(() => setToast(null), 2400);
+    }
+  };
 
   /* ---------------------------
      Filters
@@ -892,9 +1062,9 @@ const removeAddon = async (id) => {
     return plans.filter((p) => {
       if (onlyActive && !p.isActive) return false;
       if (!q) return true;
-      const hay = `${p.id} ${p.key} ${p.planKey} ${p.name?.ar || ""} ${p.name?.en || ""} ${p.fit?.ar || ""} ${
-        p.fit?.en || ""
-      }`.toLowerCase();
+      const hay = `${p.id} ${p.key} ${p.planKey} ${p.tier} ${p.name?.ar || ""} ${p.name?.en || ""} ${
+        p.fit?.ar || ""
+      } ${p.fit?.en || ""}`.toLowerCase();
       return hay.includes(q);
     });
   }, [plans, query, onlyActive]);
@@ -1027,34 +1197,34 @@ const removeAddon = async (id) => {
         </div>
 
         <div className={cn("flex items-center gap-2", isAr && "flex-row-reverse")}>
-  <div className="hidden sm:block text-xs text-white/45 font-bold">{t.helperTag}</div>
+          <div className="hidden sm:block text-xs text-white/45 font-bold">{t.helperTag}</div>
 
-  {activeTab === "plans" ? (
-    <button
-      onClick={createPlan}
-      disabled={savingId === "create-plan"}
-      className={cn(
-        "cursor-pointer inline-flex items-center gap-2 px-4 py-2 rounded-2xl font-extrabold text-white transition active:scale-[0.98]",
-        savingId === "create-plan" ? "bg-white/15" : "bg-emerald-600 hover:bg-emerald-700"
-      )}
-    >
-      <PackagePlus className="w-4 h-4" />
-      {isAr ? "إضافة باقة" : "Add Plan"}
-    </button>
-  ) : (
-    <button
-      onClick={createAddon}
-      disabled={savingId === "create-addon"}
-      className={cn(
-        "cursor-pointer inline-flex items-center gap-2 px-4 py-2 rounded-2xl font-extrabold text-white transition active:scale-[0.98]",
-        savingId === "create-addon" ? "bg-white/15" : "bg-emerald-600 hover:bg-emerald-700"
-      )}
-    >
-      <PackagePlus className="w-4 h-4" />
-      {isAr ? "إضافة Add-on" : "Add Add-on"}
-    </button>
-  )}
-</div>
+          {activeTab === "plans" ? (
+            <button
+              onClick={createPlan}
+              disabled={savingId === "create-plan"}
+              className={cn(
+                "cursor-pointer inline-flex items-center gap-2 px-4 py-2 rounded-2xl font-extrabold text-white transition active:scale-[0.98]",
+                savingId === "create-plan" ? "bg-white/15" : "bg-emerald-600 hover:bg-emerald-700"
+              )}
+            >
+              <PackagePlus className="w-4 h-4" />
+              {isAr ? "إضافة باقة" : "Add Plan"}
+            </button>
+          ) : (
+            <button
+              onClick={createAddon}
+              disabled={savingId === "create-addon"}
+              className={cn(
+                "cursor-pointer inline-flex items-center gap-2 px-4 py-2 rounded-2xl font-extrabold text-white transition active:scale-[0.98]",
+                savingId === "create-addon" ? "bg-white/15" : "bg-emerald-600 hover:bg-emerald-700"
+              )}
+            >
+              <PackagePlus className="w-4 h-4" />
+              {isAr ? "إضافة Add-on" : "Add Add-on"}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Body */}
@@ -1081,7 +1251,12 @@ const removeAddon = async (id) => {
 
                 const yearly = p.pricing?.yearly || {};
                 const yearlyTag = String(yearly.tag || "").toLowerCase();
-                const badge = yearly.best || yearlyTag === "most" ? (isAr ? "الأكثر اختيارًا" : "Most chosen") : null;
+                const badge =
+                  yearly.best || yearlyTag === "most"
+                    ? isAr
+                      ? "الأكثر اختيارًا"
+                      : "Most chosen"
+                    : null;
 
                 return (
                   <div
@@ -1122,7 +1297,7 @@ const removeAddon = async (id) => {
 
                             <span className={cn("px-2.5 py-1 rounded-full text-[11px] font-extrabold border", brand.chipDark)}>
                               <Tag className={cn("w-3.5 h-3.5 inline-block -mt-[2px]", isAr ? "ml-1" : "mr-1")} />
-                              PRO
+                              {p.tier.toUpperCase()}
                             </span>
 
                             <span
@@ -1227,376 +1402,512 @@ const removeAddon = async (id) => {
                         </div>
 
                         {/* ====== PLAN EDITOR ====== */}
-{tab === "meta" ? (
-  <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      <div>
-        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.planKey}</div>
-        <input
-          value={p.planKey}
-          onChange={(e) => setPlanField(p.id, { planKey: e.target.value.trim() })}
-          className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
-        />
-      </div>
+                        {tab === "pricing" ? (
+                          <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+                            {(() => {
+                              const allowedDur = allowedDurationsForPlan(p);
+                              return DURATIONS_UI.map((dur) => {
+                                const enabled = allowedDur.includes(dur);
+                                const v = p.pricing?.[dur] || {};
+                                return (
+                                  <div key={dur} className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                                    <div className={cn("flex items-center justify-between gap-2", isAr && "flex-row-reverse")}>
+                                      <div className="text-white font-extrabold">
+                                        {DUR_LABELS[dur]?.[isAr ? "ar" : "en"] || dur}
+                                      </div>
+                                      <div className="text-xs text-white/45 font-bold">
+                                        {!enabled
+                                          ? isAr
+                                            ? "غير متاح لهذه الباقة"
+                                            : "Not enabled for this plan"
+                                          : isOfferDuration(dur)
+                                          ? isAr
+                                            ? "يسمح بعرض/بونص"
+                                            : "Offer allowed"
+                                          : isAr
+                                          ? "بدون عروض"
+                                          : "No offer"}
+                                      </div>
+                                    </div>
 
-      <div>
-        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.key}</div>
-        <input
-          value={p.key}
-          onChange={(e) => setPlanField(p.id, { key: e.target.value.trim() })}
-          className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
-        />
-      </div>
+                                    <div className="mt-3 grid grid-cols-2 sm:grid-cols-6 gap-2">
+                                      <div>
+                                        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.monthsShown}</div>
+                                        <input
+                                          type="number"
+                                          value={v.monthsShown ?? monthsByDuration(dur)}
+                                          onChange={(e) =>
+                                            setPlanNested(p.id, ["pricing", dur, "monthsShown"], Number(e.target.value || monthsByDuration(dur)))
+                                          }
+                                          className={cn(inputBaseDark, brand.focus)}
+                                          disabled={!enabled}
+                                        />
+                                      </div>
+                                      <div>
+                                        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.paidMonths}</div>
+                                        <input
+                                          type="number"
+                                          value={v.paidMonths ?? monthsByDuration(dur)}
+                                          onChange={(e) =>
+                                            setPlanNested(p.id, ["pricing", dur, "paidMonths"], Number(e.target.value || monthsByDuration(dur)))
+                                          }
+                                          className={cn(inputBaseDark, brand.focus)}
+                                          disabled={!enabled}
+                                        />
+                                      </div>
+                                      <div>
+                                        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.bonus}</div>
+                                        <input
+                                          type="number"
+                                          value={v.bonus ?? 0}
+                                          onChange={(e) => setPlanNested(p.id, ["pricing", dur, "bonus"], Number(e.target.value || 0))}
+                                          className={cn(inputBaseDark, brand.focus)}
+                                          disabled={!enabled}
+                                        />
+                                      </div>
+                                      <div>
+                                        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.price}</div>
+                                        <input
+                                          type="number"
+                                          value={v.price ?? 0}
+                                          onChange={(e) => setPlanNested(p.id, ["pricing", dur, "price"], Number(e.target.value || 0))}
+                                          className={cn(inputBaseDark, brand.focus)}
+                                          disabled={!enabled}
+                                        />
+                                      </div>
+                                      <div>
+                                        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.tag}</div>
+                                        <input
+                                          value={v.tag || ""}
+                                          onChange={(e) => setPlanNested(p.id, ["pricing", dur, "tag"], e.target.value)}
+                                          className={cn(inputBaseDark, brand.focus)}
+                                          placeholder="offer / most"
+                                          disabled={!enabled}
+                                        />
+                                      </div>
+                                      <div className={cn("flex items-end justify-between gap-2", isAr && "flex-row-reverse")}>
+                                        <div className="w-full">
+                                          <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.best}</div>
+                                          <div
+                                            className={cn(
+                                              "flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2",
+                                              isAr && "flex-row-reverse",
+                                              !enabled && "opacity-60"
+                                            )}
+                                          >
+                                            <span className="text-white/75 font-extrabold text-sm">{isAr ? "تمييز" : "Highlight"}</span>
+                                            <Toggle
+                                              checked={!!v.best}
+                                              onChange={(val) => setPlanNested(p.id, ["pricing", dur, "best"], val)}
+                                            />
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
 
-      <div>
-        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.sortIndex}</div>
-        <input
-          type="number"
-          value={p.sortIndex ?? 0}
-          onChange={(e) => setPlanField(p.id, { sortIndex: Number(e.target.value || 0) })}
-          className={cn(inputBaseDark, brand.focus)}
-        />
-      </div>
+                                    {/* Stripe IDs per duration */}
+                                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                      <div>
+                                        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.stripeMode}</div>
+                                        <input
+                                          value={v?.stripe?.mode || "subscription"}
+                                          onChange={(e) => setPlanNested(p.id, ["pricing", dur, "stripe", "mode"], e.target.value.trim())}
+                                          className={cn(inputBaseDark, brand.focus)}
+                                          placeholder="subscription"
+                                          disabled={!enabled}
+                                        />
+                                      </div>
+                                      <div>
+                                        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.stripePriceId}</div>
+                                        <input
+                                          value={v?.stripe?.priceId || ""}
+                                          onChange={(e) => setPlanNested(p.id, ["pricing", dur, "stripe", "priceId"], e.target.value.trim())}
+                                          className={cn(inputBaseDark, brand.focus)}
+                                          placeholder="price_..."
+                                          disabled={!enabled}
+                                        />
+                                      </div>
+                                      <div>
+                                        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.stripeProductId}</div>
+                                        <input
+                                          value={v?.stripe?.productId || ""}
+                                          onChange={(e) => setPlanNested(p.id, ["pricing", dur, "stripe", "productId"], e.target.value.trim())}
+                                          className={cn(inputBaseDark, brand.focus)}
+                                          placeholder="prod_..."
+                                          disabled={!enabled}
+                                        />
+                                      </div>
+                                    </div>
 
-      <div>
-        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.version}</div>
-        <input
-          type="number"
-          value={p.version ?? 1}
-          onChange={(e) => setPlanField(p.id, { version: Number(e.target.value || 1) })}
-          className={cn(inputBaseDark, brand.focus)}
-        />
-      </div>
-
-      <div>
-        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.currency}</div>
-        <input
-          value={p.currency || "AED"}
-          onChange={(e) => setPlanField(p.id, { currency: e.target.value.trim().toUpperCase() })}
-          className={cn(inputBaseDark, brand.focus)}
-          placeholder="AED"
-        />
-      </div>
-
-      <div>
-        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.mode}</div>
-        <input
-          value={p.afterLimit?.mode || "custom"}
-          onChange={(e) => setPlanNested(p.id, ["afterLimit", "mode"], e.target.value.trim())}
-          className={cn(inputBaseDark, brand.focus)}
-          placeholder="custom"
-        />
-      </div>
-
-      <div>
-        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.nameAr}</div>
-        <input
-          value={p.name?.ar || ""}
-          onChange={(e) => setPlanNested(p.id, ["name", "ar"], e.target.value)}
-          className={cn(inputBaseDark, brand.focus)}
-        />
-      </div>
-
-      <div>
-        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.nameEn}</div>
-        <input
-          value={p.name?.en || ""}
-          onChange={(e) => setPlanNested(p.id, ["name", "en"], e.target.value)}
-          className={cn(inputBaseDark, brand.focus)}
-        />
-      </div>
-
-      <div>
-        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.fitAr}</div>
-        <input
-          value={p.fit?.ar || ""}
-          onChange={(e) => setPlanNested(p.id, ["fit", "ar"], e.target.value)}
-          className={cn(inputBaseDark, brand.focus)}
-        />
-      </div>
-
-      <div>
-        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.fitEn}</div>
-        <input
-          value={p.fit?.en || ""}
-          onChange={(e) => setPlanNested(p.id, ["fit", "en"], e.target.value)}
-          className={cn(inputBaseDark, brand.focus)}
-        />
-      </div>
-    </div>
-  </div>
-) : null}
-
-{tab === "pricing" ? (
-  <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
-    {DURATION_ORDER.map((dur) => {
-      const v = p.pricing?.[dur] || {};
-      return (
-        <div key={dur} className="rounded-2xl border border-white/10 bg-black/20 p-4">
-          <div className={cn("flex items-center justify-between gap-2", isAr && "flex-row-reverse")}>
-            <div className="text-white font-extrabold">
-              {DUR_LABELS[dur]?.[isAr ? "ar" : "en"] || dur}
-            </div>
-            <div className="text-xs text-white/45 font-bold">
-              {isOfferDuration(dur) ? (isAr ? "يسمح بعرض/بونص" : "Offer allowed") : (isAr ? "بدون عروض" : "No offer")}
-            </div>
-          </div>
-
-          <div className="mt-3 grid grid-cols-2 sm:grid-cols-6 gap-2">
-            <div>
-              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.monthsShown}</div>
-              <input
-                type="number"
-                value={v.monthsShown ?? 1}
-                onChange={(e) => setPlanNested(p.id, ["pricing", dur, "monthsShown"], Number(e.target.value || 1))}
-                className={cn(inputBaseDark, brand.focus)}
-              />
-            </div>
-            <div>
-              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.paidMonths}</div>
-              <input
-                type="number"
-                value={v.paidMonths ?? 1}
-                onChange={(e) => setPlanNested(p.id, ["pricing", dur, "paidMonths"], Number(e.target.value || 1))}
-                className={cn(inputBaseDark, brand.focus)}
-              />
-            </div>
-            <div>
-              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.bonus}</div>
-              <input
-                type="number"
-                value={v.bonus ?? 0}
-                onChange={(e) => setPlanNested(p.id, ["pricing", dur, "bonus"], Number(e.target.value || 0))}
-                className={cn(inputBaseDark, brand.focus)}
-                disabled={!isOfferDuration(dur)}
-              />
-            </div>
-            <div>
-              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.price}</div>
-              <input
-                type="number"
-                value={v.price ?? 0}
-                onChange={(e) => setPlanNested(p.id, ["pricing", dur, "price"], Number(e.target.value || 0))}
-                className={cn(inputBaseDark, brand.focus)}
-              />
-            </div>
-            <div>
-              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.tag}</div>
-              <input
-                value={v.tag || ""}
-                onChange={(e) => setPlanNested(p.id, ["pricing", dur, "tag"], e.target.value)}
-                className={cn(inputBaseDark, brand.focus)}
-                placeholder="offer / most"
-              />
-            </div>
-            <div className={cn("flex items-end justify-between gap-2", isAr && "flex-row-reverse")}>
-              <div className="w-full">
-                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.best}</div>
-                <div className={cn("flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2", isAr && "flex-row-reverse")}>
-                  <span className="text-white/75 font-extrabold text-sm">{isAr ? "تمييز" : "Highlight"}</span>
-                  <Toggle checked={!!v.best} onChange={(val) => setPlanNested(p.id, ["pricing", dur, "best"], val)} />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Stripe IDs per duration */}
-          <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <div>
-              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.stripeMode}</div>
-              <input
-                value={v?.stripe?.mode || "subscription"}
-                onChange={(e) => setPlanNested(p.id, ["pricing", dur, "stripe", "mode"], e.target.value.trim())}
-                className={cn(inputBaseDark, brand.focus)}
-                placeholder="subscription"
-              />
-            </div>
-            <div>
-              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.stripePriceId}</div>
-              <input
-                value={v?.stripe?.priceId || ""}
-                onChange={(e) => setPlanNested(p.id, ["pricing", dur, "stripe", "priceId"], e.target.value.trim())}
-                className={cn(inputBaseDark, brand.focus)}
-                placeholder="price_..."
-              />
-            </div>
-            <div>
-              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.stripeProductId}</div>
-              <input
-                value={v?.stripe?.productId || ""}
-                onChange={(e) => setPlanNested(p.id, ["pricing", dur, "stripe", "productId"], e.target.value.trim())}
-                className={cn(inputBaseDark, brand.focus)}
-                placeholder="prod_..."
-              />
-            </div>
-          </div>
-        </div>
-      );
-    })}
-  </div>
-) : null}
-
-{tab === "perks" ? (
-  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-    {(["ar", "en"]).map((locale) => (
-      <div key={locale} className="rounded-2xl border border-white/10 bg-white/5 p-4">
-        <div className={cn("flex items-center justify-between", isAr && "flex-row-reverse")}>
-          <div className="text-sm font-extrabold text-white">
-            {locale === "ar" ? (isAr ? "المميزات (عربي)" : "Perks (AR)") : (isAr ? "المميزات (English)" : "Perks (EN)")}
-          </div>
-          <button
-            onClick={() => addPerk(p.id, locale)}
-            className="cursor-pointer inline-flex items-center gap-2 px-3 py-2 rounded-xl font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white"
-          >
-            <Sparkles className="w-4 h-4" /> {t.addPerk}
-          </button>
-        </div>
-
-        <div className="mt-3 space-y-2">
-          {(p.perks?.[locale] || []).map((val, idx) => (
-            <div key={idx} className={cn("flex items-center gap-2", isAr && "flex-row-reverse")}>
-              <input
-                value={val}
-                onChange={(e) => setPlanNested(p.id, ["perks", locale, idx], e.target.value)}
-                className={cn(inputBaseDark, brand.focus)}
-                placeholder={isAr ? "اكتب الميزة..." : "Type perk..."}
-              />
-              <button
-                onClick={() => removePerk(p.id, locale, idx)}
-                className="cursor-pointer px-3 py-2 rounded-xl font-extrabold border border-rose-400/25 bg-rose-500/10 text-rose-200 hover:bg-rose-500/15"
-              >
-                {t.remove}
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-    ))}
-  </div>
-) : null}
-
-{tab === "rules" ? (
-  <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      {[
-        { path: ["afterLimit", "allowAddon"], label: t.allowAddon },
-        { path: ["afterLimit", "allowUpgrade"], label: t.allowUpgrade },
-        { path: ["afterLimit", "hardBlock"], label: t.hardBlock },
-        { path: ["allowEntitiesOutsidePlan"], label: t.allowEntitiesOutsidePlan },
-      ].map((x, i) => (
-        <div key={i} className={cn("flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3", isAr && "flex-row-reverse")}>
-          <span className="text-white/80 font-extrabold">{x.label}</span>
-          <Toggle
-            checked={!!(x.path[0] === "allowEntitiesOutsidePlan" ? p.allowEntitiesOutsidePlan : p?.[x.path[0]]?.[x.path[1]])}
-            onChange={(v) => (x.path[0] === "allowEntitiesOutsidePlan" ? setPlanField(p.id, { allowEntitiesOutsidePlan: v }) : setPlanNested(p.id, x.path, v))}
-          />
-        </div>
-      ))}
-
-      <div>
-        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.monthlyIncludedTxLimit}</div>
-        <input
-          type="number"
-          value={p.monthlyIncludedTxLimit ?? 0}
-          onChange={(e) => setPlanField(p.id, { monthlyIncludedTxLimit: Number(e.target.value || 0) })}
-          className={cn(inputBaseDark, brand.focus)}
-        />
-      </div>
-
-      <div>
-        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.allowedBillingPeriods}</div>
-        <input
-          value={(p.allowedBillingPeriods || []).join(", ")}
-          onChange={(e) => setPlanField(p.id, { allowedBillingPeriods: uniq(e.target.value.split(",").map((s) => s.trim())) })}
-          className={cn(inputBaseDark, brand.focus)}
-          placeholder="semiannual, yearly, contract"
-        />
-      </div>
-
-      <div className="sm:col-span-2">
-        <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.includedEntities}</div>
-        <input
-          value={(p.includedEntities || []).join(", ")}
-          onChange={(e) => setPlanField(p.id, { includedEntities: uniq(e.target.value.split(",").map((s) => s.trim())) })}
-          className={cn(inputBaseDark, brand.focus)}
-          placeholder="all"
-        />
-      </div>
-    </div>
-  </div>
-) : null}
-
-{tab === "covers" ? (
-  <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      {[
-        { k: "adminProcessing", label: t.coversAdminProcessing },
-        { k: "governmentFee", label: t.coversGovernmentFee },
-        { k: "printingFee", label: t.coversPrintingFee },
-        { k: "stripeFee", label: t.coversStripeFee },
-        { k: "vat", label: t.coversVat },
-      ].map((x) => (
-        <div key={x.k} className={cn("flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3", isAr && "flex-row-reverse")}>
-          <span className="text-white/80 font-extrabold">{x.label}</span>
-          <Toggle checked={!!p?.covers?.[x.k]} onChange={(v) => setPlanNested(p.id, ["covers", x.k], v)} />
-        </div>
-      ))}
-    </div>
-  </div>
-) : null}
-
-{tab === "stripe" ? (
-  <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
-    <div className="text-sm text-white/70 font-extrabold">
-      {isAr ? "Stripe موجود داخل كل مدة في Pricing (priceId / productId)" : "Stripe is configured per duration in Pricing"}
-    </div>
-    <div className="text-xs text-white/45 font-bold mt-2">
-      {isAr ? "لو عايز Stripe عام للخطة قولّي ونضيفه" : "If you want plan-level Stripe fields, tell me and I’ll add it."}
-    </div>
-  </div>
-) : null}
-
-
-                        {/* ✅ باقي الـ UI زي ما هو عندك (pricing/perks/rules/covers/stripe/meta) */}
-                        {/* علشان الرد مايبقاش ضخم أكتر من كده: نفس بلوكات JSX اللي عندك انسخها مكان السطر ده بدون تغيير */}
-                        {/* المهم: كل structuredClone اتشال واتبدل بـ deepClone في الدوال اللي فوق */}
-
-                        {/* زر الحفظ */}
-<div className={cn("mt-4 flex items-center justify-end gap-2", isAr && "justify-start flex-row-reverse")}>
-  <button
-    onClick={() => savePlan(p)}
-    disabled={savingId === p.id}
-    className={cn(
-      "cursor-pointer inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-extrabold text-white shadow-lg transition active:scale-[0.98]",
-      savingId === p.id ? "bg-white/20" : brand.btn
-    )}
-  >
-    <Save className="w-4 h-4" />
-    {savingId === p.id ? t.saving : t.save}
-  </button>
-
-  <button
-    onClick={() => removePlan(p.id)}
-    disabled={savingId === p.id}
-    className="cursor-pointer inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-extrabold border border-rose-400/25 bg-rose-500/10 text-rose-200 hover:bg-rose-500/15 transition active:scale-[0.98]"
-  >
-    <AlertTriangle className="w-4 h-4" />
-    {isAr ? "حذف" : "Delete"}
-  </button>
-</div>
-
-                        {!isOk ? (
-                          <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 p-4">
-                            <div className={cn("text-sm font-extrabold text-amber-200", isAr && "text-right")}>
-                              {isAr ? "ملاحظات:" : "Issues:"}
-                            </div>
-                            <ul className={cn("mt-2 text-xs font-bold text-amber-100/90 space-y-1", isAr && "text-right")}>
-                              {issues.map((x, i) => (
-                                <li key={i}>• {x}</li>
-                              ))}
-                            </ul>
+                                    {!enabled ? (
+                                      <div className={cn("mt-3 text-xs font-bold text-white/45", isAr && "text-right")}>
+                                        {isAr
+                                          ? "هذه المدة غير مفعلة في allowedBillingPeriods لهذه الباقة."
+                                          : "This duration is disabled by allowedBillingPeriods for this plan."}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                );
+                              });
+                            })()}
                           </div>
                         ) : null}
+
+                        {tab === "perks" ? (
+                          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {(["ar", "en"]).map((locale) => (
+                              <div key={locale} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                                <div className={cn("flex items-center justify-between", isAr && "flex-row-reverse")}>
+                                  <div className="text-sm font-extrabold text-white">
+                                    {locale === "ar"
+                                      ? isAr
+                                        ? "المميزات (عربي)"
+                                        : "Perks (AR)"
+                                      : isAr
+                                      ? "المميزات (English)"
+                                      : "Perks (EN)"}
+                                  </div>
+                                  <button
+                                    onClick={() => addPerk(p.id, locale)}
+                                    className="cursor-pointer inline-flex items-center gap-2 px-3 py-2 rounded-xl font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white"
+                                  >
+                                    <Sparkles className="w-4 h-4" /> {t.addPerk}
+                                  </button>
+                                </div>
+
+                                <div className="mt-3 space-y-2">
+                                  {(p.perks?.[locale] || []).map((val, idx) => (
+                                    <div key={idx} className={cn("flex items-center gap-2", isAr && "flex-row-reverse")}>
+                                      <input
+                                        value={val}
+                                        onChange={(e) => setPlanNested(p.id, ["perks", locale, idx], e.target.value)}
+                                        className={cn(inputBaseDark, brand.focus)}
+                                        placeholder={isAr ? "اكتب الميزة..." : "Type perk..."}
+                                      />
+                                      <button
+                                        onClick={() => removePerk(p.id, locale, idx)}
+                                        className="cursor-pointer px-3 py-2 rounded-xl font-extrabold border border-rose-400/25 bg-rose-500/10 text-rose-200 hover:bg-rose-500/15"
+                                      >
+                                        {t.remove}
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+
+                                {/* Hint: Add-ons keys */}
+                                <div className={cn("mt-4 text-xs font-bold text-white/45", isAr && "text-right")}>
+                                  {isAr
+                                    ? "ملاحظة: الإضافات (extra_5 / extra_10 / extra_20) تُدار من تبويب Add-ons وليست داخل perks."
+                                    : "Note: Add-ons (extra_5/extra_10/extra_20) are managed in Add-ons tab, not inside perks."}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        {tab === "rules" ? (
+                          <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              {[
+                                { path: ["afterLimit", "allowAddon"], label: t.allowAddon },
+                                { path: ["afterLimit", "allowUpgrade"], label: t.allowUpgrade },
+                                { path: ["afterLimit", "hardBlock"], label: t.hardBlock },
+                                { path: ["allowEntitiesOutsidePlan"], label: t.allowEntitiesOutsidePlan },
+                              ].map((x, i) => (
+                                <div
+                                  key={i}
+                                  className={cn(
+                                    "flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3",
+                                    isAr && "flex-row-reverse"
+                                  )}
+                                >
+                                  <span className="text-white/80 font-extrabold">{x.label}</span>
+                                  <Toggle
+                                    checked={
+                                      !!(x.path[0] === "allowEntitiesOutsidePlan"
+                                        ? p.allowEntitiesOutsidePlan
+                                        : p?.[x.path[0]]?.[x.path[1]])
+                                    }
+                                    onChange={(v) =>
+                                      x.path[0] === "allowEntitiesOutsidePlan"
+                                        ? setPlanField(p.id, { allowEntitiesOutsidePlan: v })
+                                        : setPlanNested(p.id, x.path, v)
+                                    }
+                                  />
+                                </div>
+                              ))}
+
+                              <div>
+                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.mode}</div>
+                                <input
+                                  value={p.afterLimit?.mode || "custom"}
+                                  onChange={(e) => setPlanNested(p.id, ["afterLimit", "mode"], e.target.value.trim())}
+                                  className={cn(inputBaseDark, brand.focus)}
+                                  placeholder="custom"
+                                />
+                              </div>
+
+                              <div>
+                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.monthlyIncludedTxLimit}</div>
+                                <input
+                                  type="number"
+                                  value={p.monthlyIncludedTxLimit ?? 0}
+                                  onChange={(e) => setPlanField(p.id, { monthlyIncludedTxLimit: Number(e.target.value || 0) })}
+                                  className={cn(inputBaseDark, brand.focus)}
+                                />
+                              </div>
+
+                              <div className="sm:col-span-2">
+                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.allowedBillingPeriods}</div>
+                                <input
+                                  value={(p.allowedBillingPeriods || []).join(", ")}
+                                  onChange={(e) =>
+                                    setPlanField(p.id, {
+                                      allowedBillingPeriods: uniq(e.target.value.split(",").map((s) => s.trim())),
+                                    })
+                                  }
+                                  className={cn(inputBaseDark, brand.focus)}
+                                  placeholder="semiannual, yearly, contract"
+                                  disabled={p.tier === "starter"} // Starter ثابت سنوي فقط
+                                />
+                                {p.tier === "starter" ? (
+                                  <div className={cn("mt-2 text-xs font-bold text-white/45", isAr && "text-right")}>
+                                    {isAr ? "Starter: ثابت سنوي فقط" : "Starter: locked to yearly only"}
+                                  </div>
+                                ) : null}
+                              </div>
+
+                              <div className="sm:col-span-2">
+                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.includedEntities}</div>
+                                <input
+                                  value={(p.includedEntities || []).join(", ")}
+                                  onChange={(e) =>
+                                    setPlanField(p.id, {
+                                      includedEntities: uniq(e.target.value.split(",").map((s) => s.trim())),
+                                    })
+                                  }
+                                  className={cn(inputBaseDark, brand.focus)}
+                                  placeholder="all"
+                                />
+                              </div>
+
+                              <div className="sm:col-span-2">
+                                <div className={cn("mt-2 text-xs font-bold text-white/45", isAr && "text-right")}>
+                                  {isAr
+                                    ? "مهم: Starter سنوي فقط. Growth/Scale/Enterprise نصف سنوي + سنوي (والـ contract كخيار فوترة)."
+                                    : "Important: Starter is yearly-only. Others are semiannual + yearly (contract allowed as billing option)."}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {tab === "covers" ? (
+                          <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              {[
+                                { k: "adminProcessing", label: t.coversAdminProcessing },
+                                { k: "governmentFee", label: t.coversGovernmentFee },
+                                { k: "printingFee", label: t.coversPrintingFee },
+                                { k: "stripeFee", label: t.coversStripeFee },
+                                { k: "vat", label: t.coversVat },
+                              ].map((x) => (
+                                <div
+                                  key={x.k}
+                                  className={cn(
+                                    "flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3",
+                                    isAr && "flex-row-reverse"
+                                  )}
+                                >
+                                  <span className="text-white/80 font-extrabold">{x.label}</span>
+                                  <Toggle checked={!!p?.covers?.[x.k]} onChange={(v) => setPlanNested(p.id, ["covers", x.k], v)} />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {tab === "stripe" ? (
+                          <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div className="text-sm text-white/70 font-extrabold">
+                              {isAr ? "Stripe موجود داخل كل مدة في Pricing (priceId / productId)" : "Stripe is configured per duration in Pricing"}
+                            </div>
+                            <div className="text-xs text-white/45 font-bold mt-2">
+                              {isAr
+                                ? "ملاحظة: Starter سنوي فقط، والباقي نصف سنوي + سنوي."
+                                : "Note: Starter is yearly-only; others have semiannual + yearly."}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {tab === "meta" ? (
+                          <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div>
+                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.planKey}</div>
+                                <input
+                                  value={p.planKey}
+                                  onChange={(e) => setPlanField(p.id, { planKey: e.target.value.trim() })}
+                                  className={cn(inputBaseDark, brand.focus)}
+                                />
+                              </div>
+
+                              <div>
+                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.key}</div>
+                                <input
+                                  value={p.key}
+                                  onChange={(e) => setPlanField(p.id, { key: e.target.value.trim() })}
+                                  className={cn(inputBaseDark, brand.focus)}
+                                />
+                              </div>
+
+                              <div>
+                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.sortIndex}</div>
+                                <input
+                                  type="number"
+                                  value={p.sortIndex ?? 0}
+                                  onChange={(e) => setPlanField(p.id, { sortIndex: Number(e.target.value || 0) })}
+                                  className={cn(inputBaseDark, brand.focus)}
+                                />
+                              </div>
+
+                              <div>
+                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.version}</div>
+                                <input
+                                  type="number"
+                                                                    value={p.version ?? 1}
+                                  onChange={(e) => setPlanField(p.id, { version: Number(e.target.value || 1) })}
+                                  className={cn(inputBaseDark, brand.focus)}
+                                />
+                              </div>
+
+                              <div>
+                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.currency}</div>
+                                <input
+                                  value={p.currency || "AED"}
+                                  onChange={(e) => setPlanField(p.id, { currency: e.target.value.trim() || "AED" })}
+                                  className={cn(inputBaseDark, brand.focus)}
+                                  placeholder="AED"
+                                />
+                              </div>
+
+                              <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                  <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.nameAr}</div>
+                                  <input
+                                    value={p?.name?.ar || ""}
+                                    onChange={(e) => setPlanNested(p.id, ["name", "ar"], e.target.value)}
+                                    className={cn(inputBaseDark, brand.focus)}
+                                    placeholder={isAr ? "اسم الباقة بالعربي" : "Plan name in Arabic"}
+                                  />
+                                </div>
+                                <div>
+                                  <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.nameEn}</div>
+                                  <input
+                                    value={p?.name?.en || ""}
+                                    onChange={(e) => setPlanNested(p.id, ["name", "en"], e.target.value)}
+                                    className={cn(inputBaseDark, brand.focus)}
+                                    placeholder={isAr ? "اسم الباقة بالإنجليزي" : "Plan name in English"}
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                  <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.fitAr}</div>
+                                  <input
+                                    value={p?.fit?.ar || ""}
+                                    onChange={(e) => setPlanNested(p.id, ["fit", "ar"], e.target.value)}
+                                    className={cn(inputBaseDark, brand.focus)}
+                                    placeholder={isAr ? "وصف مختصر بالعربي..." : "Short fit (AR)..."}
+                                  />
+                                </div>
+                                <div>
+                                  <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.fitEn}</div>
+                                  <input
+                                    value={p?.fit?.en || ""}
+                                    onChange={(e) => setPlanNested(p.id, ["fit", "en"], e.target.value)}
+                                    className={cn(inputBaseDark, brand.focus)}
+                                    placeholder={isAr ? "وصف مختصر بالإنجليزي..." : "Short fit (EN)..."}
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div
+                                  className={cn(
+                                    "flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3",
+                                    isAr && "flex-row-reverse"
+                                  )}
+                                >
+                                  <span className="text-white/80 font-extrabold">{t.mandatory}</span>
+                                  <Toggle checked={!!p.isMandatory} onChange={(v) => setPlanField(p.id, { isMandatory: v })} />
+                                </div>
+
+                                <div
+                                  className={cn(
+                                    "flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3",
+                                    isAr && "flex-row-reverse"
+                                  )}
+                                >
+                                  <span className="text-white/80 font-extrabold">{t.active}</span>
+                                  <Toggle checked={!!p.isActive} onChange={(v) => setPlanField(p.id, { isActive: v })} />
+                                </div>
+                              </div>
+
+                              {/* Issues box */}
+                              <div className="sm:col-span-2">
+                                {issues.length ? (
+                                  <div className={cn("rounded-2xl border border-amber-400/15 bg-amber-500/10 p-4", isAr && "text-right")}>
+                                    <div className="text-amber-200 font-extrabold mb-2">
+                                      {isAr ? "ملاحظات تحتاج تعديل:" : "Issues to fix:"}
+                                    </div>
+                                    <ul className={cn("text-amber-100/90 text-xs font-bold space-y-1", isAr && "pr-4")}>
+                                      {issues.map((x, i) => (
+                                        <li key={i} className={cn(isAr ? "list-disc" : "list-disc ml-4")}>
+                                          {x}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                ) : (
+                                  <div className={cn("rounded-2xl border border-emerald-400/15 bg-emerald-500/10 p-4", isAr && "text-right")}>
+                                    <div className="text-emerald-200 font-extrabold">
+                                      {isAr ? "كل شيء تمام ✅" : "All good ✅"}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {/* Footer actions */}
+                        <div className={cn("mt-4 flex items-center justify-between gap-2", isAr && "flex-row-reverse")}>
+                          <button
+                            onClick={() => removePlan(p.id)}
+                            disabled={savingId === p.id}
+                            className={cn(
+                              "cursor-pointer px-4 py-2 rounded-2xl font-extrabold border transition",
+                              "border-rose-400/25 bg-rose-500/10 text-rose-200 hover:bg-rose-500/15",
+                              savingId === p.id && "opacity-60 cursor-not-allowed"
+                            )}
+                          >
+                            {t.remove}
+                          </button>
+
+                          <button
+                            onClick={() => savePlan(p)}
+                            disabled={savingId === p.id}
+                            className={cn(
+                              "cursor-pointer inline-flex items-center gap-2 px-4 py-2 rounded-2xl font-extrabold text-white transition active:scale-[0.98]",
+                              savingId === p.id ? "bg-white/15" : brand.btn
+                            )}
+                          >
+                            <Save className="w-4 h-4" />
+                            {savingId === p.id ? t.saving : t.save}
+                          </button>
+                        </div>
                       </div>
                     ) : null}
                   </div>
@@ -1618,10 +1929,14 @@ const removeAddon = async (id) => {
             <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4">
               {filteredAddons.map((a) => {
                 const open = !!expandedAddons[a.id];
-
                 return (
-                  <div key={a.id} className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl overflow-hidden">
-                    <div className="h-[5px] bg-gradient-to-r from-emerald-400 via-sky-500 to-purple-600" />
+                  <div
+                    key={a.id}
+                    className={cn(
+                      "rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl overflow-hidden ring-1 ring-white/10"
+                    )}
+                  >
+                    <div className="h-[5px] bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-600" />
 
                     {/* header */}
                     <button
@@ -1634,7 +1949,7 @@ const removeAddon = async (id) => {
                     >
                       <div className={cn("flex items-start gap-3 min-w-0", isAr && "flex-row-reverse")}>
                         <div className="w-12 h-12 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center shrink-0">
-                          <PackagePlus className="w-5 h-5 text-white/80" />
+                          <Boxes className="w-5 h-5 text-white/80" />
                         </div>
 
                         <div className="min-w-0">
@@ -1642,16 +1957,6 @@ const removeAddon = async (id) => {
                             <div className="font-extrabold text-lg text-white truncate">
                               {a.title?.[isAr ? "ar" : "en"] || a.addonKey || a.id}
                             </div>
-
-                            <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold border border-white/10 bg-black/25 text-white/80">
-                              {t.addonKey}: {a.addonKey}
-                            </span>
-
-                            {a.popular ? (
-                              <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold border border-amber-400/20 bg-amber-500/10 text-amber-200">
-                                {t.popular}
-                              </span>
-                            ) : null}
 
                             <span
                               className={cn(
@@ -1663,6 +1968,20 @@ const removeAddon = async (id) => {
                             >
                               {t.active}: {a.isActive ? (isAr ? "نعم" : "Yes") : isAr ? "لا" : "No"}
                             </span>
+
+                            {a.popular ? (
+                              <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold border border-amber-400/20 bg-amber-500/10 text-amber-200">
+                                {t.popular}
+                              </span>
+                            ) : null}
+
+                            <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-black/25 text-white/70 border border-white/10">
+                              {t.addonKey}: {a.addonKey}
+                            </span>
+
+                            <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-black/25 text-white/70 border border-white/10">
+                              {t.version}: {a.version}
+                            </span>
                           </div>
 
                           <div className={cn("mt-2 flex items-center gap-2 flex-wrap", isAr && "flex-row-reverse")}>
@@ -1673,10 +1992,7 @@ const removeAddon = async (id) => {
                               {t.qty}: {a.qty}
                             </span>
                             <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-black/25 text-white/70 border border-white/10">
-                              {t.currency}: {a.currency || "AED"}
-                            </span>
-                            <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-black/25 text-white/70 border border-white/10">
-                              {t.version}: {a.version}
+                              {t.price}: {a.price}
                             </span>
                           </div>
                         </div>
@@ -1707,14 +2023,15 @@ const removeAddon = async (id) => {
                     {/* expanded */}
                     {open ? (
                       <div className="px-4 sm:px-5 pb-5">
-                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <div className="mt-2 rounded-2xl border border-white/10 bg-white/5 p-4">
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div>
                               <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.addonKey}</div>
                               <input
-                                value={a.addonKey}
-                                onChange={(e) => setAddonField(a.id, { addonKey: e.target.value })}
+                                value={a.addonKey || ""}
+                                onChange={(e) => setAddonField(a.id, { addonKey: e.target.value.trim() })}
                                 className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                                placeholder="extra_10"
                               />
                             </div>
 
@@ -1722,19 +2039,29 @@ const removeAddon = async (id) => {
                               <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.version}</div>
                               <input
                                 type="number"
-                                value={a.version}
+                                value={a.version ?? 1}
                                 onChange={(e) => setAddonField(a.id, { version: Number(e.target.value || 1) })}
                                 className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
                               />
                             </div>
 
                             <div>
-                              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.currency}</div>
+                              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.nameAr}</div>
                               <input
-                                value={a.currency || "AED"}
-                                onChange={(e) => setAddonField(a.id, { currency: e.target.value.trim().toUpperCase() })}
+                                value={a?.title?.ar || ""}
+                                onChange={(e) => setAddonNested(a.id, ["title", "ar"], e.target.value)}
                                 className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
-                                placeholder="AED"
+                                placeholder={isAr ? "اسم الإضافة بالعربي" : "Add-on title (AR)"}
+                              />
+                            </div>
+
+                            <div>
+                              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.nameEn}</div>
+                              <input
+                                value={a?.title?.en || ""}
+                                onChange={(e) => setAddonNested(a.id, ["title", "en"], e.target.value)}
+                                className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                                placeholder={isAr ? "اسم الإضافة بالإنجليزي" : "Add-on title (EN)"}
                               />
                             </div>
 
@@ -1749,20 +2076,12 @@ const removeAddon = async (id) => {
                             </div>
 
                             <div>
-                              <div className="text-[11px] font-extrabold text-white/55 mb-1">{isAr ? "العنوان (عربي)" : "Title (AR)"}</div>
+                              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.currency}</div>
                               <input
-                                value={a.title?.ar || ""}
-                                onChange={(e) => setAddonNested(a.id, ["title", "ar"], e.target.value)}
+                                value={a.currency || "AED"}
+                                onChange={(e) => setAddonField(a.id, { currency: e.target.value.trim() || "AED" })}
                                 className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
-                              />
-                            </div>
-
-                            <div>
-                              <div className="text-[11px] font-extrabold text-white/55 mb-1">{isAr ? "العنوان (English)" : "Title (EN)"}</div>
-                              <input
-                                value={a.title?.en || ""}
-                                onChange={(e) => setAddonNested(a.id, ["title", "en"], e.target.value)}
-                                className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                                placeholder="AED"
                               />
                             </div>
 
@@ -1796,119 +2115,113 @@ const removeAddon = async (id) => {
                               />
                             </div>
 
-                            <div>
-                              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.priceMin}</div>
-                              <input
-                                type="number"
-                                value={a.priceMin ?? 0}
-                                onChange={(e) => setAddonField(a.id, { priceMin: Number(e.target.value || 0) })}
-                                className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
-                              />
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.priceMin}</div>
+                                <input
+                                  type="number"
+                                  value={a.priceMin ?? 0}
+                                  onChange={(e) => setAddonField(a.id, { priceMin: Number(e.target.value || 0) })}
+                                  className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                                />
+                              </div>
+                              <div>
+                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.priceMax}</div>
+                                <input
+                                  type="number"
+                                  value={a.priceMax ?? 0}
+                                  onChange={(e) => setAddonField(a.id, { priceMax: Number(e.target.value || 0) })}
+                                  className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                                />
+                              </div>
                             </div>
 
-                            <div>
-                              <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.priceMax}</div>
-                              <input
-                                type="number"
-                                value={a.priceMax ?? 0}
-                                onChange={(e) => setAddonField(a.id, { priceMax: Number(e.target.value || 0) })}
-                                className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
-                              />
+                            {/* Covers */}
+                            <div className="sm:col-span-2 mt-1">
+                              <div className={cn("text-white/80 font-extrabold mb-2", isAr && "text-right")}>{t.tabCovers}</div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                {[
+                                  { k: "adminProcessing", label: t.coversAdminProcessing },
+                                  { k: "governmentFee", label: t.coversGovernmentFee },
+                                  { k: "printingFee", label: t.coversPrintingFee },
+                                  { k: "stripeFee", label: t.coversStripeFee },
+                                  { k: "vat", label: t.coversVat },
+                                ].map((x) => (
+                                  <div
+                                    key={x.k}
+                                    className={cn(
+                                      "flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3",
+                                      isAr && "flex-row-reverse"
+                                    )}
+                                  >
+                                    <span className="text-white/80 font-extrabold">{x.label}</span>
+                                    <Toggle checked={!!a?.covers?.[x.k]} onChange={(v) => setAddonNested(a.id, ["covers", x.k], v)} />
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                          </div>
 
-                          {/* Covers for addon */}
-                          <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
-                            <div className={cn("flex items-center justify-between", isAr && "flex-row-reverse")}>
-                              <div className="text-sm font-extrabold text-white">{t.tabCovers}</div>
-                              <div className="text-xs text-white/45 font-bold">{isAr ? "تأثير على التسعير" : "Affects pricing"}</div>
-                            </div>
-
-                            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              {[
-                                { k: "adminProcessing", label: t.coversAdminProcessing },
-                                { k: "governmentFee", label: t.coversGovernmentFee },
-                                { k: "printingFee", label: t.coversPrintingFee },
-                                { k: "stripeFee", label: t.coversStripeFee },
-                                { k: "vat", label: t.coversVat },
-                              ].map((x) => (
-                                <div
-                                  key={x.k}
-                                  className={cn(
-                                    "flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3",
-                                    isAr && "flex-row-reverse"
-                                  )}
-                                >
-                                  <span className="text-white/80 font-extrabold">{x.label}</span>
-                                  <Toggle
-                                    checked={!!a?.covers?.[x.k]}
-                                    onChange={(v) => setAddonNested(a.id, ["covers", x.k], v)}
+                            {/* Stripe */}
+                            <div className="sm:col-span-2 mt-2">
+                              <div className={cn("text-white/80 font-extrabold mb-2", isAr && "text-right")}>{t.tabStripe}</div>
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                <div>
+                                  <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.stripeMode}</div>
+                                  <input
+                                    value={a?.stripe?.mode || "payment"}
+                                    onChange={(e) => setAddonNested(a.id, ["stripe", "mode"], e.target.value.trim())}
+                                    className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                                    placeholder="payment"
                                   />
                                 </div>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* Stripe for addon */}
-                          <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
-                            <div className={cn("flex items-center justify-between", isAr && "flex-row-reverse")}>
-                              <div className="text-sm font-extrabold text-white">{t.tabStripe}</div>
-                              <div className="text-xs text-white/45 font-bold">{isAr ? "اختياري" : "Optional"}</div>
-                            </div>
-
-                            <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                              <div>
-                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.stripeMode}</div>
-                                <input
-                                  value={a.stripe?.mode || "payment"}
-                                  onChange={(e) => setAddonNested(a.id, ["stripe", "mode"], e.target.value.trim())}
-                                  className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
-                                  placeholder="payment"
-                                />
-                              </div>
-                              <div>
-                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.stripePriceId}</div>
-                                <input
-                                  value={a.stripe?.priceId || ""}
-                                  onChange={(e) => setAddonNested(a.id, ["stripe", "priceId"], e.target.value.trim())}
-                                  className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
-                                  placeholder="price_..."
-                                />
-                              </div>
-                              <div>
-                                <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.stripeProductId}</div>
-                                <input
-                                  value={a.stripe?.productId || ""}
-                                  onChange={(e) => setAddonNested(a.id, ["stripe", "productId"], e.target.value.trim())}
-                                  className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
-                                  placeholder="prod_..."
-                                />
+                                <div>
+                                  <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.stripePriceId}</div>
+                                  <input
+                                    value={a?.stripe?.priceId || ""}
+                                    onChange={(e) => setAddonNested(a.id, ["stripe", "priceId"], e.target.value.trim())}
+                                    className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                                    placeholder="price_..."
+                                  />
+                                </div>
+                                <div>
+                                  <div className="text-[11px] font-extrabold text-white/55 mb-1">{t.stripeProductId}</div>
+                                  <input
+                                    value={a?.stripe?.productId || ""}
+                                    onChange={(e) => setAddonNested(a.id, ["stripe", "productId"], e.target.value.trim())}
+                                    className={cn(inputBaseDark, "focus:ring-emerald-500/30")}
+                                    placeholder="prod_..."
+                                  />
+                                </div>
                               </div>
                             </div>
                           </div>
+                        </div>
 
-<div className={cn("mt-4 flex items-center justify-end gap-2", isAr && "justify-start flex-row-reverse")}>
-  <button
-    onClick={() => saveAddon(a)}
-    disabled={savingId === a.id}
-    className={cn(
-      "cursor-pointer inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-extrabold text-white shadow-lg transition active:scale-[0.98]",
-      savingId === a.id ? "bg-white/20" : "bg-emerald-600 hover:bg-emerald-700"
-    )}
-  >
-    <Save className="w-4 h-4" />
-    {savingId === a.id ? t.saving : t.save}
-  </button>
+                        {/* Footer actions */}
+                        <div className={cn("mt-4 flex items-center justify-between gap-2", isAr && "flex-row-reverse")}>
+                          <button
+                            onClick={() => removeAddon(a.id)}
+                            disabled={savingId === a.id}
+                            className={cn(
+                              "cursor-pointer px-4 py-2 rounded-2xl font-extrabold border transition",
+                              "border-rose-400/25 bg-rose-500/10 text-rose-200 hover:bg-rose-500/15",
+                              savingId === a.id && "opacity-60 cursor-not-allowed"
+                            )}
+                          >
+                            {t.remove}
+                          </button>
 
-  <button
-    onClick={() => removeAddon(a.id)}
-    disabled={savingId === a.id}
-    className="cursor-pointer inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-extrabold border border-rose-400/25 bg-rose-500/10 text-rose-200 hover:bg-rose-500/15 transition active:scale-[0.98]"
-  >
-    <AlertTriangle className="w-4 h-4" />
-    {isAr ? "حذف" : "Delete"}
-  </button>
-</div>
+                          <button
+                            onClick={() => saveAddon(a)}
+                            disabled={savingId === a.id}
+                            className={cn(
+                              "cursor-pointer inline-flex items-center gap-2 px-4 py-2 rounded-2xl font-extrabold text-white transition active:scale-[0.98]",
+                              savingId === a.id ? "bg-white/15" : "bg-emerald-600 hover:bg-emerald-700"
+                            )}
+                          >
+                            <Save className="w-4 h-4" />
+                            {savingId === a.id ? t.saving : t.save}
+                          </button>
                         </div>
                       </div>
                     ) : null}
