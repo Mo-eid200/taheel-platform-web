@@ -147,8 +147,8 @@ const SIDEBAR_LINKS = [
   {
     key: "settings",
     icon: <FaCogs />,
-    labelAr: "الإعدادات الإدارية",
-    labelEn: "Admin Settings"
+    labelAr: "إدارة الباقات والإضافات",
+    labelEn: "Plans & Add-ons"
   },
   {
     key: "archive",
