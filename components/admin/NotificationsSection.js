@@ -82,7 +82,7 @@ function Tabs({ value, onChange, isAr }) {
 
 function ClientRow({ client, active, onSelect }) {
   const name = client?.name || client?.displayName || "-";
-  const cid = client?.__cid || client?.customerId || "-";
+  const cid = client?.customerId || client?.__cid || "-";
   const tokens = client.__tokens || 0;
 
   return (
@@ -158,20 +158,20 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
       setNotifications(list);
     });
 
-    const unsubClients = onSnapshot(collection(db, "users"), (snap) => {
-      const list = [];
-      snap.forEach((d) => {
-        const data = d.data() || {};
-        const cid = data.customerId || d.id;
-        list.push({
-          userId: d.id,
-          customerId: data.customerId || "",
-          __cid: cid,
-          ...data,
-        });
-      });
-      setClients(list);
+const unsubClients = onSnapshot(collection(db, "users"), (snap) => {
+  const list = [];
+  snap.forEach((d) => {
+    const data = d.data() || {};
+    list.push({
+      userId: d.id,                 // ✅ docId الحقيقي
+      customerId: data.customerId || "", // ✅ للعرض فقط
+      __cid: d.id,                  // ✅ خلي الاختيار/الاستهداف بـ docId
+      ...data,
     });
+  });
+  setClients(list);
+});
+
 
     const qPending = query(collectionGroup(db, "pendingNotifications"), orderBy("createdAt", "desc"));
     const unsubPending = onSnapshot(qPending, (snap) => {
@@ -242,32 +242,33 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
   }, [target, tokenCounts]);
 
   /* Preview tokens for a given customerId */
-  async function getActiveTokensForUserDoc(customerId) {
-    if (!customerId) return [];
-    setResolvingTokens(true);
-    const tokens = new Set();
+async function getActiveTokensForUserDoc(userId) {
+  if (!userId) return [];
+  setResolvingTokens(true);
+  const tokens = new Set();
+  try {
     try {
-      try {
-        const s1 = await getDocs(query(collection(db, "users", customerId, "expoPushTokens"), where("active", "==", true)));
-        s1.forEach((d) => {
-          const v = d.data() || {};
-          const fg = typeof v.foreground === "boolean" ? v.foreground : true;
-          if (fg && v.token) tokens.add(v.token);
-        });
-      } catch {}
-      try {
-        const s2 = await getDocs(query(collection(db, "users", customerId, "pushTokens"), where("active", "==", true)));
-        s2.forEach((d) => {
-          const v = d.data() || {};
-          const fg = typeof v.foreground === "boolean" ? v.foreground : true;
-          if (fg && v.token) tokens.add(v.token);
-        });
-      } catch {}
-    } finally {
-      setResolvingTokens(false);
-    }
-    return Array.from(tokens);
+      const s1 = await getDocs(query(collection(db, "users", userId, "expoPushTokens"), where("active", "==", true)));
+      s1.forEach((d) => {
+        const v = d.data() || {};
+        const fg = typeof v.foreground === "boolean" ? v.foreground : true;
+        if (fg && v.token) tokens.add(v.token);
+      });
+    } catch {}
+    try {
+      const s2 = await getDocs(query(collection(db, "users", userId, "pushTokens"), where("active", "==", true)));
+      s2.forEach((d) => {
+        const v = d.data() || {};
+        const fg = typeof v.foreground === "boolean" ? v.foreground : true;
+        if (fg && v.token) tokens.add(v.token);
+      });
+    } catch {}
+  } finally {
+    setResolvingTokens(false);
   }
+  return Array.from(tokens);
+}
+
 
   /* Send notification (uses customerId as targetId) */
   async function sendNotification() {
@@ -314,18 +315,18 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
   const clientsMap = useMemo(() => {
     const m = new Map();
     clients.forEach((c) => {
-      const cid = c.__cid || c.customerId || c.userId;
-      if (cid) m.set(String(cid), c);
+    const key = c.userId; // docId
+     if (key) m.set(String(key), c);
     });
     return m;
   }, [clients, tokenCounts]);
 
-  const clientsWithTokens = useMemo(() => {
-    return clients.map((c) => {
-      const cid = c.__cid || c.customerId || c.userId;
-      return { ...c, __tokens: tokenCounts.get(String(cid)) || 0 };
-    });
-  }, [clients, tokenCounts]);
+const clientsWithTokens = useMemo(() => {
+  return clients.map((c) => {
+    const key = c.userId; // ✅ docId
+    return { ...c, __tokens: tokenCounts.get(String(key)) || 0 };
+  });
+}, [clients, tokenCounts]);
 
   const filteredClients = useMemo(() => {
     const s = clientSearch.trim().toLowerCase();
@@ -336,7 +337,7 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
       const name = (c.name || c.displayName || "").toLowerCase();
       const email = (c.email || "").toLowerCase();
       const phone = String(c.phone || c.phoneE164 || "");
-      const customerId = (c.__cid || c.customerId || "").toLowerCase();
+      const customerId = (c.customerId || "").toLowerCase();
       return (name && name.includes(s)) || (email && email.includes(s)) || phone.includes(s) || customerId.includes(s);
     });
 
@@ -426,9 +427,15 @@ export default function NotificationsSection({ lang = DEFAULT_LANG }) {
             </div>
 
             <div className="max-h-40 overflow-auto border rounded-lg p-2 bg-slate-50 space-y-2">
-              {filteredClients.slice(0, 120).map((cl) => (
-                <ClientRow key={cl.__cid} client={cl} active={target === cl.__cid} onSelect={() => setTarget(cl.__cid)} />
-              ))}
+{filteredClients.slice(0, 120).map((cl) => (
+  <ClientRow
+    key={cl.userId}
+    client={cl}
+    active={target === cl.userId}
+    onSelect={() => setTarget(cl.userId)}
+  />
+))}
+
             </div>
 
             <div className="flex items-center gap-2 mt-2">
